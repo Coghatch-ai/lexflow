@@ -53,7 +53,7 @@ aws cloudformation describe-stacks --region sa-east-1 --stack-name lexflow-api-p
 ## 5. [claude] Deploy the frontend
 
 Set `VITE_API_URL` = the API Gateway URL, then dispatch **Deploy App** → `vite build` →
-`s3 sync dist/app → lexflow-frontend` → CloudFront invalidation.
+`s3 sync dist/app → lexflow-frontend-mrhewbuc` → CloudFront invalidation.
 
 ## 6. [you] Clerk + your user
 
@@ -80,7 +80,7 @@ aws cloudformation describe-stacks --region sa-east-1 --stack-name lexflow-api-p
 ```bash
 aws cloudformation delete-stack --region sa-east-1 --stack-name lexflow-api-prod
 aws cloudfront get-distribution-config --id <DISTRIBUTION_ID>   # disable, then delete
-aws s3 rb s3://lexflow-frontend --force
+aws s3 rb s3://lexflow-frontend-mrhewbuc --force
 aws iam delete-role-policy --role-name lexflow-github-actions-role --policy-name lexflow-deploy-policy
 aws iam delete-role --role-name lexflow-github-actions-role
 ```

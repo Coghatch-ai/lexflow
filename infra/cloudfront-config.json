@@ -7,15 +7,15 @@
     "Quantity": 1,
     "Items": [
       {
-        "Id": "lexflow-frontend-s3",
-        "DomainName": "lexflow-frontend.s3.sa-east-1.amazonaws.com",
+        "Id": "lexflow-frontend-mrhewbuc-s3",
+        "DomainName": "lexflow-frontend-mrhewbuc.s3.sa-east-1.amazonaws.com",
         "OriginAccessControlId": "OAC_ID_PLACEHOLDER",
         "S3OriginConfig": { "OriginAccessIdentity": "" }
       }
     ]
   },
   "DefaultCacheBehavior": {
-    "TargetOriginId": "lexflow-frontend-s3",
+    "TargetOriginId": "lexflow-frontend-mrhewbuc-s3",
     "ViewerProtocolPolicy": "redirect-to-https",
     "Compress": true,
     "AllowedMethods": {

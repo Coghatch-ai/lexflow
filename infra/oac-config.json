@@ -1,6 +1,6 @@
 {
-  "Name": "lexflow-frontend-oac",
-  "Description": "OAC for lexflow-frontend",
+  "Name": "lexflow-frontend-mrhewbuc-oac",
+  "Description": "OAC for lexflow-frontend-mrhewbuc",
   "SigningProtocol": "sigv4",
   "SigningBehavior": "always",
   "OriginAccessControlOriginType": "s3"

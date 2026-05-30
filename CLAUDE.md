@@ -87,7 +87,7 @@ Pages stay eslint-quarantined (typecheck + build clean); full max-strict hardeni
 - **Network:** shared VPC, SG `sg-0d065bb06c8c04a68`, subnets `subnet-0cc43286651b1e2d9`,
   `subnet-03602b4d349546b6b`, `subnet-0ffadc50f6a7a1f26`. **No NAT.**
 - **Secrets:** SSM Parameter Store at `/lexflow/api/{env}/*` (resolved at deploy by `template.yaml`).
-- **Stack:** `lexflow-api-prod`. Frontend bucket `lexflow-frontend` + CloudFront (no custom domain yet).
+- **Stack:** `lexflow-api-prod`. Frontend bucket `lexflow-frontend-mrhewbuc` + CloudFront (no custom domain yet).
 - **Deploy via GitHub Actions only** (`deploy-api.yml`, `deploy-app.yml`). NEVER `sam deploy` from a laptop.
 - **Migrations:** `db:generate` → review SQL → `db:migrate`. NEVER apply SQL manually to RDS.
 

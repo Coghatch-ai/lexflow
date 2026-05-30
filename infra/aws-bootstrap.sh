@@ -2,7 +2,7 @@
 #
 # One-time AWS bootstrap for the lexflow deploy pipeline. Creates (lexflow-only,
 # additive — touches nothing outside the lexflow-* namespace):
-#   - S3 bucket  lexflow-frontend   (sa-east-1, private, Block Public Access)
+#   - S3 bucket  lexflow-frontend-mrhewbuc   (sa-east-1, private, Block Public Access)
 #   - CloudFront OAC + distribution  (SPA, OAC, default *.cloudfront.net domain)
 #   - S3 bucket policy               (allow only this distribution via OAC)
 #   - IAM role   lexflow-github-actions-role  + inline lexflow-deploy-policy
@@ -16,7 +16,7 @@ set -euo pipefail
 
 ACCOUNT=394559824800
 REGION=sa-east-1
-BUCKET=lexflow-frontend
+BUCKET=lexflow-frontend-mrhewbuc
 ROLE=lexflow-github-actions-role
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TAGS_TAGSET='TagSet=[{Key=Project,Value=lexflow},{Key=Environment,Value=prod},{Key=CostCenter,Value=billable}]'
@@ -35,7 +35,7 @@ aws s3api put-bucket-tagging --bucket "$BUCKET" --tagging "$TAGS_TAGSET"
 
 echo "==> 2/5  CloudFront Origin Access Control"
 OAC_ID=$(aws cloudfront list-origin-access-controls \
-  --query "OriginAccessControlList.Items[?Name=='lexflow-frontend-oac'].Id | [0]" --output text)
+  --query "OriginAccessControlList.Items[?Name=='lexflow-frontend-mrhewbuc-oac'].Id | [0]" --output text)
 if [ "$OAC_ID" = "None" ] || [ -z "$OAC_ID" ]; then
   OAC_ID=$(aws cloudfront create-origin-access-control \
     --origin-access-control-config "file://$DIR/oac-config.json" \
