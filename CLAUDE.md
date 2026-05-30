@@ -17,7 +17,9 @@ text is Brazilian Portuguese (pt-BR). URLs/slugs are English kebab-case.
 - **Backend:** AWS (sa-east-1) Lambda + API Gateway (HTTP API) + tRPC 11 + Drizzle ORM +
   PostgreSQL (own `lexflow` database on the shared `mrhewbuc-rds` instance)
 - **Auth:** Clerk — single-user B2C, **no organizations**. Offline JWT verification via
-  `CLERK_JWT_KEY` (PEM public key). User rows created from the Clerk `user.created` webhook.
+  `CLERK_JWT_KEY` (PEM public key). **POC: no webhook** — local `users` rows are created
+  manually with `pnpm db:create-user <clerk-user-id>` (the `webhook-routes.ts` path exists but
+  is inert until a Clerk webhook + `clerk-webhook-secret` SSM param are configured).
 - **Package manager:** pnpm 10. **Node:** 22 (local + CI).
 
 ## Data model — single-user B2C (NOT multi-tenant)
@@ -44,7 +46,17 @@ pnpm test         # Vitest
 pnpm validate     # check + lint + test
 pnpm db:generate  # Generate migration SQL from drizzle/schema.ts (review before applying)
 pnpm db:migrate   # Apply pending migrations
+pnpm db:seed      # Seed the global oab_questions catalog (idempotent)
+pnpm db:create-user <clerk-user-id> [email] [name...]   # Manually create a local users row
+pnpm smoke        # End-to-end check of the data API against the DB (throwaway user, self-cleans)
 ```
+
+## Data API (tRPC routers)
+
+`questions` (list/filter the catalog, disciplines), `sessions` (record a completed session +
+its answers in one transaction, listRecent), `stats` (summary / byDiscipline / byExamBoard,
+computed on read), `users.me`. All are `protectedProcedure` (require a local users row). The
+inherited bolt UI still renders on mock data — wiring it onto these routers is the next chunk.
 
 ## POC deviations (intentional — differ from sharpmoney; revisit as the POC matures)
 

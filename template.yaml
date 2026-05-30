@@ -83,7 +83,10 @@ Resources:
           DB_USER: !Sub "{{resolve:ssm:/lexflow/api/${Environment}/db-user}}"
           DB_PASSWORD: !Sub "{{resolve:ssm:/lexflow/api/${Environment}/db-password}}"
           CLERK_JWT_KEY: !Sub "{{resolve:ssm:/lexflow/api/${Environment}/clerk-jwt-key}}"
-          CLERK_WEBHOOK_SECRET: !Sub "{{resolve:ssm:/lexflow/api/${Environment}/clerk-webhook-secret}}"
+          # Clerk webhook is deferred for the POC (users are created manually via
+          # `pnpm db:create-user`). When the webhook lands, add the
+          # /lexflow/api/${Environment}/clerk-webhook-secret SSM param and restore:
+          # CLERK_WEBHOOK_SECRET: !Sub "{{resolve:ssm:/lexflow/api/${Environment}/clerk-webhook-secret}}"
           ENVIRONMENT: !Ref Environment
       Events:
         ApiEvent:

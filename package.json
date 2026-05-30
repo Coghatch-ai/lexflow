@@ -17,7 +17,9 @@
     "prepare": "husky || true",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx scripts/migrate.ts",
-    "db:seed": "tsx scripts/seed.ts"
+    "db:seed": "tsx scripts/seed.ts",
+    "db:create-user": "tsx scripts/create-user.ts",
+    "smoke": "tsx scripts/smoke.ts"
   },
   "dependencies": {
     "@clerk/backend": "^2.29.6",

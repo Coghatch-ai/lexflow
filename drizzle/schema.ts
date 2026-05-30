@@ -38,8 +38,8 @@ const systemFields = {
 
 // ── Identity ────────────────────────────────────────────────────────────────
 
-// People. `external_id` holds Clerk's user id. The ONLY place rows are written
-// is the Clerk webhook (api/routes/webhook-routes.ts).
+// People. `external_id` holds Clerk's user id. POC: rows are created manually
+// via `pnpm db:create-user` (the Clerk webhook path is deferred).
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
   externalId: text("external_id").notNull().unique(),
