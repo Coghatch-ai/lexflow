@@ -1,0 +1,7 @@
+{
+  "Name": "lexflow-frontend-oac",
+  "Description": "OAC for lexflow-frontend",
+  "SigningProtocol": "sigv4",
+  "SigningBehavior": "always",
+  "OriginAccessControlOriginType": "s3"
+}

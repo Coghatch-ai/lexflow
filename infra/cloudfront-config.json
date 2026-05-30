@@ -1,0 +1,46 @@
+{
+  "CallerReference": "CALLER_REF_PLACEHOLDER",
+  "Comment": "lexflow frontend SPA",
+  "Enabled": true,
+  "DefaultRootObject": "index.html",
+  "Origins": {
+    "Quantity": 1,
+    "Items": [
+      {
+        "Id": "lexflow-frontend-s3",
+        "DomainName": "lexflow-frontend.s3.sa-east-1.amazonaws.com",
+        "OriginAccessControlId": "OAC_ID_PLACEHOLDER",
+        "S3OriginConfig": { "OriginAccessIdentity": "" }
+      }
+    ]
+  },
+  "DefaultCacheBehavior": {
+    "TargetOriginId": "lexflow-frontend-s3",
+    "ViewerProtocolPolicy": "redirect-to-https",
+    "Compress": true,
+    "AllowedMethods": {
+      "Quantity": 2,
+      "Items": ["GET", "HEAD"],
+      "CachedMethods": { "Quantity": 2, "Items": ["GET", "HEAD"] }
+    },
+    "CachePolicyId": "658327ea-f89d-4fab-a63d-7e88639e58f6"
+  },
+  "CustomErrorResponses": {
+    "Quantity": 2,
+    "Items": [
+      {
+        "ErrorCode": 403,
+        "ResponseCode": "200",
+        "ResponsePagePath": "/index.html",
+        "ErrorCachingMinTTL": 10
+      },
+      {
+        "ErrorCode": 404,
+        "ResponseCode": "200",
+        "ResponsePagePath": "/index.html",
+        "ErrorCachingMinTTL": 10
+      }
+    ]
+  },
+  "PriceClass": "PriceClass_100"
+}
