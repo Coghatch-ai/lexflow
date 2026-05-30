@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useSession } from '../auth';
 import { Brain, ChevronRight, CheckCircle, XCircle, Clock, Zap } from 'lucide-react';
-import { DISCIPLINES } from '../types';
+import { useLov } from '../shared/hooks/use-lov';
 import { trpc } from '../shared/lib/trpc';
 import { nextDifficulty } from '@shared/domain/adaptive';
 import { accuracyPct } from '@shared/domain/scoring';
@@ -31,12 +31,6 @@ interface AdaptiveState {
   difficultyHistory: Difficulty[];
 }
 
-const DIFFICULTY_LABELS: Record<Difficulty, string> = {
-  easy: 'Facil',
-  medium: 'Medio',
-  hard: 'Dificil',
-};
-
 const DIFFICULTY_COLORS: Record<Difficulty, string> = {
   easy: 'bg-green-100 text-green-700',
   medium: 'bg-yellow-100 text-yellow-700',
@@ -45,6 +39,9 @@ const DIFFICULTY_COLORS: Record<Difficulty, string> = {
 
 export default function AdaptiveSimulation() {
   const { user } = useSession();
+  const disciplineLov = useLov('DISCIPLINE');
+  const examBoardLov = useLov('EXAM_BOARD');
+  const difficultyLov = useLov('DIFFICULTY');
   const [status, setStatus] = useState<Status>('setup');
   const [selectedDiscipline, setSelectedDiscipline] = useState('');
   const [totalQuestions, setTotalQuestions] = useState(10);
@@ -248,8 +245,8 @@ export default function AdaptiveSimulation() {
               className="w-full px-4 py-2 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-[#0ea5e9]"
             >
               <option value="">Todas as disciplinas</option>
-              {DISCIPLINES.map((d) => (
-                <option key={d} value={d}>{d}</option>
+              {disciplineLov.options.map((o) => (
+                <option key={o.code} value={o.code}>{o.value}</option>
               ))}
             </select>
           </div>
@@ -305,7 +302,7 @@ export default function AdaptiveSimulation() {
             <Brain className="w-5 h-5 text-[#0ea5e9]" />
             <span className="text-sm font-medium text-gray-700">Nivel atual:</span>
             <span className={`px-3 py-1 rounded-full text-sm font-bold ${DIFFICULTY_COLORS[adaptive.currentDifficulty]}`}>
-              {DIFFICULTY_LABELS[adaptive.currentDifficulty]}
+              {difficultyLov.labelOf(adaptive.currentDifficulty)}
             </span>
           </div>
           <div className="flex items-center gap-2 text-sm text-gray-600">
@@ -329,8 +326,8 @@ export default function AdaptiveSimulation() {
 
         <div className="bg-white rounded-xl p-6 shadow">
           <p className="text-sm text-gray-600 mb-2">
-            <span className="font-medium">{currentQuestion.discipline}</span> -{' '}
-            <span className="font-medium">{currentQuestion.exam_board}</span>
+            <span className="font-medium">{disciplineLov.labelOf(currentQuestion.discipline)}</span> -{' '}
+            <span className="font-medium">{examBoardLov.labelOf(currentQuestion.exam_board)}</span>
           </p>
           <h3 className="text-lg font-semibold text-[#0f172a] mb-4">
             {currentQuestion.question_text}
@@ -423,8 +420,8 @@ export default function AdaptiveSimulation() {
             <div>
               <p className="font-semibold text-[#0f172a]">Dificuldade ajustada!</p>
               <p className="text-sm text-gray-700">
-                De <span className={`font-bold ${DIFFICULTY_COLORS[adaptive.currentDifficulty]}`}>{DIFFICULTY_LABELS[adaptive.currentDifficulty]}</span> para{' '}
-                <span className={`font-bold ${DIFFICULTY_COLORS[nextDiff]}`}>{DIFFICULTY_LABELS[nextDiff]}</span>
+                De <span className={`font-bold ${DIFFICULTY_COLORS[adaptive.currentDifficulty]}`}>{difficultyLov.labelOf(adaptive.currentDifficulty)}</span> para{' '}
+                <span className={`font-bold ${DIFFICULTY_COLORS[nextDiff]}`}>{difficultyLov.labelOf(nextDiff)}</span>
               </p>
             </div>
           </div>

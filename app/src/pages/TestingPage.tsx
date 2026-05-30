@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useSession } from '../auth';
 import { Clock, CheckCircle, XCircle, ChevronRight, BookOpen } from 'lucide-react';
-import { DISCIPLINES, EXAM_BOARDS, DIFFICULTIES } from '../types';
+import { useLov } from '../shared/hooks/use-lov';
 import AdaptiveSimulation from '../components/AdaptiveSimulation';
 import SpacedRepetition from '../components/SpacedRepetition';
 import RealExamSimulation from '../components/RealExamSimulation';
@@ -33,6 +33,9 @@ interface Answer {
 
 export default function TestingPage() {
   const { user } = useSession();
+  const disciplineLov = useLov('DISCIPLINE');
+  const examBoardLov = useLov('EXAM_BOARD');
+  const difficultyLov = useLov('DIFFICULTY');
   const utils = trpc.useUtils();
   const recordMutation = trpc.sessions.record.useMutation({
     onSuccess: () => {
@@ -247,8 +250,8 @@ export default function TestingPage() {
               className="w-full px-4 py-2 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-[#0ea5e9]"
             >
               <option value="">Todas</option>
-              {DISCIPLINES.map((d) => (
-                <option key={d} value={d}>{d}</option>
+              {disciplineLov.options.map((o) => (
+                <option key={o.code} value={o.code}>{o.value}</option>
               ))}
             </select>
           </div>
@@ -261,8 +264,8 @@ export default function TestingPage() {
               className="w-full px-4 py-2 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-[#0ea5e9]"
             >
               <option value="">Todas</option>
-              {EXAM_BOARDS.map((b) => (
-                <option key={b} value={b}>{b}</option>
+              {examBoardLov.options.map((o) => (
+                <option key={o.code} value={o.code}>{o.value}</option>
               ))}
             </select>
           </div>
@@ -275,10 +278,8 @@ export default function TestingPage() {
               className="w-full px-4 py-2 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-[#0ea5e9]"
             >
               <option value="">Todas</option>
-              {DIFFICULTIES.map((d) => (
-                <option key={d} value={d}>
-                  {d === 'easy' ? 'Facil' : d === 'medium' ? 'Medio' : 'Dificil'}
-                </option>
+              {difficultyLov.options.map((o) => (
+                <option key={o.code} value={o.code}>{o.value}</option>
               ))}
             </select>
           </div>
@@ -333,8 +334,8 @@ export default function TestingPage() {
         <div className="bg-white rounded-xl p-6 shadow">
           <div className="mb-6">
             <p className="text-sm text-gray-600 mb-2">
-              <span className="font-medium">{currentQuestion.discipline}</span> -{' '}
-              <span className="font-medium">{currentQuestion.exam_board}</span>
+              <span className="font-medium">{disciplineLov.labelOf(currentQuestion.discipline)}</span> -{' '}
+              <span className="font-medium">{examBoardLov.labelOf(currentQuestion.exam_board)}</span>
             </p>
             <h3 className="text-lg font-semibold text-[#0f172a]">
               {currentQuestion.question_text}
@@ -427,7 +428,7 @@ export default function TestingPage() {
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
                     <p className="font-medium text-gray-800">Questao {idx + 1}</p>
-                    <p className="text-sm text-gray-600">{q.discipline}</p>
+                    <p className="text-sm text-gray-600">{disciplineLov.labelOf(q.discipline)}</p>
                   </div>
                   {answer?.correct ? (
                     <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" />

@@ -6,6 +6,14 @@
 // generator expands a handful of templates per discipline across exam boards,
 // years and difficulties to produce a stable (re-runnable) set of questions.
 
+import { LOV_SEED } from "./lov";
+
+// Maps a discipline's pt-BR value (used internally in the templates below) to
+// its English LOV code, which is what we emit + store in oab_questions.
+const DISCIPLINE_CODE_BY_VALUE: Record<string, string> = Object.fromEntries(
+  LOV_SEED.filter((r) => r.type === "DISCIPLINE").map((r) => [r.value, r.code]),
+);
+
 export type QuestionTemplate = {
   q: string;
   opts: string[];
@@ -766,7 +774,7 @@ export function generateOabQuestions(limit = 500): SeedQuestion[] {
           legislationLink: "http://www.planalto.gov.br",
           legislationTitle: t.legTitle,
           difficulty: v.diff,
-          discipline,
+          discipline: DISCIPLINE_CODE_BY_VALUE[discipline] ?? discipline,
           topic: t.topic,
           examBoard: pick(EXAM_BOARDS, n),
           year: pick(YEARS, n),

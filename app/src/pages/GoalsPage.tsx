@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Target, Plus, Trash2, CreditCard as Edit2 } from 'lucide-react';
-import { DISCIPLINES } from '../types';
+import { useLov } from '../shared/hooks/use-lov';
 import { trpc } from '../shared/lib/trpc';
 import { goalProgressPct } from '@shared/domain/scoring';
 
@@ -16,6 +16,7 @@ export default function GoalsPage() {
   const utils = trpc.useUtils();
   const goalsQuery = trpc.goals.list.useQuery();
   const byDiscipline = trpc.stats.byDiscipline.useQuery();
+  const disciplineLov = useLov('DISCIPLINE');
 
   const [showForm, setShowForm] = useState(false);
   const [selectedDiscipline, setSelectedDiscipline] = useState('');
@@ -62,8 +63,8 @@ export default function GoalsPage() {
     deleteGoal.mutate({ id });
   };
 
-  const availableDisciplines = DISCIPLINES.filter(
-    (d) => !goals.find((g) => g.discipline === d)
+  const availableDisciplines = disciplineLov.options.filter(
+    (o) => !goals.find((g) => g.discipline === o.code)
   );
 
   return (
@@ -105,12 +106,9 @@ export default function GoalsPage() {
                 className="w-full px-4 py-2 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-[#0ea5e9]"
               >
                 <option value="">Selecione uma disciplina</option>
-                {(editingId
-                  ? DISCIPLINES
-                  : availableDisciplines
-                ).map((d) => (
-                  <option key={d} value={d}>
-                    {d}
+                {(editingId ? disciplineLov.options : availableDisciplines).map((o) => (
+                  <option key={o.code} value={o.code}>
+                    {o.value}
                   </option>
                 ))}
               </select>
@@ -172,7 +170,7 @@ export default function GoalsPage() {
                 </div>
                 <div className="flex-1">
                   <h3 className="font-bold text-lg text-[#0f172a]">
-                    {goal.discipline}
+                    {disciplineLov.labelOf(goal.discipline)}
                   </h3>
                   <p className="text-sm text-gray-600">
                     Alvo: {goal.target_accuracy}% | Atual: {goal.current_accuracy}

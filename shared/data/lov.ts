@@ -34,15 +34,15 @@ export const LOV_SEED: LovSeedRow[] = [
   { type: "DISCIPLINE", code: "LEGAL_ETHICS", value: "Ética Profissional", sortOrder: 11 },
 
   // Difficulty
-  { type: "DIFFICULTY", code: "EASY", value: "Fácil", sortOrder: 1 },
-  { type: "DIFFICULTY", code: "MEDIUM", value: "Médio", sortOrder: 2 },
-  { type: "DIFFICULTY", code: "HARD", value: "Difícil", sortOrder: 3 },
+  { type: "DIFFICULTY", code: "easy", value: "Fácil", sortOrder: 1 },
+  { type: "DIFFICULTY", code: "medium", value: "Médio", sortOrder: 2 },
+  { type: "DIFFICULTY", code: "hard", value: "Difícil", sortOrder: 3 },
 
   // Exam board (proper nouns — code == value)
   { type: "EXAM_BOARD", code: "FGV", value: "FGV", sortOrder: 1 },
   { type: "EXAM_BOARD", code: "CESPE", value: "CESPE", sortOrder: 2 },
 
   // Exam phase
-  { type: "PHASE", code: "FIRST", value: "1ª Fase", sortOrder: 1 },
-  { type: "PHASE", code: "SECOND", value: "2ª Fase", sortOrder: 2 },
+  { type: "PHASE", code: "1st", value: "1ª Fase", sortOrder: 1 },
+  { type: "PHASE", code: "2nd", value: "2ª Fase", sortOrder: 2 },
 ];

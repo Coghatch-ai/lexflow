@@ -102,20 +102,4 @@ export interface GoalNotification {
   createdAt: Date;
 }
 
-export const DISCIPLINES = [
-  "Direito Constitucional",
-  "Direito Civil",
-  "Direito Penal",
-  "Direito Processual Civil",
-  "Direito Processual Penal",
-  "Direito Administrativo",
-  "Direito Tributário",
-  "Direito Trabalhista",
-  "Direito Comercial",
-  "Direito Ambiental",
-  "Ética Profissional",
-];
-
-export const EXAM_BOARDS = ["FGV", "CESPE"] as const;
-export const DIFFICULTIES = ["easy", "medium", "hard"] as const;
 export const PHASES = ["1st", "2nd"] as const;

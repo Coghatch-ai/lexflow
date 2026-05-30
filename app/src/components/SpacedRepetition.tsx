@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useSession } from '../auth';
 import { RotateCcw, ChevronRight, CheckCircle, XCircle, Calendar } from 'lucide-react';
+import { useLov } from '../shared/hooks/use-lov';
 import { trpc } from '../shared/lib/trpc';
 import { nextReviewIntervalDays } from '@shared/domain/spaced-repetition';
 import { accuracyPct } from '@shared/domain/scoring';
@@ -26,6 +27,8 @@ interface ReviewQuestion {
 
 export default function SpacedRepetition() {
   const { user } = useSession();
+  const disciplineLov = useLov('DISCIPLINE');
+  const examBoardLov = useLov('EXAM_BOARD');
   const reviewQuery = trpc.questions.reviewQueue.useQuery();
   const utils = trpc.useUtils();
   const recordMutation = trpc.sessions.record.useMutation({
@@ -198,9 +201,9 @@ export default function SpacedRepetition() {
 
         <div className="bg-white rounded-xl p-6 shadow">
           <div className="flex items-center gap-2 mb-4">
-            <span className="text-sm font-medium text-gray-600">{currentQuestion.discipline}</span>
+            <span className="text-sm font-medium text-gray-600">{disciplineLov.labelOf(currentQuestion.discipline)}</span>
             <span className="text-gray-400">|</span>
-            <span className="text-sm text-gray-600">{currentQuestion.exam_board}</span>
+            <span className="text-sm text-gray-600">{examBoardLov.labelOf(currentQuestion.exam_board)}</span>
             <span className="text-gray-400">|</span>
             <span className="text-sm text-gray-600">
               {currentQuestion.timesCorrect}/{currentQuestion.timesAnswered} acertos anteriores

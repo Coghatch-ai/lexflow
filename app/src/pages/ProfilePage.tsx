@@ -1,12 +1,14 @@
 import { useSession } from '../auth';
 import { User, TrendingUp, BookOpen, Award, Clock } from 'lucide-react';
 import { trpc } from '../shared/lib/trpc';
+import { useLov } from '../shared/hooks/use-lov';
 
 export default function ProfilePage() {
   const { user } = useSession();
 
   const summary = trpc.stats.summary.useQuery();
   const byDiscipline = trpc.stats.byDiscipline.useQuery();
+  const disciplineLov = useLov('DISCIPLINE');
 
   const stats = {
     totalAnswered: summary.data?.totalAnswered ?? 0,
@@ -19,11 +21,11 @@ export default function ProfilePage() {
   const sorted = [...(byDiscipline.data ?? [])].sort((a, b) => b.accuracy - a.accuracy);
   const topDisciplines = sorted
     .slice(0, 5)
-    .map((d) => ({ discipline: d.discipline, accuracy: d.accuracy }));
+    .map((d) => ({ discipline: disciplineLov.labelOf(d.discipline), accuracy: d.accuracy }));
   const weakDisciplines = [...sorted]
     .reverse()
     .slice(0, 5)
-    .map((d) => ({ discipline: d.discipline, accuracy: d.accuracy }));
+    .map((d) => ({ discipline: disciplineLov.labelOf(d.discipline), accuracy: d.accuracy }));
 
   return (
     <div className="space-y-6">

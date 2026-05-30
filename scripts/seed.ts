@@ -27,7 +27,10 @@ async function main(): Promise<void> {
       await db
         .insert(oabQuestions)
         .values(questions.slice(i, i + BATCH))
-        .onConflictDoNothing();
+        .onConflictDoUpdate({
+          target: oabQuestions.id,
+          set: { discipline: sql`excluded.discipline`, lastUpdAt: new Date().toISOString() },
+        });
     }
 
     const rows = await db.select({ count: sql<number>`count(*)::int` }).from(oabQuestions);

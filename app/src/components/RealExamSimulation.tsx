@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Clock, AlertCircle, Flag, CheckCircle, XCircle } from 'lucide-react';
+import { useLov } from '../shared/hooks/use-lov';
 import { trpc } from '../shared/lib/trpc';
 import { accuracyPct } from '@shared/domain/scoring';
 
@@ -21,6 +22,8 @@ const EXAM_DURATION = 5 * 60 * 60;
 const QUESTIONS_PER_EXAM = 80;
 
 export default function RealExamSimulation() {
+  const disciplineLov = useLov('DISCIPLINE');
+  const examBoardLov = useLov('EXAM_BOARD');
   const [status, setStatus] = useState<Status>('setup');
   const [questions, setQuestions] = useState<Question[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -238,7 +241,7 @@ export default function RealExamSimulation() {
           </div>
 
           <p className="text-sm text-gray-600 mb-2">
-            <span className="font-medium">{currentQuestion.discipline}</span> - {currentQuestion.exam_board}
+            <span className="font-medium">{disciplineLov.labelOf(currentQuestion.discipline)}</span> - {examBoardLov.labelOf(currentQuestion.exam_board)}
           </p>
 
           <h3 className="text-lg font-semibold text-[#0f172a] mb-4">
@@ -425,7 +428,7 @@ export default function RealExamSimulation() {
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
                       <p className="font-medium text-gray-800 text-sm">
-                        Questao {idx + 1} - {q.discipline}
+                        Questao {idx + 1} - {disciplineLov.labelOf(q.discipline)}
                       </p>
                       {!isCorrect && (
                         <div className="mt-1 text-xs">

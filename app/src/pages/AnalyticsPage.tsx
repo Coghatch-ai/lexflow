@@ -14,6 +14,7 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import { trpc } from '../shared/lib/trpc';
+import { useLov } from '../shared/hooks/use-lov';
 import { accuracyPct } from '@shared/domain/scoring';
 
 interface DisciplineData {
@@ -38,10 +39,12 @@ export default function AnalyticsPage() {
   const byDiscipline = trpc.stats.byDiscipline.useQuery();
   const byExamBoard = trpc.stats.byExamBoard.useQuery();
   const recent = trpc.sessions.listRecent.useQuery();
+  const disciplineLov = useLov('DISCIPLINE');
+  const examBoardLov = useLov('EXAM_BOARD');
 
   const disciplineData: DisciplineData[] = (byDiscipline.data ?? [])
     .map((d) => ({
-      discipline: d.discipline,
+      discipline: disciplineLov.labelOf(d.discipline),
       accuracy: d.accuracy,
       total: d.totalAnswered,
       correct: d.totalCorrect,
@@ -55,7 +58,7 @@ export default function AnalyticsPage() {
   }));
 
   const examBoardData: ExamBoardData[] = (byExamBoard.data ?? []).map((e) => ({
-    name: e.examBoard,
+    name: examBoardLov.labelOf(e.examBoard),
     value: e.accuracy,
     total: e.totalAnswered,
   }));

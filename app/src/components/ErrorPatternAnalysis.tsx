@@ -18,6 +18,7 @@ import {
   Cell,
 } from 'recharts';
 import { trpc } from '../shared/lib/trpc';
+import { useLov } from '../shared/hooks/use-lov';
 
 interface ErrorByDiscipline {
   discipline: string;
@@ -46,13 +47,15 @@ export default function ErrorPatternAnalysis() {
   const byExamBoard = trpc.stats.byExamBoard.useQuery();
   const byResponseTime = trpc.stats.byResponseTime.useQuery();
   const recurring = trpc.stats.recurringErrors.useQuery();
+  const disciplineLov = useLov('DISCIPLINE');
+  const examBoardLov = useLov('EXAM_BOARD');
 
   const totalAnswered = summary.data?.totalAnswered ?? 0;
   const totalErrors = totalAnswered - (summary.data?.totalCorrect ?? 0);
 
   const errorByDiscipline: ErrorByDiscipline[] = (byDiscipline.data ?? [])
     .map((d) => ({
-      discipline: d.discipline,
+      discipline: disciplineLov.labelOf(d.discipline),
       errors: d.totalAnswered - d.totalCorrect,
       total: d.totalAnswered,
       errorRate: 100 - d.accuracy,
@@ -60,7 +63,7 @@ export default function ErrorPatternAnalysis() {
     .sort((a, b) => b.errorRate - a.errorRate);
 
   const errorByBoard: ErrorByBoard[] = (byExamBoard.data ?? []).map((e) => ({
-    examBoard: e.examBoard,
+    examBoard: examBoardLov.labelOf(e.examBoard),
     errors: e.totalAnswered - Math.round((e.totalAnswered * e.accuracy) / 100),
     total: e.totalAnswered,
     errorRate: 100 - e.accuracy,
@@ -83,7 +86,7 @@ export default function ErrorPatternAnalysis() {
 
   const recurringErrors = (recurring.data ?? []).map((r) => ({
     questionId: r.questionId,
-    discipline: r.discipline,
+    discipline: disciplineLov.labelOf(r.discipline),
     timesAnswered: r.timesAnswered,
     timesWrong: r.timesWrong,
     lastAttempt: r.lastAttempt,
