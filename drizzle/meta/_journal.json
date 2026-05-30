@@ -8,6 +8,13 @@
       "when": 1780132529830,
       "tag": "0000_ancient_shiver_man",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1780141128623,
+      "tag": "0001_slim_wendigo",
+      "breakpoints": true
     }
   ]
 }

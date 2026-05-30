@@ -16,6 +16,7 @@ const TABLE_SCOPE: Record<string, ScopeType> = {
   // Global (not user-scoped)
   users: { type: "global" },
   oab_questions: { type: "global" },
+  list_of_values: { type: "global" },
 
   // Per-user owned tables
   user_answers: { type: "user" },

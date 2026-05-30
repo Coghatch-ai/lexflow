@@ -2,6 +2,10 @@
 
 Guidance for Claude Code working in this repo.
 
+**Refactoring or adding features? Read [docs/conventions.md](docs/conventions.md) first** — it holds
+the LOV/picklist rules (English code, pt-BR label), the no-duplication + business-rules-in-`shared/`
+rules, and the step-by-step refactor playbook.
+
 ## Project Overview
 
 **LexFlow** — a study platform for Brazilian legal exams (initial focus: OAB bar exam).

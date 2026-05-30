@@ -210,6 +210,25 @@ export const goalNotifications = pgTable(
   (t) => [index("idx_goal_notif_user").on(t.userId), index("idx_goal_notif_goal").on(t.goalId)],
 );
 
+// ── List of values (picklists) ────────────────────────────────────────────────
+
+// Global reference catalog for dropdowns. `type` is an UPPER_SNAKE discriminator
+// (DISCIPLINE, DIFFICULTY, EXAM_BOARD, PHASE); `code` is the English identifier
+// stored in domain tables; `value` is the pt-BR display label. Not user-scoped.
+export const listOfValues = pgTable(
+  "list_of_values",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    type: text("type").notNull(),
+    code: text("code").notNull(),
+    value: text("value").notNull(),
+    sortOrder: integer("sort_order").notNull().default(0),
+    active: boolean("active").notNull().default(true),
+    ...systemFields,
+  },
+  (t) => [unique("uq_lov_type_code").on(t.type, t.code), index("idx_lov_type").on(t.type)],
+);
+
 // ── Relations ─────────────────────────────────────────────────────────────────
 
 export const usersRelations = relations(users, ({ many, one }) => ({

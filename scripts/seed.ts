@@ -7,8 +7,9 @@ import "dotenv/config";
 import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
-import { oabQuestions } from "../drizzle/schema";
+import { listOfValues, oabQuestions } from "../drizzle/schema";
 import { generateOabQuestions } from "../shared/data/oab-questions";
+import { LOV_SEED } from "../shared/data/lov";
 
 async function main(): Promise<void> {
   const connectionString =
@@ -31,6 +32,21 @@ async function main(): Promise<void> {
 
     const rows = await db.select({ count: sql<number>`count(*)::int` }).from(oabQuestions);
     console.warn(`[seed] ✓ oab_questions now has ${rows[0]?.count ?? 0} rows`);
+
+    console.warn(`[seed] upserting ${LOV_SEED.length} list_of_values (idempotent)`);
+    await db
+      .insert(listOfValues)
+      .values(
+        LOV_SEED.map((r) => ({
+          type: r.type,
+          code: r.code,
+          value: r.value,
+          sortOrder: r.sortOrder,
+        })),
+      )
+      .onConflictDoNothing();
+    const lovRows = await db.select({ count: sql<number>`count(*)::int` }).from(listOfValues);
+    console.warn(`[seed] ✓ list_of_values now has ${lovRows[0]?.count ?? 0} rows`);
   } finally {
     await pool.end();
   }
