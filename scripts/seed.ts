@@ -36,18 +36,18 @@ async function main(): Promise<void> {
     const rows = await db.select({ count: sql<number>`count(*)::int` }).from(oabQuestions);
     console.warn(`[seed] ✓ oab_questions now has ${rows[0]?.count ?? 0} rows`);
 
-    console.warn(`[seed] upserting ${LOV_SEED.length} list_of_values (idempotent)`);
-    await db
-      .insert(listOfValues)
-      .values(
-        LOV_SEED.map((r) => ({
-          type: r.type,
-          code: r.code,
-          value: r.value,
-          sortOrder: r.sortOrder,
-        })),
-      )
-      .onConflictDoNothing();
+    // LOV is reference data with no FK references — sync it deterministically
+    // (delete-all + insert) so changed codes don't leave stale rows behind.
+    console.warn(`[seed] syncing ${LOV_SEED.length} list_of_values`);
+    await db.delete(listOfValues);
+    await db.insert(listOfValues).values(
+      LOV_SEED.map((r) => ({
+        type: r.type,
+        code: r.code,
+        value: r.value,
+        sortOrder: r.sortOrder,
+      })),
+    );
     const lovRows = await db.select({ count: sql<number>`count(*)::int` }).from(listOfValues);
     console.warn(`[seed] ✓ list_of_values now has ${lovRows[0]?.count ?? 0} rows`);
   } finally {
