@@ -1,0 +1,19 @@
+{
+  // Frontend (browser) project. The inherited bolt POC UI under app/src/pages
+  // and app/src/components is type-checked here at POC strictness. New backend
+  // code lives in tsconfig.api.json at max strictness. Frontend hardening to
+  // full max-strict happens as pages migrate off mock data onto tRPC.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["esnext", "dom", "dom.iterable"],
+    "jsx": "react-jsx",
+    // "node" is needed because app/src/shared/lib/trpc.ts type-imports the
+    // backend AppRouter (@api/handler), pulling the api/ graph (process.env,
+    // pg, etc.) into this program. It is still checked strict via tsconfig.api.json.
+    "types": ["node", "vite/client"],
+    "incremental": true,
+    "tsBuildInfoFile": "./node_modules/.cache/tsbuildinfo.app"
+  },
+  "include": ["app/src/**/*"],
+  "exclude": ["node_modules", "dist", "build", ".aws-sam"]
+}

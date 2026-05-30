@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "allowImportingTsExtensions": true,
+    "useDefineForClassFields": true,
+    "noEmit": true,
+
+    // Shared strictness
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./app/src/*"],
+      "@api/*": ["./api/*"],
+      "@app/*": ["./app/src/*"],
+      "@shared/*": ["./shared/*"],
+      "@drizzle/*": ["./drizzle/*"]
+    }
+  }
+}

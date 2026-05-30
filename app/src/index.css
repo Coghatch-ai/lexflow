@@ -1,0 +1,59 @@
+@import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Fraunces:wght@600;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-lex-dark: #0f172a;
+  --color-lex-primary: #1e3a5f;
+  --color-lex-accent: #0ea5e9;
+  --color-lex-gold: #f59e0b;
+  --color-lex-white: #ffffff;
+  --color-lex-gray-light: #f8fafc;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: "DM Sans", sans-serif;
+  background-color: var(--color-lex-gray-light);
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: "Fraunces", serif;
+  font-weight: 700;
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-gradient-to-r from-[#1e3a5f] to-[#0c4a6e] text-white py-3 px-6 rounded-lg font-semibold hover:shadow-lg transition disabled:opacity-50;
+  }
+
+  .btn-secondary {
+    @apply bg-white text-[#1e3a5f] border-2 border-[#1e3a5f] py-3 px-6 rounded-lg font-semibold hover:bg-[#1e3a5f] hover:text-white transition;
+  }
+
+  .card-default {
+    @apply bg-white rounded-xl p-6 shadow hover:shadow-lg transition;
+  }
+
+  .badge-success {
+    @apply inline-block px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm font-semibold;
+  }
+
+  .badge-warning {
+    @apply inline-block px-3 py-1 bg-yellow-100 text-yellow-700 rounded-full text-sm font-semibold;
+  }
+
+  .badge-danger {
+    @apply inline-block px-3 py-1 bg-red-100 text-red-700 rounded-full text-sm font-semibold;
+  }
+}

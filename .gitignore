@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+build/
+.aws-sam/
+*.tsbuildinfo
+
+# Env / secrets (never commit)
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Claude Code per-user settings
+.claude/settings.local.json
+
+# Editor / OS
+.DS_Store
+*.swp
+*.swo
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Testing
+coverage/
+*.lcov
+.vitest-cache/

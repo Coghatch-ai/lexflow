@@ -1,0 +1,481 @@
+import { useState, useEffect, useCallback } from 'react';
+import { useSession } from '../auth';
+import { Brain, ChevronRight, CheckCircle, XCircle, Clock, Zap } from 'lucide-react';
+import { DISCIPLINES } from '../types';
+import { mockQuestions } from '../lib/mockData';
+
+type Difficulty = 'easy' | 'medium' | 'hard';
+type Status = 'setup' | 'playing' | 'feedback' | 'finished';
+
+interface Question {
+  id: string;
+  question_text: string;
+  options: string[];
+  correct_answer: string;
+  difficulty: Difficulty;
+  discipline: string;
+  exam_board: string;
+  explanation: string;
+  legislation_title: string;
+  legislation_link: string;
+}
+
+interface AdaptiveState {
+  currentDifficulty: Difficulty;
+  consecutiveCorrect: number;
+  consecutiveWrong: number;
+  totalCorrect: number;
+  totalAnswered: number;
+  difficultyHistory: Difficulty[];
+}
+
+const DIFFICULTY_ORDER: Difficulty[] = ['easy', 'medium', 'hard'];
+
+function getNextDifficulty(state: AdaptiveState): Difficulty {
+  const { currentDifficulty, consecutiveCorrect, consecutiveWrong } = state;
+  const idx = DIFFICULTY_ORDER.indexOf(currentDifficulty);
+
+  if (consecutiveCorrect >= 2 && idx < DIFFICULTY_ORDER.length - 1) {
+    return DIFFICULTY_ORDER[idx + 1];
+  }
+  if (consecutiveWrong >= 2 && idx > 0) {
+    return DIFFICULTY_ORDER[idx - 1];
+  }
+  return currentDifficulty;
+}
+
+const DIFFICULTY_LABELS: Record<Difficulty, string> = {
+  easy: 'Facil',
+  medium: 'Medio',
+  hard: 'Dificil',
+};
+
+const DIFFICULTY_COLORS: Record<Difficulty, string> = {
+  easy: 'bg-green-100 text-green-700',
+  medium: 'bg-yellow-100 text-yellow-700',
+  hard: 'bg-red-100 text-red-700',
+};
+
+export default function AdaptiveSimulation() {
+  const { user } = useSession();
+  const [status, setStatus] = useState<Status>('setup');
+  const [selectedDiscipline, setSelectedDiscipline] = useState('');
+  const [totalQuestions, setTotalQuestions] = useState(10);
+  const [questions, setQuestions] = useState<Question[]>([]);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [selectedAnswer, setSelectedAnswer] = useState('');
+  const [adaptive, setAdaptive] = useState<AdaptiveState>({
+    currentDifficulty: 'medium',
+    consecutiveCorrect: 0,
+    consecutiveWrong: 0,
+    totalCorrect: 0,
+    totalAnswered: 0,
+    difficultyHistory: [],
+  });
+  const [, setTimeSpent] = useState(0);
+  const [timer, setTimer] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [lastCorrect, setLastCorrect] = useState<boolean | null>(null);
+
+  const currentQuestion = questions[currentIndex];
+
+  // Timer
+  useEffect(() => {
+    if (status === 'playing' && currentIndex < questions.length) {
+      const interval = setInterval(() => {
+        setTimer((t) => t + 1);
+        setTimeSpent((t) => t + 1);
+      }, 1000);
+      return () => clearInterval(interval);
+    }
+  }, [status, currentIndex, questions.length]);
+
+  const fetchQuestion = useCallback(
+    (difficulty: Difficulty): Question | null => {
+      let pool = [...mockQuestions];
+
+      if (selectedDiscipline) pool = pool.filter(q => q.discipline === selectedDiscipline);
+
+      const diffPool = pool.filter(q => q.difficulty === difficulty);
+      const answeredIds = questions.map((q) => q.id);
+      const available = (diffPool.length > 0 ? diffPool : pool).filter(q => !answeredIds.includes(q.id));
+
+      if (available.length === 0) {
+        const fallback = pool.filter(q => !answeredIds.includes(q.id));
+        return fallback[Math.floor(Math.random() * fallback.length)] as Question || null;
+      }
+
+      return available[Math.floor(Math.random() * available.length)] as Question;
+    },
+    [selectedDiscipline, questions]
+  );
+
+  const startSimulation = () => {
+    setLoading(true);
+    try {
+      const startDifficulty: Difficulty = 'medium';
+      const firstQuestion = fetchQuestion(startDifficulty);
+      if (firstQuestion) {
+        setQuestions([firstQuestion]);
+        setAdaptive({
+          currentDifficulty: startDifficulty,
+          consecutiveCorrect: 0,
+          consecutiveWrong: 0,
+          totalCorrect: 0,
+          totalAnswered: 0,
+          difficultyHistory: [startDifficulty],
+        });
+        setCurrentIndex(0);
+        setSelectedAnswer('');
+        setTimeSpent(0);
+        setTimer(0);
+        setLastCorrect(null);
+        setStatus('playing');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAnswer = () => {
+    if (!currentQuestion || !user) return;
+
+    const correct = selectedAnswer === currentQuestion.correct_answer;
+    setLastCorrect(correct);
+
+    const newConsecutiveCorrect = correct ? adaptive.consecutiveCorrect + 1 : 0;
+    const newConsecutiveWrong = correct ? 0 : adaptive.consecutiveWrong + 1;
+
+    const newAdaptive: AdaptiveState = {
+      currentDifficulty: adaptive.currentDifficulty,
+      consecutiveCorrect: newConsecutiveCorrect,
+      consecutiveWrong: newConsecutiveWrong,
+      totalCorrect: adaptive.totalCorrect + (correct ? 1 : 0),
+      totalAnswered: adaptive.totalAnswered + 1,
+      difficultyHistory: [...adaptive.difficultyHistory, adaptive.currentDifficulty],
+    };
+
+    setAdaptive(newAdaptive);
+    setStatus('feedback');
+  };
+
+  const handleNext = () => {
+    if (adaptive.totalAnswered + 1 >= totalQuestions) {
+      setStatus('finished');
+      return;
+    }
+
+    const nextDifficulty = getNextDifficulty(adaptive);
+    const nextQuestion = fetchQuestion(nextDifficulty);
+
+    if (nextQuestion) {
+      setAdaptive((prev) => ({
+        ...prev,
+        currentDifficulty: nextDifficulty,
+        difficultyHistory: [...prev.difficultyHistory, nextDifficulty],
+      }));
+      setQuestions((prev) => [...prev, nextQuestion]);
+      setCurrentIndex((prev) => prev + 1);
+      setSelectedAnswer('');
+      setTimeSpent(0);
+      setLastCorrect(null);
+      setStatus('playing');
+    } else {
+      setStatus('finished');
+    }
+  };
+
+  // Setup screen
+  if (status === 'setup') {
+    return (
+      <div className="bg-white rounded-xl p-6 shadow">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="bg-[#0ea5e9] p-3 rounded-lg">
+            <Brain className="w-6 h-6 text-white" />
+          </div>
+          <div>
+            <h3 className="text-xl font-bold text-[#0f172a]">Simulado Adaptativo</h3>
+            <p className="text-sm text-gray-600">
+              A dificuldade ajusta automaticamente conforme seu desempenho
+            </p>
+          </div>
+        </div>
+
+        <div className="space-y-4 mb-6">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Disciplina (opcional)
+            </label>
+            <select
+              value={selectedDiscipline}
+              onChange={(e) => setSelectedDiscipline(e.target.value)}
+              className="w-full px-4 py-2 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-[#0ea5e9]"
+            >
+              <option value="">Todas as disciplinas</option>
+              {DISCIPLINES.map((d) => (
+                <option key={d} value={d}>{d}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Numero de questoes: {totalQuestions}
+            </label>
+            <input
+              type="range"
+              min="5"
+              max="30"
+              value={totalQuestions}
+              onChange={(e) => setTotalQuestions(Number(e.target.value))}
+              className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+            />
+            <div className="flex justify-between text-xs text-gray-500 mt-1">
+              <span>5</span>
+              <span>15</span>
+              <span>30</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-[#0ea5e9]/5 rounded-lg p-4 mb-6">
+          <h4 className="font-semibold text-[#0f172a] mb-2">Como funciona?</h4>
+          <ul className="space-y-1 text-sm text-gray-700">
+            <li>- Comeca no nivel medio</li>
+            <li>- 2 acertos seguidos: sobe a dificuldade</li>
+            <li>- 2 erros seguidos: diminui a dificuldade</li>
+            <li>- Ajuste automatico em tempo real</li>
+          </ul>
+        </div>
+
+        <button
+          onClick={startSimulation}
+          disabled={loading}
+          className="w-full bg-gradient-to-r from-[#1e3a5f] to-[#0c4a6e] text-white py-3 rounded-lg font-semibold hover:shadow-lg transition disabled:opacity-50 flex items-center justify-center gap-2"
+        >
+          <Zap className="w-5 h-5" />
+          {loading ? 'Carregando...' : 'Iniciar Simulado Adaptativo'}
+        </button>
+      </div>
+    );
+  }
+
+  // Playing screen
+  if (status === 'playing' && currentQuestion) {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between bg-white rounded-xl p-4 shadow">
+          <div className="flex items-center gap-3">
+            <Brain className="w-5 h-5 text-[#0ea5e9]" />
+            <span className="text-sm font-medium text-gray-700">Nivel atual:</span>
+            <span className={`px-3 py-1 rounded-full text-sm font-bold ${DIFFICULTY_COLORS[adaptive.currentDifficulty]}`}>
+              {DIFFICULTY_LABELS[adaptive.currentDifficulty]}
+            </span>
+          </div>
+          <div className="flex items-center gap-2 text-sm text-gray-600">
+            <Clock className="w-4 h-4" />
+            {Math.floor(timer / 60)}:{String(timer % 60).padStart(2, '0')}
+          </div>
+        </div>
+
+        <div className="space-y-1">
+          <div className="flex justify-between text-sm text-gray-600">
+            <span>Questao {adaptive.totalAnswered + 1} de {totalQuestions}</span>
+            <span>{adaptive.totalCorrect}/{adaptive.totalAnswered} acertos</span>
+          </div>
+          <div className="w-full bg-gray-200 rounded-full h-2">
+            <div
+              className="bg-gradient-to-r from-[#0ea5e9] to-[#1e3a5f] h-2 rounded-full transition-all"
+              style={{ width: `${(adaptive.totalAnswered / totalQuestions) * 100}%` }}
+            />
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl p-6 shadow">
+          <p className="text-sm text-gray-600 mb-2">
+            <span className="font-medium">{currentQuestion.discipline}</span> -{' '}
+            <span className="font-medium">{currentQuestion.exam_board}</span>
+          </p>
+          <h3 className="text-lg font-semibold text-[#0f172a] mb-4">
+            {currentQuestion.question_text}
+          </h3>
+
+          <div className="space-y-3 mb-6">
+            {currentQuestion.options.map((option, idx) => (
+              <button
+                key={idx}
+                onClick={() => setSelectedAnswer(option)}
+                className={`w-full text-left p-4 border-2 rounded-lg transition ${
+                  selectedAnswer === option
+                    ? 'border-[#0ea5e9] bg-[#0ea5e9]/5'
+                    : 'border-gray-200 hover:border-[#0ea5e9]/50'
+                }`}
+              >
+                <div className="flex items-start gap-3">
+                  <div
+                    className={`w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 mt-0.5 ${
+                      selectedAnswer === option
+                        ? 'border-[#0ea5e9] bg-[#0ea5e9]'
+                        : 'border-gray-300'
+                    }`}
+                  >
+                    {selectedAnswer === option && (
+                      <div className="w-2 h-2 bg-white rounded-full" />
+                    )}
+                  </div>
+                  <span className="text-gray-800">{option}</span>
+                </div>
+              </button>
+            ))}
+          </div>
+
+          <button
+            onClick={handleAnswer}
+            disabled={!selectedAnswer}
+            className="w-full bg-gradient-to-r from-[#1e3a5f] to-[#0c4a6e] text-white py-3 rounded-lg font-semibold hover:shadow-lg transition disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            Confirmar Resposta
+            <ChevronRight className="w-5 h-5" />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Feedback screen
+  if (status === 'feedback' && currentQuestion) {
+    const nextDiff = getNextDifficulty(adaptive);
+    const difficultyChanged = nextDiff !== adaptive.currentDifficulty;
+
+    return (
+      <div className="space-y-4">
+        <div className={`rounded-xl p-6 shadow ${lastCorrect ? 'bg-green-50 border-2 border-green-200' : 'bg-red-50 border-2 border-red-200'}`}>
+          <div className="flex items-center gap-3 mb-4">
+            {lastCorrect ? (
+              <CheckCircle className="w-8 h-8 text-green-600" />
+            ) : (
+              <XCircle className="w-8 h-8 text-red-600" />
+            )}
+            <h3 className="text-xl font-bold text-[#0f172a]">
+              {lastCorrect ? 'Resposta Correta!' : 'Resposta Incorreta'}
+            </h3>
+          </div>
+
+          {!lastCorrect && (
+            <div className="mb-4 bg-white rounded-lg p-4">
+              <p className="text-sm text-gray-600 mb-1">Resposta correta:</p>
+              <p className="font-semibold text-green-700">{currentQuestion.correct_answer}</p>
+            </div>
+          )}
+
+          <div className="bg-white rounded-lg p-4">
+            <p className="text-sm font-medium text-gray-700 mb-1">Explicacao:</p>
+            <p className="text-gray-800">{currentQuestion.explanation}</p>
+            <p className="text-sm text-[#0ea5e9] mt-2 font-medium">
+              {currentQuestion.legislation_title}
+            </p>
+          </div>
+        </div>
+
+        {difficultyChanged && (
+          <div className="bg-[#0ea5e9]/10 border-2 border-[#0ea5e9] rounded-xl p-4 flex items-center gap-3">
+            <Zap className="w-5 h-5 text-[#0ea5e9]" />
+            <div>
+              <p className="font-semibold text-[#0f172a]">Dificuldade ajustada!</p>
+              <p className="text-sm text-gray-700">
+                De <span className={`font-bold ${DIFFICULTY_COLORS[adaptive.currentDifficulty]}`}>{DIFFICULTY_LABELS[adaptive.currentDifficulty]}</span> para{' '}
+                <span className={`font-bold ${DIFFICULTY_COLORS[nextDiff]}`}>{DIFFICULTY_LABELS[nextDiff]}</span>
+              </p>
+            </div>
+          </div>
+        )}
+
+        <button
+          onClick={handleNext}
+          className="w-full bg-gradient-to-r from-[#1e3a5f] to-[#0c4a6e] text-white py-3 rounded-lg font-semibold hover:shadow-lg transition flex items-center justify-center gap-2"
+        >
+          {adaptive.totalAnswered + 1 >= totalQuestions ? 'Ver Resultado' : 'Proxima Questao'}
+          <ChevronRight className="w-5 h-5" />
+        </button>
+      </div>
+    );
+  }
+
+  // Finished screen
+  const accuracy = adaptive.totalAnswered > 0
+    ? Math.round((adaptive.totalCorrect / adaptive.totalAnswered) * 100)
+    : 0;
+
+  const easyCount = adaptive.difficultyHistory.filter((d) => d === 'easy').length;
+  const medCount = adaptive.difficultyHistory.filter((d) => d === 'medium').length;
+  const hardCount = adaptive.difficultyHistory.filter((d) => d === 'hard').length;
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-gradient-to-r from-[#0ea5e9] to-[#0f172a] rounded-xl p-6 text-white">
+        <h3 className="text-2xl font-bold mb-2">Simulado Adaptativo Finalizado!</h3>
+        <p className="text-white/80">Veja como seu desempenho evoluiu</p>
+      </div>
+
+      <div className="grid md:grid-cols-3 gap-4">
+        <div className="bg-white rounded-xl p-6 shadow text-center">
+          <div className="text-4xl font-bold text-[#0f172a] mb-2">{accuracy}%</div>
+          <p className="text-gray-600">Acuracia Final</p>
+        </div>
+        <div className="bg-white rounded-xl p-6 shadow text-center">
+          <div className="text-4xl font-bold text-green-600 mb-2">{adaptive.totalCorrect}</div>
+          <p className="text-gray-600">Acertos de {adaptive.totalAnswered}</p>
+        </div>
+        <div className="bg-white rounded-xl p-6 shadow text-center">
+          <div className="text-4xl font-bold text-[#0ea5e9] mb-2">{Math.floor(timer / 60)}:{String(timer % 60).padStart(2, '0')}</div>
+          <p className="text-gray-600">Tempo Total</p>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-xl p-6 shadow">
+        <h4 className="text-lg font-bold text-[#0f172a] mb-4">Distribuicao de Dificuldade</h4>
+        <div className="space-y-3">
+          <div className="flex items-center gap-3">
+            <span className="w-16 text-sm font-medium text-gray-700">Facil</span>
+            <div className="flex-1 bg-gray-200 rounded-full h-4">
+              <div className="bg-green-500 h-4 rounded-full" style={{ width: `${(easyCount / adaptive.difficultyHistory.length) * 100}%` }} />
+            </div>
+            <span className="w-8 text-sm font-bold text-gray-700">{easyCount}</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="w-16 text-sm font-medium text-gray-700">Medio</span>
+            <div className="flex-1 bg-gray-200 rounded-full h-4">
+              <div className="bg-yellow-500 h-4 rounded-full" style={{ width: `${(medCount / adaptive.difficultyHistory.length) * 100}%` }} />
+            </div>
+            <span className="w-8 text-sm font-bold text-gray-700">{medCount}</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="w-16 text-sm font-medium text-gray-700">Dificil</span>
+            <div className="flex-1 bg-gray-200 rounded-full h-4">
+              <div className="bg-red-500 h-4 rounded-full" style={{ width: `${(hardCount / adaptive.difficultyHistory.length) * 100}%` }} />
+            </div>
+            <span className="w-8 text-sm font-bold text-gray-700">{hardCount}</span>
+          </div>
+        </div>
+      </div>
+
+      <button
+        onClick={() => {
+          setStatus('setup');
+          setQuestions([]);
+          setAdaptive({
+            currentDifficulty: 'medium',
+            consecutiveCorrect: 0,
+            consecutiveWrong: 0,
+            totalCorrect: 0,
+            totalAnswered: 0,
+            difficultyHistory: [],
+          });
+        }}
+        className="w-full bg-gradient-to-r from-[#1e3a5f] to-[#0c4a6e] text-white py-3 rounded-lg font-semibold hover:shadow-lg transition"
+      >
+        Fazer Outro Simulado Adaptativo
+      </button>
+    </div>
+  );
+}

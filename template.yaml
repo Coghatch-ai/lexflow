@@ -1,0 +1,101 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: LexFlow API - Lambda with API Gateway (HTTP API)
+
+Parameters:
+  Environment:
+    Type: String
+    Default: prod
+    AllowedValues: [dev, prod]
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 512
+    Runtime: nodejs22.x
+    Tags:
+      Project: lexflow
+      Environment: !Ref Environment
+      CostCenter: billable
+
+Resources:
+  LexFlowApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/lexflow-api-${Environment}"
+      RetentionInDays: 7
+
+  LexFlowHttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: !Ref Environment
+      # No custom domain yet — the frontend is served from the CloudFront default
+      # domain. Allow any origin; auth is via bearer token (no cookies).
+      CorsConfiguration:
+        AllowOrigins: ["*"]
+        AllowHeaders:
+          - Content-Type
+          - Authorization
+          - svix-id
+          - svix-timestamp
+          - svix-signature
+        AllowMethods: [GET, POST, PUT, DELETE, OPTIONS]
+
+  LexFlowApiFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: LexFlowApiLogGroup
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints:
+          - api/handler.ts
+        Minify: true
+        Target: es2022
+        Sourcemap: true
+        External:
+          - pg-native
+          - better-sqlite3
+          - tedious
+          - sqlite3
+          - mysql
+          - mysql2
+          - pg-query-stream
+          - oracledb
+    Properties:
+      FunctionName: !Sub lexflow-api-${Environment}
+      CodeUri: .
+      Handler: api/handler.handler
+      Tracing: PassThrough
+      # Shared VPC with the mrhewbuc-rds RDS instance (same SG + subnets as the
+      # other MrHewbuc projects). No NAT — Lambda reaches RDS directly via the
+      # private subnets.
+      VpcConfig:
+        SecurityGroupIds:
+          - sg-0d065bb06c8c04a68
+        SubnetIds:
+          - subnet-0cc43286651b1e2d9
+          - subnet-03602b4d349546b6b
+          - subnet-0ffadc50f6a7a1f26
+      Environment:
+        Variables:
+          DB_HOST: !Sub "{{resolve:ssm:/lexflow/api/${Environment}/db-host}}"
+          DB_NAME: !Sub "{{resolve:ssm:/lexflow/api/${Environment}/db-name}}"
+          DB_USER: !Sub "{{resolve:ssm:/lexflow/api/${Environment}/db-user}}"
+          DB_PASSWORD: !Sub "{{resolve:ssm:/lexflow/api/${Environment}/db-password}}"
+          CLERK_JWT_KEY: !Sub "{{resolve:ssm:/lexflow/api/${Environment}/clerk-jwt-key}}"
+          CLERK_WEBHOOK_SECRET: !Sub "{{resolve:ssm:/lexflow/api/${Environment}/clerk-webhook-secret}}"
+          ENVIRONMENT: !Ref Environment
+      Events:
+        ApiEvent:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref LexFlowHttpApi
+            Path: /{proxy+}
+            Method: ANY
+
+Outputs:
+  ApiGatewayUrl:
+    Description: API Gateway endpoint (use this as VITE_API_URL)
+    Value: !Sub "https://${LexFlowHttpApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}"
+  FunctionArn:
+    Value: !GetAtt LexFlowApiFunction.Arn
