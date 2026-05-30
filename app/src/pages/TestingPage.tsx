@@ -7,6 +7,7 @@ import SpacedRepetition from '../components/SpacedRepetition';
 import RealExamSimulation from '../components/RealExamSimulation';
 import { trpc } from '../shared/lib/trpc';
 import { accuracyPct } from '@shared/domain/scoring';
+import QuestionCard from '@/shared/components/QuestionCard';
 
 type Mode = 'standard' | 'adaptive' | 'spaced' | 'real';
 type QuestionStatus = 'not-started' | 'in-progress' | 'completed';
@@ -332,44 +333,14 @@ export default function TestingPage() {
         </div>
 
         <div className="bg-white rounded-xl p-6 shadow">
-          <div className="mb-6">
-            <p className="text-sm text-gray-600 mb-2">
-              <span className="font-medium">{disciplineLov.labelOf(currentQuestion.discipline)}</span> -{' '}
-              <span className="font-medium">{examBoardLov.labelOf(currentQuestion.exam_board)}</span>
-            </p>
-            <h3 className="text-lg font-semibold text-[#0f172a]">
-              {currentQuestion.question_text}
-            </h3>
-          </div>
-
-          <div className="space-y-3 mb-6">
-            {currentQuestion.options.map((option, idx) => (
-              <button
-                key={idx}
-                onClick={() => setSelectedAnswer(option)}
-                className={`w-full text-left p-4 border-2 rounded-lg transition ${
-                  selectedAnswer === option
-                    ? 'border-[#0ea5e9] bg-[#0ea5e9]/5'
-                    : 'border-gray-200 hover:border-[#0ea5e9]/50'
-                }`}
-              >
-                <div className="flex items-start gap-3">
-                  <div
-                    className={`w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 mt-0.5 ${
-                      selectedAnswer === option
-                        ? 'border-[#0ea5e9] bg-[#0ea5e9]'
-                        : 'border-gray-300'
-                    }`}
-                  >
-                    {selectedAnswer === option && (
-                      <div className="w-2 h-2 bg-white rounded-full" />
-                    )}
-                  </div>
-                  <span className="text-gray-800">{option}</span>
-                </div>
-              </button>
-            ))}
-          </div>
+          <QuestionCard
+            disciplineLabel={disciplineLov.labelOf(currentQuestion.discipline)}
+            examBoardLabel={examBoardLov.labelOf(currentQuestion.exam_board)}
+            questionText={currentQuestion.question_text}
+            options={currentQuestion.options}
+            selectedAnswer={selectedAnswer}
+            onSelect={setSelectedAnswer}
+          />
 
           <button
             onClick={handleNext}

@@ -3,6 +3,7 @@ import { Clock, AlertCircle, Flag, CheckCircle, XCircle } from 'lucide-react';
 import { useLov } from '../shared/hooks/use-lov';
 import { trpc } from '../shared/lib/trpc';
 import { accuracyPct } from '@shared/domain/scoring';
+import QuestionCard from '@/shared/components/QuestionCard';
 
 type Status = 'setup' | 'playing' | 'review' | 'finished';
 
@@ -240,42 +241,14 @@ export default function RealExamSimulation() {
             </div>
           </div>
 
-          <p className="text-sm text-gray-600 mb-2">
-            <span className="font-medium">{disciplineLov.labelOf(currentQuestion.discipline)}</span> - {examBoardLov.labelOf(currentQuestion.exam_board)}
-          </p>
-
-          <h3 className="text-lg font-semibold text-[#0f172a] mb-4">
-            {currentQuestion.question_text}
-          </h3>
-
-          <div className="space-y-3 mb-6">
-            {currentQuestion.options.map((option, idx) => (
-              <button
-                key={idx}
-                onClick={() => selectAnswer(option)}
-                className={`w-full text-left p-4 border-2 rounded-lg transition ${
-                  answers.get(currentIndex) === option
-                    ? 'border-[#0ea5e9] bg-[#0ea5e9]/5'
-                    : 'border-gray-200 hover:border-[#0ea5e9]/50'
-                }`}
-              >
-                <div className="flex items-start gap-3">
-                  <div
-                    className={`w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 mt-0.5 ${
-                      answers.get(currentIndex) === option
-                        ? 'border-[#0ea5e9] bg-[#0ea5e9]'
-                        : 'border-gray-300'
-                    }`}
-                  >
-                    {answers.get(currentIndex) === option && (
-                      <div className="w-2 h-2 bg-white rounded-full" />
-                    )}
-                  </div>
-                  <span className="text-gray-800">{option}</span>
-                </div>
-              </button>
-            ))}
-          </div>
+          <QuestionCard
+            disciplineLabel={disciplineLov.labelOf(currentQuestion.discipline)}
+            examBoardLabel={examBoardLov.labelOf(currentQuestion.exam_board)}
+            questionText={currentQuestion.question_text}
+            options={currentQuestion.options}
+            selectedAnswer={answers.get(currentIndex) ?? ''}
+            onSelect={selectAnswer}
+          />
 
           <div className="flex items-center justify-between">
             <button
