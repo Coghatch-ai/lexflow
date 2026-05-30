@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- data module: the question bank is large by nature. */
 // shared/data/oab-questions.ts
 //
 // Canonical OAB question bank + a deterministic generator used by the seed

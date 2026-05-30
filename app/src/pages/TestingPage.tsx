@@ -5,7 +5,7 @@ import { DISCIPLINES, EXAM_BOARDS, DIFFICULTIES } from '../types';
 import AdaptiveSimulation from '../components/AdaptiveSimulation';
 import SpacedRepetition from '../components/SpacedRepetition';
 import RealExamSimulation from '../components/RealExamSimulation';
-import { mockQuestions } from '../lib/mockData';
+import { trpc } from '../shared/lib/trpc';
 
 type Mode = 'standard' | 'adaptive' | 'spaced' | 'real';
 type QuestionStatus = 'not-started' | 'in-progress' | 'completed';
@@ -32,6 +32,13 @@ interface Answer {
 
 export default function TestingPage() {
   const { user } = useSession();
+  const utils = trpc.useUtils();
+  const recordMutation = trpc.sessions.record.useMutation({
+    onSuccess: () => {
+      void utils.stats.invalidate();
+      void utils.sessions.invalidate();
+    },
+  });
   const [mode, setMode] = useState<Mode | null>(null);
   const [status, setStatus] = useState<QuestionStatus>('not-started');
   const [questions, setQuestions] = useState<Question[]>([]);
@@ -138,20 +145,31 @@ export default function TestingPage() {
     );
   }
 
-  // Load questions from mock data
-  const loadQuestions = () => {
+  // Load questions from the API (random 10 matching the filters).
+  const loadQuestions = async () => {
     setLoading(true);
     try {
-      let filtered = [...mockQuestions];
+      const rows = await utils.questions.list.fetch({
+        discipline: discipline !== '' ? discipline : undefined,
+        examBoard: examBoard !== '' ? (examBoard as 'FGV' | 'CESPE') : undefined,
+        difficulty: difficulty !== '' ? (difficulty as 'easy' | 'medium' | 'hard') : undefined,
+        limit: 10,
+      });
 
-      if (discipline) filtered = filtered.filter(q => q.discipline === discipline);
-      if (examBoard) filtered = filtered.filter(q => q.exam_board === examBoard);
-      if (difficulty) filtered = filtered.filter(q => q.difficulty === difficulty);
+      const mapped: Question[] = rows.map((r) => ({
+        id: r.id,
+        question_text: r.questionText,
+        options: r.options,
+        correct_answer: r.correctAnswer,
+        difficulty: r.difficulty,
+        discipline: r.discipline,
+        exam_board: r.examBoard,
+        explanation: r.explanation,
+        legislation_title: r.legislationTitle,
+        legislation_link: r.legislationLink,
+      }));
 
-      // Shuffle and take 10
-      const shuffled = filtered.sort(() => Math.random() - 0.5).slice(0, 10);
-
-      setQuestions(shuffled);
+      setQuestions(mapped);
       setStatus('in-progress');
       setCurrentIndex(0);
       setAnswers([]);
@@ -170,7 +188,7 @@ export default function TestingPage() {
     if (!currentQuestion || !user) return;
 
     const correct = selectedAnswer === currentQuestion.correct_answer;
-    setAnswers([
+    const updated: Answer[] = [
       ...answers,
       {
         questionId: currentQuestion.id,
@@ -178,10 +196,17 @@ export default function TestingPage() {
         correct,
         timeSpent,
       },
-    ]);
+    ];
+    setAnswers(updated);
 
     if (currentIndex + 1 >= questions.length) {
       setStatus('completed');
+      // Persist the completed session + its answers.
+      recordMutation.mutate({
+        discipline: discipline !== '' ? discipline : 'Geral',
+        difficulty: difficulty !== '' ? (difficulty as 'easy' | 'medium' | 'hard') : 'medium',
+        answers: updated,
+      });
     } else {
       setCurrentIndex(currentIndex + 1);
       setSelectedAnswer('');

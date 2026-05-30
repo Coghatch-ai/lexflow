@@ -8,21 +8,30 @@ import {
   Zap,
   AlertCircle,
 } from 'lucide-react';
-import { mockStats, mockSessions } from '../lib/mockData';
+import { trpc } from '../shared/lib/trpc';
 
 export default function HomePage() {
   const { user } = useSession();
 
+  const summary = trpc.stats.summary.useQuery();
+  const recent = trpc.sessions.listRecent.useQuery();
+  const last = recent.data?.[0];
+
   const stats = {
-    totalAnswered: mockStats.totalAnswered,
-    totalCorrect: mockStats.totalCorrect,
-    accuracy: mockStats.accuracy,
-    totalSessions: mockStats.totalSessions,
-    recentSession: mockSessions.length > 0 ? {
-      accuracy: Math.round((mockSessions[mockSessions.length - 1].correct_answers / mockSessions[mockSessions.length - 1].total_questions) * 100),
-      discipline: mockSessions[mockSessions.length - 1].discipline,
-      date: new Date(mockSessions[mockSessions.length - 1].created_at).toLocaleDateString('pt-BR'),
-    } : undefined,
+    totalAnswered: summary.data?.totalAnswered ?? 0,
+    totalCorrect: summary.data?.totalCorrect ?? 0,
+    accuracy: summary.data?.accuracy ?? 0,
+    totalSessions: summary.data?.totalSessions ?? 0,
+    recentSession: last
+      ? {
+          accuracy:
+            last.totalQuestions > 0
+              ? Math.round((last.correctAnswers / last.totalQuestions) * 100)
+              : 0,
+          discipline: last.discipline,
+          date: new Date(last.createdAt).toLocaleDateString('pt-BR'),
+        }
+      : undefined,
   };
 
   return (
