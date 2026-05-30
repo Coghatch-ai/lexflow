@@ -62,4 +62,36 @@ export const statsRouter = router({
       .where(eq(userAnswers.userId, ctx.userId))
       .groupBy(oabQuestions.examBoard);
   }),
+
+  // Error rate bucketed by how long the answer took (fast / medium / slow).
+  byResponseTime: protectedProcedure.query(async ({ ctx }) => {
+    return db
+      .select({
+        bucket: sql<string>`case when ${userAnswers.timeSpent} < 30 then 'fast' when ${userAnswers.timeSpent} < 90 then 'medium' else 'slow' end`,
+        total: sql<number>`count(*)::int`,
+        errors: sql<number>`sum(case when ${userAnswers.correct} then 0 else 1 end)::int`,
+      })
+      .from(userAnswers)
+      .where(eq(userAnswers.userId, ctx.userId))
+      .groupBy(sql`1`);
+  }),
+
+  // Questions the user answered at least twice and got wrong at least twice.
+  recurringErrors: protectedProcedure.query(async ({ ctx }) => {
+    return db
+      .select({
+        questionId: userAnswers.questionId,
+        discipline: oabQuestions.discipline,
+        timesAnswered: sql<number>`count(*)::int`,
+        timesWrong: sql<number>`sum(case when ${userAnswers.correct} then 0 else 1 end)::int`,
+        lastAttempt: sql<string>`max(${userAnswers.createdAt})`,
+      })
+      .from(userAnswers)
+      .innerJoin(oabQuestions, eq(userAnswers.questionId, oabQuestions.id))
+      .where(eq(userAnswers.userId, ctx.userId))
+      .groupBy(userAnswers.questionId, oabQuestions.discipline)
+      .having(sql`count(*) >= 2 and sum(case when ${userAnswers.correct} then 0 else 1 end) >= 2`)
+      .orderBy(sql`max(${userAnswers.createdAt}) desc`)
+      .limit(20);
+  }),
 });

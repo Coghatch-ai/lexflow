@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import ErrorPatternAnalysis from '../components/ErrorPatternAnalysis';
 import {
   LineChart,
@@ -14,7 +13,7 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from 'recharts';
-import { mockDisciplinePerformance, mockExamBoardPerformance, mockSessions } from '../lib/mockData';
+import { trpc } from '../shared/lib/trpc';
 
 interface DisciplineData {
   discipline: string;
@@ -35,29 +34,30 @@ interface ExamBoardData {
 }
 
 export default function AnalyticsPage() {
-  const [disciplineData] = useState<DisciplineData[]>(
-    mockDisciplinePerformance.map((d) => ({
+  const byDiscipline = trpc.stats.byDiscipline.useQuery();
+  const byExamBoard = trpc.stats.byExamBoard.useQuery();
+  const recent = trpc.sessions.listRecent.useQuery();
+
+  const disciplineData: DisciplineData[] = (byDiscipline.data ?? [])
+    .map((d) => ({
       discipline: d.discipline,
       accuracy: d.accuracy,
-      total: d.total_answered,
-      correct: d.total_correct,
-    })).sort((a, b) => b.accuracy - a.accuracy)
-  );
-
-  const [sessionData] = useState<SessionData[]>(
-    mockSessions.map((s) => ({
-      date: new Date(s.created_at).toLocaleDateString('pt-BR'),
-      accuracy: Math.round((s.correct_answers / s.total_questions) * 100),
+      total: d.totalAnswered,
+      correct: d.totalCorrect,
     }))
-  );
+    .sort((a, b) => b.accuracy - a.accuracy);
 
-  const [examBoardData] = useState<ExamBoardData[]>(
-    mockExamBoardPerformance.map((e) => ({
-      name: e.exam_board,
-      value: e.accuracy,
-      total: e.total_answered,
-    }))
-  );
+  // listRecent is newest-first; reverse for a left-to-right chronological trend.
+  const sessionData: SessionData[] = [...(recent.data ?? [])].reverse().map((s) => ({
+    date: new Date(s.createdAt).toLocaleDateString('pt-BR'),
+    accuracy: s.totalQuestions > 0 ? Math.round((s.correctAnswers / s.totalQuestions) * 100) : 0,
+  }));
+
+  const examBoardData: ExamBoardData[] = (byExamBoard.data ?? []).map((e) => ({
+    name: e.examBoard,
+    value: e.accuracy,
+    total: e.totalAnswered,
+  }));
 
   const COLORS = ['#0f172a', '#1e3a5f', '#0ea5e9', '#0c4a6e', '#38bdf8'];
 

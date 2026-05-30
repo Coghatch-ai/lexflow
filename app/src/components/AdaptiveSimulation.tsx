@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useSession } from '../auth';
 import { Brain, ChevronRight, CheckCircle, XCircle, Clock, Zap } from 'lucide-react';
 import { DISCIPLINES } from '../types';
-import { mockQuestions } from '../lib/mockData';
+import { trpc } from '../shared/lib/trpc';
 
 type Difficulty = 'easy' | 'medium' | 'hard';
 type Status = 'setup' | 'playing' | 'feedback' | 'finished';
@@ -72,10 +72,22 @@ export default function AdaptiveSimulation() {
     totalAnswered: 0,
     difficultyHistory: [],
   });
-  const [, setTimeSpent] = useState(0);
+  const [questionPool, setQuestionPool] = useState<Question[]>([]);
+  const [questionTime, setTimeSpent] = useState(0);
   const [timer, setTimer] = useState(0);
   const [loading, setLoading] = useState(false);
   const [lastCorrect, setLastCorrect] = useState<boolean | null>(null);
+  const [answerLog, setAnswerLog] = useState<
+    { questionId: string; userAnswer: string; correct: boolean; timeSpent: number }[]
+  >([]);
+
+  const utils = trpc.useUtils();
+  const recordMutation = trpc.sessions.record.useMutation({
+    onSuccess: () => {
+      void utils.stats.invalidate();
+      void utils.sessions.invalidate();
+    },
+  });
 
   const currentQuestion = questions[currentIndex];
 
@@ -90,33 +102,46 @@ export default function AdaptiveSimulation() {
     }
   }, [status, currentIndex, questions.length]);
 
+  // Picks the next unseen question at the given difficulty from the fetched pool.
   const fetchQuestion = useCallback(
     (difficulty: Difficulty): Question | null => {
-      let pool = [...mockQuestions];
-
-      if (selectedDiscipline) pool = pool.filter(q => q.discipline === selectedDiscipline);
-
-      const diffPool = pool.filter(q => q.difficulty === difficulty);
       const answeredIds = questions.map((q) => q.id);
-      const available = (diffPool.length > 0 ? diffPool : pool).filter(q => !answeredIds.includes(q.id));
-
-      if (available.length === 0) {
-        const fallback = pool.filter(q => !answeredIds.includes(q.id));
-        return fallback[Math.floor(Math.random() * fallback.length)] as Question || null;
-      }
-
-      return available[Math.floor(Math.random() * available.length)] as Question;
+      const unseen = questionPool.filter((q) => !answeredIds.includes(q.id));
+      const atDifficulty = unseen.filter((q) => q.difficulty === difficulty);
+      const fromPool = atDifficulty.length > 0 ? atDifficulty : unseen;
+      if (fromPool.length === 0) return null;
+      return fromPool[Math.floor(Math.random() * fromPool.length)];
     },
-    [selectedDiscipline, questions]
+    [questionPool, questions]
   );
 
-  const startSimulation = () => {
+  const startSimulation = async () => {
     setLoading(true);
     try {
+      const rows = await utils.questions.list.fetch({
+        discipline: selectedDiscipline !== '' ? selectedDiscipline : undefined,
+        limit: 100,
+      });
+      const mapped: Question[] = rows.map((r) => ({
+        id: r.id,
+        question_text: r.questionText,
+        options: r.options,
+        correct_answer: r.correctAnswer,
+        difficulty: r.difficulty as Difficulty,
+        discipline: r.discipline,
+        exam_board: r.examBoard,
+        explanation: r.explanation,
+        legislation_title: r.legislationTitle,
+        legislation_link: r.legislationLink,
+      }));
+      setQuestionPool(mapped);
+
       const startDifficulty: Difficulty = 'medium';
-      const firstQuestion = fetchQuestion(startDifficulty);
+      const startPool = mapped.filter((q) => q.difficulty === startDifficulty);
+      const firstQuestion = (startPool.length > 0 ? startPool : mapped)[0] ?? null;
       if (firstQuestion) {
         setQuestions([firstQuestion]);
+        setAnswerLog([]);
         setAdaptive({
           currentDifficulty: startDifficulty,
           consecutiveCorrect: 0,
@@ -137,31 +162,51 @@ export default function AdaptiveSimulation() {
     }
   };
 
+  const finish = (
+    log: { questionId: string; userAnswer: string; correct: boolean; timeSpent: number }[]
+  ) => {
+    setStatus('finished');
+    if (log.length > 0) {
+      recordMutation.mutate({
+        discipline: selectedDiscipline !== '' ? selectedDiscipline : 'Geral',
+        difficulty: adaptive.currentDifficulty,
+        answers: log,
+      });
+    }
+  };
+
   const handleAnswer = () => {
     if (!currentQuestion || !user) return;
 
     const correct = selectedAnswer === currentQuestion.correct_answer;
     setLastCorrect(correct);
+    setAnswerLog((log) => [
+      ...log,
+      {
+        questionId: currentQuestion.id,
+        userAnswer: selectedAnswer,
+        correct,
+        timeSpent: questionTime,
+      },
+    ]);
 
     const newConsecutiveCorrect = correct ? adaptive.consecutiveCorrect + 1 : 0;
     const newConsecutiveWrong = correct ? 0 : adaptive.consecutiveWrong + 1;
 
-    const newAdaptive: AdaptiveState = {
+    setAdaptive({
       currentDifficulty: adaptive.currentDifficulty,
       consecutiveCorrect: newConsecutiveCorrect,
       consecutiveWrong: newConsecutiveWrong,
       totalCorrect: adaptive.totalCorrect + (correct ? 1 : 0),
       totalAnswered: adaptive.totalAnswered + 1,
       difficultyHistory: [...adaptive.difficultyHistory, adaptive.currentDifficulty],
-    };
-
-    setAdaptive(newAdaptive);
+    });
     setStatus('feedback');
   };
 
   const handleNext = () => {
-    if (adaptive.totalAnswered + 1 >= totalQuestions) {
-      setStatus('finished');
+    if (adaptive.totalAnswered >= totalQuestions) {
+      finish(answerLog);
       return;
     }
 
@@ -181,7 +226,7 @@ export default function AdaptiveSimulation() {
       setLastCorrect(null);
       setStatus('playing');
     } else {
-      setStatus('finished');
+      finish(answerLog);
     }
   };
 
@@ -394,7 +439,7 @@ export default function AdaptiveSimulation() {
           onClick={handleNext}
           className="w-full bg-gradient-to-r from-[#1e3a5f] to-[#0c4a6e] text-white py-3 rounded-lg font-semibold hover:shadow-lg transition flex items-center justify-center gap-2"
         >
-          {adaptive.totalAnswered + 1 >= totalQuestions ? 'Ver Resultado' : 'Proxima Questao'}
+          {adaptive.totalAnswered >= totalQuestions ? 'Ver Resultado' : 'Proxima Questao'}
           <ChevronRight className="w-5 h-5" />
         </button>
       </div>

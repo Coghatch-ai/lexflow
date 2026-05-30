@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Target, Plus, Trash2, CreditCard as Edit2 } from 'lucide-react';
 import { DISCIPLINES } from '../types';
-import { mockGoals as initialGoals } from '../lib/mockData';
+import { trpc } from '../shared/lib/trpc';
 
 interface GoalWithProgress {
   id: string;
@@ -12,38 +12,54 @@ interface GoalWithProgress {
 }
 
 export default function GoalsPage() {
-  const [goals, setGoals] = useState<GoalWithProgress[]>(initialGoals);
+  const utils = trpc.useUtils();
+  const goalsQuery = trpc.goals.list.useQuery();
+  const byDiscipline = trpc.stats.byDiscipline.useQuery();
+
   const [showForm, setShowForm] = useState(false);
   const [selectedDiscipline, setSelectedDiscipline] = useState('');
   const [targetAccuracy, setTargetAccuracy] = useState(70);
   const [editingId, setEditingId] = useState<string | null>(null);
 
+  const invalidate = () => {
+    void utils.goals.list.invalidate();
+  };
+  const createGoal = trpc.goals.create.useMutation({ onSuccess: invalidate });
+  const updateGoal = trpc.goals.update.useMutation({ onSuccess: invalidate });
+  const deleteGoal = trpc.goals.delete.useMutation({ onSuccess: invalidate });
+
+  // Current accuracy per discipline → goal progress.
+  const accuracyByDiscipline: Record<string, number> = {};
+  for (const d of byDiscipline.data ?? []) accuracyByDiscipline[d.discipline] = d.accuracy;
+
+  const goals: GoalWithProgress[] = (goalsQuery.data ?? []).map((g) => {
+    const current = accuracyByDiscipline[g.discipline] ?? 0;
+    const progress =
+      g.targetAccuracy > 0 ? Math.min(100, Math.round((current / g.targetAccuracy) * 100)) : 0;
+    return {
+      id: g.id,
+      discipline: g.discipline,
+      target_accuracy: g.targetAccuracy,
+      current_accuracy: current,
+      progress,
+    };
+  });
+
   const handleAddGoal = () => {
     if (!selectedDiscipline) return;
-
     if (editingId) {
-      setGoals(goals.map(g =>
-        g.id === editingId ? { ...g, target_accuracy: targetAccuracy, progress: Math.min(100, Math.round((g.current_accuracy / targetAccuracy) * 100)) } : g
-      ));
+      updateGoal.mutate({ id: editingId, targetAccuracy });
       setEditingId(null);
     } else {
-      const newGoal: GoalWithProgress = {
-        id: `g${Date.now()}`,
-        discipline: selectedDiscipline,
-        target_accuracy: targetAccuracy,
-        current_accuracy: 0,
-        progress: 0,
-      };
-      setGoals([...goals, newGoal]);
+      createGoal.mutate({ discipline: selectedDiscipline, targetAccuracy });
     }
-
     setSelectedDiscipline('');
     setTargetAccuracy(70);
     setShowForm(false);
   };
 
   const handleDeleteGoal = (id: string) => {
-    setGoals(goals.filter((g) => g.id !== id));
+    deleteGoal.mutate({ id });
   };
 
   const availableDisciplines = DISCIPLINES.filter(

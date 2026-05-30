@@ -17,7 +17,7 @@ import {
   Pie,
   Cell,
 } from 'recharts';
-import { mockDisciplinePerformance, mockExamBoardPerformance, mockUserAnswers } from '../lib/mockData';
+import { trpc } from '../shared/lib/trpc';
 
 interface ErrorByDiscipline {
   discipline: string;
@@ -41,53 +41,53 @@ interface ErrorByTime {
 }
 
 export default function ErrorPatternAnalysis() {
-  const totalAnswered = mockUserAnswers.length;
-  const totalErrors = mockUserAnswers.filter(a => !a.correct).length;
+  const summary = trpc.stats.summary.useQuery();
+  const byDiscipline = trpc.stats.byDiscipline.useQuery();
+  const byExamBoard = trpc.stats.byExamBoard.useQuery();
+  const byResponseTime = trpc.stats.byResponseTime.useQuery();
+  const recurring = trpc.stats.recurringErrors.useQuery();
 
-  const errorByDiscipline: ErrorByDiscipline[] = mockDisciplinePerformance.map(d => ({
-    discipline: d.discipline,
-    errors: d.total_answered - d.total_correct,
-    total: d.total_answered,
-    errorRate: d.total_answered > 0 ? Math.round(((d.total_answered - d.total_correct) / d.total_answered) * 100) : 0,
-  })).sort((a, b) => b.errorRate - a.errorRate);
+  const totalAnswered = summary.data?.totalAnswered ?? 0;
+  const totalErrors = totalAnswered - (summary.data?.totalCorrect ?? 0);
 
-  const errorByBoard: ErrorByBoard[] = mockExamBoardPerformance.map(e => ({
-    examBoard: e.exam_board,
-    errors: e.total_answered - Math.round(e.total_answered * e.accuracy / 100),
-    total: e.total_answered,
+  const errorByDiscipline: ErrorByDiscipline[] = (byDiscipline.data ?? [])
+    .map((d) => ({
+      discipline: d.discipline,
+      errors: d.totalAnswered - d.totalCorrect,
+      total: d.totalAnswered,
+      errorRate: 100 - d.accuracy,
+    }))
+    .sort((a, b) => b.errorRate - a.errorRate);
+
+  const errorByBoard: ErrorByBoard[] = (byExamBoard.data ?? []).map((e) => ({
+    examBoard: e.examBoard,
+    errors: e.totalAnswered - Math.round((e.totalAnswered * e.accuracy) / 100),
+    total: e.totalAnswered,
     errorRate: 100 - e.accuracy,
   }));
 
-  const fastAnswers = mockUserAnswers.filter(a => a.time_spent < 30);
-  const medAnswers = mockUserAnswers.filter(a => a.time_spent >= 30 && a.time_spent < 90);
-  const slowAnswers = mockUserAnswers.filter(a => a.time_spent >= 90);
+  const timeBuckets = byResponseTime.data ?? [];
+  const pickBucket = (key: string): { total: number; errors: number } =>
+    timeBuckets.find((b) => b.bucket === key) ?? { total: 0, errors: 0 };
+  const rate = (b: { total: number; errors: number }): number =>
+    b.total > 0 ? Math.round((b.errors / b.total) * 100) : 0;
+  const fast = pickBucket('fast');
+  const med = pickBucket('medium');
+  const slow = pickBucket('slow');
 
   const errorByTime: ErrorByTime[] = [
-    {
-      category: 'Rapido (<30s)',
-      errors: fastAnswers.filter(a => !a.correct).length,
-      total: fastAnswers.length,
-      errorRate: fastAnswers.length > 0 ? Math.round((fastAnswers.filter(a => !a.correct).length / fastAnswers.length) * 100) : 0,
-    },
-    {
-      category: 'Medio (30-90s)',
-      errors: medAnswers.filter(a => !a.correct).length,
-      total: medAnswers.length,
-      errorRate: medAnswers.length > 0 ? Math.round((medAnswers.filter(a => !a.correct).length / medAnswers.length) * 100) : 0,
-    },
-    {
-      category: 'Lento (>90s)',
-      errors: slowAnswers.filter(a => !a.correct).length,
-      total: slowAnswers.length,
-      errorRate: slowAnswers.length > 0 ? Math.round((slowAnswers.filter(a => !a.correct).length / slowAnswers.length) * 100) : 0,
-    },
+    { category: 'Rapido (<30s)', errors: fast.errors, total: fast.total, errorRate: rate(fast) },
+    { category: 'Medio (30-90s)', errors: med.errors, total: med.total, errorRate: rate(med) },
+    { category: 'Lento (>90s)', errors: slow.errors, total: slow.total, errorRate: rate(slow) },
   ];
 
-  const recurringErrors = [
-    { questionId: 'q0001', discipline: 'Etica Profissional', timesAnswered: 3, timesWrong: 2, lastAttempt: '2026-05-10' },
-    { questionId: 'q0002', discipline: 'Direito Ambiental', timesAnswered: 2, timesWrong: 2, lastAttempt: '2026-05-12' },
-    { questionId: 'q0003', discipline: 'Direito Comercial', timesAnswered: 2, timesWrong: 2, lastAttempt: '2026-05-13' },
-  ];
+  const recurringErrors = (recurring.data ?? []).map((r) => ({
+    questionId: r.questionId,
+    discipline: r.discipline,
+    timesAnswered: r.timesAnswered,
+    timesWrong: r.timesWrong,
+    lastAttempt: r.lastAttempt,
+  }));
 
   if (totalAnswered === 0) {
     return (

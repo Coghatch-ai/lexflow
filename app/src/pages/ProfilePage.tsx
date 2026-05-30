@@ -1,32 +1,29 @@
 import { useSession } from '../auth';
 import { User, TrendingUp, BookOpen, Award, Clock } from 'lucide-react';
-import { mockStats, mockDisciplinePerformance } from '../lib/mockData';
+import { trpc } from '../shared/lib/trpc';
 
 export default function ProfilePage() {
   const { user } = useSession();
 
+  const summary = trpc.stats.summary.useQuery();
+  const byDiscipline = trpc.stats.byDiscipline.useQuery();
+
   const stats = {
-    totalAnswered: mockStats.totalAnswered,
-    totalCorrect: mockStats.totalCorrect,
-    accuracy: mockStats.accuracy,
-    totalSessions: mockStats.totalSessions,
-    averageTimePerQuestion: mockStats.averageTimePerQuestion,
+    totalAnswered: summary.data?.totalAnswered ?? 0,
+    totalCorrect: summary.data?.totalCorrect ?? 0,
+    accuracy: summary.data?.accuracy ?? 0,
+    totalSessions: summary.data?.totalSessions ?? 0,
+    averageTimePerQuestion: summary.data?.averageTimePerQuestion ?? 0,
   };
 
-  const topDisciplines = mockDisciplinePerformance
+  const sorted = [...(byDiscipline.data ?? [])].sort((a, b) => b.accuracy - a.accuracy);
+  const topDisciplines = sorted
     .slice(0, 5)
-    .map((d) => ({
-      discipline: d.discipline,
-      accuracy: d.accuracy,
-    }));
-
-  const weakDisciplines = [...mockDisciplinePerformance]
+    .map((d) => ({ discipline: d.discipline, accuracy: d.accuracy }));
+  const weakDisciplines = [...sorted]
     .reverse()
     .slice(0, 5)
-    .map((d) => ({
-      discipline: d.discipline,
-      accuracy: d.accuracy,
-    }));
+    .map((d) => ({ discipline: d.discipline, accuracy: d.accuracy }));
 
   return (
     <div className="space-y-6">

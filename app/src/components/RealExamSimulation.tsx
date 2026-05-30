@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Clock, AlertCircle, Flag, CheckCircle, XCircle } from 'lucide-react';
-import { mockQuestions } from '../lib/mockData';
+import { trpc } from '../shared/lib/trpc';
 
 type Status = 'setup' | 'playing' | 'review' | 'finished';
 
@@ -28,6 +28,14 @@ export default function RealExamSimulation() {
   const [timeLeft, setTimeLeft] = useState(EXAM_DURATION);
   const [loading, setLoading] = useState(false);
   const [showConfirmSubmit, setShowConfirmSubmit] = useState(false);
+
+  const utils = trpc.useUtils();
+  const recordMutation = trpc.sessions.record.useMutation({
+    onSuccess: () => {
+      void utils.stats.invalidate();
+      void utils.sessions.invalidate();
+    },
+  });
 
   const currentQuestion = questions[currentIndex];
 
@@ -57,11 +65,22 @@ export default function RealExamSimulation() {
     return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
   };
 
-  const startExam = () => {
+  const startExam = async () => {
     setLoading(true);
     try {
-      const shuffled = [...mockQuestions].sort(() => Math.random() - 0.5);
-      setQuestions(shuffled.slice(0, Math.min(QUESTIONS_PER_EXAM, shuffled.length)));
+      const rows = await utils.questions.list.fetch({ limit: QUESTIONS_PER_EXAM });
+      const mapped: Question[] = rows.map((r) => ({
+        id: r.id,
+        question_text: r.questionText,
+        options: r.options,
+        correct_answer: r.correctAnswer,
+        difficulty: r.difficulty,
+        discipline: r.discipline,
+        exam_board: r.examBoard,
+        explanation: r.explanation,
+        legislation_title: r.legislationTitle,
+      }));
+      setQuestions(mapped);
       setAnswers(new Map());
       setFlagged(new Set());
       setCurrentIndex(0);
@@ -75,6 +94,22 @@ export default function RealExamSimulation() {
   const handleSubmit = useCallback(() => {
     setStatus('review');
   }, []);
+
+  // Persist the exam once when entering the review screen (covers both manual
+  // submit and the timer running out).
+  useEffect(() => {
+    if (status !== 'review') return;
+    const log = questions.map((q, idx) => ({
+      questionId: q.id,
+      userAnswer: answers.get(idx) ?? '',
+      correct: answers.get(idx) === q.correct_answer,
+      timeSpent: 0,
+    }));
+    if (log.length > 0) {
+      recordMutation.mutate({ discipline: 'Prova Real', difficulty: 'hard', answers: log });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status]);
 
   const selectAnswer = (option: string) => {
     const newAnswers = new Map(answers);

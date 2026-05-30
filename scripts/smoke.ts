@@ -67,6 +67,25 @@ async function main(): Promise<void> {
     const recent = await caller.sessions.listRecent();
     console.warn(`[smoke] sessions.listRecent → ${recent.length} session(s)`);
 
+    const byBoard = await caller.stats.byExamBoard();
+    console.warn(`[smoke] stats.byExamBoard → ${byBoard.length} board row(s)`);
+
+    const byTime = await caller.stats.byResponseTime();
+    console.warn(`[smoke] stats.byResponseTime → ${byTime.length} bucket(s)`);
+
+    const recurring = await caller.stats.recurringErrors();
+    console.warn(`[smoke] stats.recurringErrors → ${recurring.length} row(s)`);
+
+    const review = await caller.questions.reviewQueue();
+    console.warn(`[smoke] questions.reviewQueue → ${review.length} question(s)`);
+
+    const goal = await caller.goals.create({ discipline: first.discipline, targetAccuracy: 75 });
+    const goalList = await caller.goals.list();
+    console.warn(`[smoke] goals.create + list → ${goalList.length} goal(s) (new ${goal.id})`);
+    await caller.goals.update({ id: goal.id, targetAccuracy: 80 });
+    await caller.goals.delete({ id: goal.id });
+    console.warn("[smoke] goals.update + delete OK");
+
     console.warn("[smoke] ✓ all protected procedures OK");
   } finally {
     if (smokeUserId !== undefined) {

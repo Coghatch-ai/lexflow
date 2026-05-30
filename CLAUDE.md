@@ -53,10 +53,14 @@ pnpm smoke        # End-to-end check of the data API against the DB (throwaway u
 
 ## Data API (tRPC routers)
 
-`questions` (list/filter the catalog, disciplines), `sessions` (record a completed session +
-its answers in one transaction, listRecent), `stats` (summary / byDiscipline / byExamBoard,
-computed on read), `users.me`. All are `protectedProcedure` (require a local users row). The
-inherited bolt UI still renders on mock data — wiring it onto these routers is the next chunk.
+`questions` (list/filter, disciplines, reviewQueue), `sessions` (record session + answers in one
+transaction, listRecent), `stats` (summary / byDiscipline / byExamBoard / byResponseTime /
+recurringErrors, computed on read), `goals` (list/create/update/delete), `users.me`. All are
+`protectedProcedure` (require a local users row).
+
+The whole bolt UI is now wired onto these routers (no more mock data): HomePage, TestingPage
+(standard) + the Adaptive/Spaced/RealExam modes, Analytics + ErrorPatternAnalysis, Profile, Goals.
+Pages stay eslint-quarantined (typecheck + build clean); full max-strict hardening is still pending.
 
 ## POC deviations (intentional — differ from sharpmoney; revisit as the POC matures)
 
@@ -73,8 +77,8 @@ inherited bolt UI still renders on mock data — wiring it onto these routers is
    bolt UI can't pass max-strict yet and the import graph forces one strictness per program.
 4. **State-based navigation, not Wouter.** `App.tsx` switches pages via local state (as the POC
    did). Auth gating uses Clerk `<SignedIn>/<SignedOut>`. Convention default is Wouter.
-5. The UI still renders on **mock data** (`app/src/lib/mockData.ts`). Real tRPC wiring lands in
-   a later chunk.
+5. The UI is fully wired to real tRPC data (mock data removed). Pages remain eslint-quarantined
+   until each is hardened to full max-strict.
 
 ## Infrastructure (be careful — shared AWS account 394559824800, region sa-east-1)
 

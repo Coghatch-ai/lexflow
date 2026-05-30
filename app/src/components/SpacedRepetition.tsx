@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useSession } from '../auth';
 import { RotateCcw, ChevronRight, CheckCircle, XCircle, Calendar } from 'lucide-react';
-import { mockQuestions, mockUserAnswers } from '../lib/mockData';
+import { trpc } from '../shared/lib/trpc';
 
 type Status = 'loading' | 'empty' | 'playing' | 'feedback' | 'done';
 
@@ -34,56 +34,56 @@ function getNextInterval(currentInterval: number, correct: boolean): number {
 
 export default function SpacedRepetition() {
   const { user } = useSession();
+  const reviewQuery = trpc.questions.reviewQueue.useQuery();
+  const utils = trpc.useUtils();
+  const recordMutation = trpc.sessions.record.useMutation({
+    onSuccess: () => {
+      void utils.stats.invalidate();
+      void utils.sessions.invalidate();
+    },
+  });
+
   const [status, setStatus] = useState<Status>('loading');
   const [reviewQuestions, setReviewQuestions] = useState<ReviewQuestion[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [selectedAnswer, setSelectedAnswer] = useState('');
   const [lastCorrect, setLastCorrect] = useState<boolean | null>(null);
   const [stats, setStats] = useState({ dueToday: 0, mastered: 0, learning: 0 });
-  const [, setTimeSpent] = useState(0);
+  const [questionTime, setTimeSpent] = useState(0);
   const [sessionCorrect, setSessionCorrect] = useState(0);
   const [sessionTotal, setSessionTotal] = useState(0);
+  const [answerLog, setAnswerLog] = useState<
+    { questionId: string; userAnswer: string; correct: boolean; timeSpent: number }[]
+  >([]);
 
-  // Load review data from mock
-  useState(() => {
-    if (!user) return;
-
-    const wrongAnswers = mockUserAnswers.filter(a => !a.correct);
-
-    if (wrongAnswers.length === 0) {
+  // Build the review queue from questions the user has gotten wrong.
+  useEffect(() => {
+    if (!user || reviewQuery.isLoading) return;
+    const data = reviewQuery.data ?? [];
+    if (data.length === 0) {
       setStatus('empty');
       return;
     }
-
-    const reviewItems: ReviewQuestion[] = wrongAnswers.slice(0, 5).map((answer) => {
-      const question = mockQuestions.find(q => q.id === answer.question_id) || mockQuestions[0];
-      return {
-        id: question.id,
-        question_text: question.question_text,
-        options: question.options,
-        correct_answer: question.correct_answer,
-        explanation: question.explanation,
-        discipline: question.discipline,
-        exam_board: question.exam_board,
-        difficulty: question.difficulty,
-        legislation_title: question.legislation_title,
-        lastAnsweredAt: answer.created_at,
-        timesAnswered: 1,
-        timesCorrect: 0,
-        nextReviewDate: new Date().toISOString(),
-        intervalDays: 1,
-      };
-    });
-
-    setReviewQuestions(reviewItems);
-    setStats({ dueToday: reviewItems.length, mastered: 3, learning: 8 });
-
-    if (reviewItems.length > 0) {
-      setStatus('playing');
-    } else {
-      setStatus('empty');
-    }
-  });
+    const items: ReviewQuestion[] = data.slice(0, 5).map((q) => ({
+      id: q.id,
+      question_text: q.questionText,
+      options: q.options,
+      correct_answer: q.correctAnswer,
+      explanation: q.explanation,
+      discipline: q.discipline,
+      exam_board: q.examBoard,
+      difficulty: q.difficulty,
+      legislation_title: q.legislationTitle,
+      lastAnsweredAt: q.lastAnsweredAt,
+      timesAnswered: q.timesAnswered,
+      timesCorrect: q.timesCorrect,
+      nextReviewDate: new Date().toISOString(),
+      intervalDays: 1,
+    }));
+    setReviewQuestions(items);
+    setStats({ dueToday: items.length, mastered: 0, learning: data.length });
+    setStatus('playing');
+  }, [user, reviewQuery.isLoading, reviewQuery.data]);
 
   const currentQuestion = reviewQuestions[currentIndex];
 
@@ -92,6 +92,15 @@ export default function SpacedRepetition() {
 
     const correct = selectedAnswer === currentQuestion.correct_answer;
     setLastCorrect(correct);
+    setAnswerLog((log) => [
+      ...log,
+      {
+        questionId: currentQuestion.id,
+        userAnswer: selectedAnswer,
+        correct,
+        timeSpent: questionTime,
+      },
+    ]);
 
     if (correct) setSessionCorrect((c) => c + 1);
     setSessionTotal((t) => t + 1);
@@ -102,6 +111,13 @@ export default function SpacedRepetition() {
   const handleNext = () => {
     if (currentIndex + 1 >= reviewQuestions.length) {
       setStatus('done');
+      if (answerLog.length > 0) {
+        recordMutation.mutate({
+          discipline: currentQuestion?.discipline ?? 'Revisão',
+          difficulty: 'medium',
+          answers: answerLog,
+        });
+      }
     } else {
       setCurrentIndex((i) => i + 1);
       setSelectedAnswer('');
