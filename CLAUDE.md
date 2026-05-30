@@ -88,6 +88,11 @@ Pages stay eslint-quarantined (typecheck + build clean); full max-strict hardeni
   `subnet-03602b4d349546b6b`, `subnet-0ffadc50f6a7a1f26`. **No NAT.**
 - **Secrets:** SSM Parameter Store at `/lexflow/api/{env}/*` (resolved at deploy by `template.yaml`).
 - **Stack:** `lexflow-api-prod`. Frontend bucket `lexflow-frontend-mrhewbuc` + CloudFront (no custom domain yet).
+- **Live (deployed):** API `https://8cz98sohhk.execute-api.sa-east-1.amazonaws.com/prod`;
+  frontend `https://d1qru6bxdnwd2r.cloudfront.net` (CloudFront `E31A7ZWGZ815JT`).
+- **Repo:** `Coghatch-ai/lexflow`; OIDC role `lexflow-github-actions-role`; PROD env secrets
+  `AWS_ROLE_ARN` / `CLOUDFRONT_DISTRIBUTION_ID` / `VITE_CLERK_PUBLISHABLE_KEY` / `VITE_API_URL`.
+  Bootstrap script: `infra/aws-bootstrap.sh` (+ `infra/deploy-runbook.md`).
 - **Deploy via GitHub Actions only** (`deploy-api.yml`, `deploy-app.yml`). NEVER `sam deploy` from a laptop.
 - **Migrations:** `db:generate` → review SQL → `db:migrate`. NEVER apply SQL manually to RDS.
 
