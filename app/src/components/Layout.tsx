@@ -135,6 +135,19 @@ export default function Layout({
 
         {/* Page Content */}
         <div className="p-4 md:p-6 max-w-7xl mx-auto">{children}</div>
+
+        {/* Footer */}
+        <footer className="text-center text-xs text-gray-400 py-6">
+          Powered by{' '}
+          <a
+            href="https://mrhewbuc.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-medium text-gray-500 hover:text-[#0ea5e9]"
+          >
+            Mr. Hewbuc
+          </a>
+        </footer>
       </div>
 
       {/* Mobile overlay */}

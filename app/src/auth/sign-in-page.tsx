@@ -11,6 +11,17 @@ export function SignInPage(): ReactElement {
         <p className="text-gray-500 mt-2">Sua aprovação no Direito</p>
       </div>
       <SignIn routing="virtual" />
+      <p className="mt-8 text-xs text-gray-400">
+        Powered by{" "}
+        <a
+          href="https://mrhewbuc.com"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-medium text-gray-500 hover:text-[#0ea5e9]"
+        >
+          Mr. Hewbuc
+        </a>
+      </p>
     </div>
   );
 }
