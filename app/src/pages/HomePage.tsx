@@ -9,6 +9,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { trpc } from '../shared/lib/trpc';
+import { accuracyPct } from '@shared/domain/scoring';
 
 export default function HomePage() {
   const { user } = useSession();
@@ -24,10 +25,7 @@ export default function HomePage() {
     totalSessions: summary.data?.totalSessions ?? 0,
     recentSession: last
       ? {
-          accuracy:
-            last.totalQuestions > 0
-              ? Math.round((last.correctAnswers / last.totalQuestions) * 100)
-              : 0,
+          accuracy: accuracyPct(last.correctAnswers, last.totalQuestions),
           discipline: last.discipline,
           date: new Date(last.createdAt).toLocaleDateString('pt-BR'),
         }

@@ -6,6 +6,7 @@ import AdaptiveSimulation from '../components/AdaptiveSimulation';
 import SpacedRepetition from '../components/SpacedRepetition';
 import RealExamSimulation from '../components/RealExamSimulation';
 import { trpc } from '../shared/lib/trpc';
+import { accuracyPct } from '@shared/domain/scoring';
 
 type Mode = 'standard' | 'adaptive' | 'spaced' | 'real';
 type QuestionStatus = 'not-started' | 'in-progress' | 'completed';
@@ -215,7 +216,7 @@ export default function TestingPage() {
   };
 
   const correctCount = answers.filter((a) => a.correct).length;
-  const accuracy = questions.length > 0 ? (correctCount / questions.length) * 100 : 0;
+  const accuracy = accuracyPct(correctCount, questions.length);
 
   // Not started state
   if (status === 'not-started') {
@@ -392,7 +393,7 @@ export default function TestingPage() {
 
       <div className="grid md:grid-cols-3 gap-4">
         <div className="bg-white rounded-xl p-6 shadow text-center">
-          <div className="text-4xl font-bold text-[#0f172a] mb-2">{Math.round(accuracy)}%</div>
+          <div className="text-4xl font-bold text-[#0f172a] mb-2">{accuracy}%</div>
           <p className="text-gray-600">Acuracia</p>
         </div>
         <div className="bg-white rounded-xl p-6 shadow text-center">

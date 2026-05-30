@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { useSession } from '../auth';
 import { RotateCcw, ChevronRight, CheckCircle, XCircle, Calendar } from 'lucide-react';
 import { trpc } from '../shared/lib/trpc';
+import { nextReviewIntervalDays } from '@shared/domain/spaced-repetition';
+import { accuracyPct } from '@shared/domain/scoring';
 
 type Status = 'loading' | 'empty' | 'playing' | 'feedback' | 'done';
 
@@ -20,16 +22,6 @@ interface ReviewQuestion {
   timesCorrect: number;
   nextReviewDate: string;
   intervalDays: number;
-}
-
-const INTERVALS = [1, 3, 7, 14, 30];
-
-function getNextInterval(currentInterval: number, correct: boolean): number {
-  const idx = INTERVALS.indexOf(currentInterval);
-  if (correct) {
-    return INTERVALS[Math.min(idx + 1, INTERVALS.length - 1)];
-  }
-  return INTERVALS[0];
 }
 
 export default function SpacedRepetition() {
@@ -263,9 +255,9 @@ export default function SpacedRepetition() {
 
   // Feedback
   if (status === 'feedback' && currentQuestion) {
-    const nextInterval = getNextInterval(
+    const nextInterval = nextReviewIntervalDays(
       currentQuestion.intervalDays,
-      lastCorrect!
+      lastCorrect ?? false
     );
 
     return (
@@ -328,7 +320,7 @@ export default function SpacedRepetition() {
         </div>
         <div className="bg-white rounded-xl p-6 shadow text-center">
           <div className="text-4xl font-bold text-[#0f172a] mb-2">
-            {sessionTotal > 0 ? Math.round((sessionCorrect / sessionTotal) * 100) : 0}%
+            {accuracyPct(sessionCorrect, sessionTotal)}%
           </div>
           <p className="text-gray-600">Acuracia na Sessao</p>
         </div>

@@ -14,6 +14,7 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import { trpc } from '../shared/lib/trpc';
+import { accuracyPct } from '@shared/domain/scoring';
 
 interface DisciplineData {
   discipline: string;
@@ -50,7 +51,7 @@ export default function AnalyticsPage() {
   // listRecent is newest-first; reverse for a left-to-right chronological trend.
   const sessionData: SessionData[] = [...(recent.data ?? [])].reverse().map((s) => ({
     date: new Date(s.createdAt).toLocaleDateString('pt-BR'),
-    accuracy: s.totalQuestions > 0 ? Math.round((s.correctAnswers / s.totalQuestions) * 100) : 0,
+    accuracy: accuracyPct(s.correctAnswers, s.totalQuestions),
   }));
 
   const examBoardData: ExamBoardData[] = (byExamBoard.data ?? []).map((e) => ({

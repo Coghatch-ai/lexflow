@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Target, Plus, Trash2, CreditCard as Edit2 } from 'lucide-react';
 import { DISCIPLINES } from '../types';
 import { trpc } from '../shared/lib/trpc';
+import { goalProgressPct } from '@shared/domain/scoring';
 
 interface GoalWithProgress {
   id: string;
@@ -34,8 +35,7 @@ export default function GoalsPage() {
 
   const goals: GoalWithProgress[] = (goalsQuery.data ?? []).map((g) => {
     const current = accuracyByDiscipline[g.discipline] ?? 0;
-    const progress =
-      g.targetAccuracy > 0 ? Math.min(100, Math.round((current / g.targetAccuracy) * 100)) : 0;
+    const progress = goalProgressPct(current, g.targetAccuracy);
     return {
       id: g.id,
       discipline: g.discipline,

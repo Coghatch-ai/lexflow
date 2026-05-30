@@ -6,6 +6,7 @@
 import { eq, sql } from "drizzle-orm";
 import { db } from "../../db/client";
 import { oabQuestions, studySessions, userAnswers } from "../../../drizzle/schema";
+import { accuracyPct } from "../../../shared/domain/scoring";
 import { protectedProcedure, router } from "../procedures";
 
 export const statsRouter = router({
@@ -30,7 +31,7 @@ export const statsRouter = router({
     return {
       totalAnswered,
       totalCorrect,
-      accuracy: totalAnswered > 0 ? Math.round((totalCorrect / totalAnswered) * 100) : 0,
+      accuracy: accuracyPct(totalCorrect, totalAnswered),
       totalSessions: sessionRows[0]?.totalSessions ?? 0,
       averageTimePerQuestion: answerRows[0]?.averageTimePerQuestion ?? 0,
     };

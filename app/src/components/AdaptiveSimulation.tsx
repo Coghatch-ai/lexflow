@@ -3,6 +3,8 @@ import { useSession } from '../auth';
 import { Brain, ChevronRight, CheckCircle, XCircle, Clock, Zap } from 'lucide-react';
 import { DISCIPLINES } from '../types';
 import { trpc } from '../shared/lib/trpc';
+import { nextDifficulty } from '@shared/domain/adaptive';
+import { accuracyPct } from '@shared/domain/scoring';
 
 type Difficulty = 'easy' | 'medium' | 'hard';
 type Status = 'setup' | 'playing' | 'feedback' | 'finished';
@@ -27,21 +29,6 @@ interface AdaptiveState {
   totalCorrect: number;
   totalAnswered: number;
   difficultyHistory: Difficulty[];
-}
-
-const DIFFICULTY_ORDER: Difficulty[] = ['easy', 'medium', 'hard'];
-
-function getNextDifficulty(state: AdaptiveState): Difficulty {
-  const { currentDifficulty, consecutiveCorrect, consecutiveWrong } = state;
-  const idx = DIFFICULTY_ORDER.indexOf(currentDifficulty);
-
-  if (consecutiveCorrect >= 2 && idx < DIFFICULTY_ORDER.length - 1) {
-    return DIFFICULTY_ORDER[idx + 1];
-  }
-  if (consecutiveWrong >= 2 && idx > 0) {
-    return DIFFICULTY_ORDER[idx - 1];
-  }
-  return currentDifficulty;
 }
 
 const DIFFICULTY_LABELS: Record<Difficulty, string> = {
@@ -210,14 +197,18 @@ export default function AdaptiveSimulation() {
       return;
     }
 
-    const nextDifficulty = getNextDifficulty(adaptive);
-    const nextQuestion = fetchQuestion(nextDifficulty);
+    const nextDiff = nextDifficulty(
+      adaptive.currentDifficulty,
+      adaptive.consecutiveCorrect,
+      adaptive.consecutiveWrong
+    );
+    const nextQuestion = fetchQuestion(nextDiff);
 
     if (nextQuestion) {
       setAdaptive((prev) => ({
         ...prev,
-        currentDifficulty: nextDifficulty,
-        difficultyHistory: [...prev.difficultyHistory, nextDifficulty],
+        currentDifficulty: nextDiff,
+        difficultyHistory: [...prev.difficultyHistory, nextDiff],
       }));
       setQuestions((prev) => [...prev, nextQuestion]);
       setCurrentIndex((prev) => prev + 1);
@@ -389,7 +380,11 @@ export default function AdaptiveSimulation() {
 
   // Feedback screen
   if (status === 'feedback' && currentQuestion) {
-    const nextDiff = getNextDifficulty(adaptive);
+    const nextDiff = nextDifficulty(
+      adaptive.currentDifficulty,
+      adaptive.consecutiveCorrect,
+      adaptive.consecutiveWrong
+    );
     const difficultyChanged = nextDiff !== adaptive.currentDifficulty;
 
     return (
@@ -447,9 +442,7 @@ export default function AdaptiveSimulation() {
   }
 
   // Finished screen
-  const accuracy = adaptive.totalAnswered > 0
-    ? Math.round((adaptive.totalCorrect / adaptive.totalAnswered) * 100)
-    : 0;
+  const accuracy = accuracyPct(adaptive.totalCorrect, adaptive.totalAnswered);
 
   const easyCount = adaptive.difficultyHistory.filter((d) => d === 'easy').length;
   const medCount = adaptive.difficultyHistory.filter((d) => d === 'medium').length;

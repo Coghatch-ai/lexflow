@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Clock, AlertCircle, Flag, CheckCircle, XCircle } from 'lucide-react';
 import { trpc } from '../shared/lib/trpc';
+import { accuracyPct } from '@shared/domain/scoring';
 
 type Status = 'setup' | 'playing' | 'review' | 'finished';
 
@@ -373,7 +374,7 @@ export default function RealExamSimulation() {
     questions.forEach((q, idx) => {
       if (answers.get(idx) === q.correct_answer) correctCount++;
     });
-    const accuracy = questions.length > 0 ? Math.round((correctCount / questions.length) * 100) : 0;
+    const accuracy = accuracyPct(correctCount, questions.length);
     const timeUsed = EXAM_DURATION - timeLeft;
 
     return (
