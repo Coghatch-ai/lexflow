@@ -91,9 +91,15 @@ Pages stay eslint-quarantined (typecheck + build clean); full max-strict hardeni
 - **Network:** shared VPC, SG `sg-0d065bb06c8c04a68`, subnets `subnet-0cc43286651b1e2d9`,
   `subnet-03602b4d349546b6b`, `subnet-0ffadc50f6a7a1f26`. **No NAT.**
 - **Secrets:** SSM Parameter Store at `/lexflow/api/{env}/*` (resolved at deploy by `template.yaml`).
-- **Stack:** `lexflow-api-prod`. Frontend bucket `lexflow-frontend-mrhewbuc` + CloudFront (no custom domain yet).
-- **Live (deployed):** API `https://8cz98sohhk.execute-api.sa-east-1.amazonaws.com/prod`;
-  frontend `https://d1qru6bxdnwd2r.cloudfront.net` (CloudFront `E31A7ZWGZ815JT`).
+- **Stack:** `lexflow-api-prod`. Frontend bucket `lexflow-frontend-mrhewbuc` + CloudFront.
+- **Domains (Cloudflare DNS):** frontend `https://my.probius.app`, API `https://api.probius.app`,
+  apex `probius.app` 301→`my.probius.app` (Cloudflare Redirect Rule). API custom domain is in
+  `template.yaml` (`ApiDomainName`/`ApiCertificateArn` params, regional cert in sa-east-1); the
+  CloudFront alias + us-east-1 cert are attached out-of-band via `infra/cloudfront-add-domain.sh`.
+  CORS is locked to `https://my.probius.app`. Setup steps: `infra/deploy-runbook.md` (Phase 2).
+- **Origins (default AWS URLs, still live):** API
+  `https://8cz98sohhk.execute-api.sa-east-1.amazonaws.com/prod`; CloudFront
+  `https://d1qru6bxdnwd2r.cloudfront.net` (distribution `E31A7ZWGZ815JT`).
 - **Repo:** `Coghatch-ai/lexflow`; OIDC role `lexflow-github-actions-role`; PROD env secrets
   `AWS_ROLE_ARN` / `CLOUDFRONT_DISTRIBUTION_ID` / `VITE_CLERK_PUBLISHABLE_KEY` / `VITE_API_URL`.
   Bootstrap script: `infra/aws-bootstrap.sh` (+ `infra/deploy-runbook.md`).

@@ -61,6 +61,12 @@
       "Resource": "arn:aws:apigateway:sa-east-1::*"
     },
     {
+      "Sid": "ACMRead",
+      "Effect": "Allow",
+      "Action": ["acm:DescribeCertificate", "acm:ListCertificates"],
+      "Resource": "*"
+    },
+    {
       "Sid": "IAMForStackRoles",
       "Effect": "Allow",
       "Action": [

@@ -17,7 +17,7 @@ import { logTrpcError } from "./trpc/log-error";
 import { handleWebhookRoutes } from "./routes/webhook-routes";
 
 const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Origin": "https://my.probius.app",
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
   "Access-Control-Allow-Headers":
     "Content-Type, Authorization, svix-id, svix-timestamp, svix-signature",

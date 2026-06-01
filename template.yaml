@@ -7,6 +7,21 @@ Parameters:
     Type: String
     Default: prod
     AllowedValues: [dev, prod]
+  ApiDomainName:
+    Type: String
+    Default: ""
+    Description: >-
+      Custom domain for the API (e.g. api.probius.app). Empty = use the default
+      execute-api URL only. When set, ApiCertificateArn is required.
+  ApiCertificateArn:
+    Type: String
+    Default: ""
+    Description: >-
+      ACM certificate ARN for ApiDomainName. MUST be in this stack's region
+      (sa-east-1) — API Gateway regional custom domains require a regional cert.
+
+Conditions:
+  HasApiDomain: !Not [!Equals [!Ref ApiDomainName, ""]]
 
 Globals:
   Function:
@@ -29,10 +44,11 @@ Resources:
     Type: AWS::Serverless::HttpApi
     Properties:
       StageName: !Ref Environment
-      # No custom domain yet — the frontend is served from the CloudFront default
-      # domain. Allow any origin; auth is via bearer token (no cookies).
+      # CORS is locked to the SPA origin. Auth is via bearer token (no cookies), so
+      # this is defense-in-depth: only the frontend origin can read API responses
+      # from a browser. The custom domain (api.probius.app) is wired below.
       CorsConfiguration:
-        AllowOrigins: ["*"]
+        AllowOrigins: ["https://my.probius.app"]
         AllowHeaders:
           - Content-Type
           - Authorization
@@ -40,6 +56,27 @@ Resources:
           - svix-timestamp
           - svix-signature
         AllowMethods: [GET, POST, PUT, DELETE, OPTIONS]
+
+  # Custom domain for the API (created only when ApiDomainName is set). The ACM cert
+  # must be regional (sa-east-1). The empty-key ApiMapping maps the domain root to the
+  # stage, so api.probius.app/{x} → ${Environment} stage /{x} (no /prod in the URL).
+  LexFlowApiDomain:
+    Type: AWS::ApiGatewayV2::DomainName
+    Condition: HasApiDomain
+    Properties:
+      DomainName: !Ref ApiDomainName
+      DomainNameConfigurations:
+        - CertificateArn: !Ref ApiCertificateArn
+          EndpointType: REGIONAL
+          SecurityPolicy: TLS_1_2
+
+  LexFlowApiMapping:
+    Type: AWS::ApiGatewayV2::ApiMapping
+    Condition: HasApiDomain
+    Properties:
+      ApiId: !Ref LexFlowHttpApi
+      DomainName: !Ref LexFlowApiDomain
+      Stage: !Ref Environment
 
   LexFlowApiFunction:
     Type: AWS::Serverless::Function
@@ -102,3 +139,11 @@ Outputs:
     Value: !Sub "https://${LexFlowHttpApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}"
   FunctionArn:
     Value: !GetAtt LexFlowApiFunction.Arn
+  ApiCustomDomainTarget:
+    Condition: HasApiDomain
+    Description: Point the api.* DNS record (CNAME, DNS-only) at this regional domain
+    Value: !GetAtt LexFlowApiDomain.RegionalDomainName
+  ApiCustomDomainHostedZoneId:
+    Condition: HasApiDomain
+    Description: Regional hosted zone id (for Route53 alias setups; unused with Cloudflare)
+    Value: !GetAtt LexFlowApiDomain.RegionalHostedZoneId

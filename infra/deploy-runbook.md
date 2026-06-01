@@ -75,6 +75,83 @@ aws cloudformation describe-stacks --region sa-east-1 --stack-name lexflow-api-p
 - Open `https://<CLOUDFRONT_DOMAIN>` → sign in with Clerk → take a standard simulation →
   the dashboard/analytics update (browser → API Gateway → Lambda → RDS, all live).
 
+## Custom domains (Phase 2) — api.probius.app + my.probius.app
+
+DNS is on **Cloudflare**. Apex `probius.app` 301-redirects to `my.probius.app` via a Cloudflare
+Redirect Rule (not AWS). The `my.` and `api.` records are **DNS-only (grey cloud)** so AWS
+terminates TLS with the ACM certs. CloudFront only reads certs from **us-east-1**; the regional
+API Gateway needs its cert in **sa-east-1**. Run AWS steps with the `dev` IAM user.
+
+1. **Request two ACM certs (DNS validation):**
+
+   ```bash
+   aws acm request-certificate --region us-east-1 --domain-name my.probius.app  --validation-method DNS
+   aws acm request-certificate --region sa-east-1 --domain-name api.probius.app --validation-method DNS
+   ```
+
+   For each, read the validation CNAME and add it in Cloudflare (DNS-only), then wait for `ISSUED`:
+
+   ```bash
+   aws acm describe-certificate --region <region> --certificate-arn <arn> \
+     --query 'Certificate.DomainValidationOptions[0].ResourceRecord'
+   aws acm describe-certificate --region <region> --certificate-arn <arn> \
+     --query 'Certificate.Status'   # ISSUED
+   ```
+
+2. **Deploy the API custom domain.** Put the **sa-east-1** cert ARN into `samconfig.toml`:
+
+   ```
+   parameter_overrides = "Environment=prod ApiDomainName=api.probius.app ApiCertificateArn=<sa-east-1 arn>"
+   ```
+
+   Merge to `main` → **Deploy API** runs → read the regional target:
+
+   ```bash
+   aws cloudformation describe-stacks --region sa-east-1 --stack-name lexflow-api-prod \
+     --query "Stacks[0].Outputs[?OutputKey=='ApiCustomDomainTarget'].OutputValue" --output text
+   ```
+
+3. **Cloudflare — `api`:** `CNAME api → <ApiCustomDomainTarget>`, **DNS-only (grey)**.
+
+4. **Attach the CloudFront alias** with the **us-east-1** cert ARN, then wait for `Deployed`:
+
+   ```bash
+   bash infra/cloudfront-add-domain.sh <us-east-1 arn>
+   aws cloudfront get-distribution --id E31A7ZWGZ815JT --query 'Distribution.Status'   # Deployed
+   ```
+
+5. **Cloudflare — `my` + apex:**
+   - `CNAME my → d1qru6bxdnwd2r.cloudfront.net`, **DNS-only (grey)**.
+   - Apex: a proxied placeholder (`A probius.app → 192.0.2.1`, orange) + a **Redirect Rule**
+     `Hostname eq probius.app` → 301 `https://my.probius.app${http.request.uri.path}` (preserve query).
+
+6. **Redeploy with the new API URL + locked CORS.** Set the GitHub PROD secret
+   `VITE_API_URL=https://api.probius.app` (no `/prod`), merge the `handler.ts` / template CORS /
+   `deploy-policy.json` changes → run **Deploy App** (rebuilds the SPA) and **Deploy API**. If
+   `deploy-policy.json` changed, re-apply the inline policy:
+
+   ```bash
+   aws iam put-role-policy --role-name lexflow-github-actions-role \
+     --policy-name lexflow-deploy-policy --policy-document file://infra/deploy-policy.json
+   ```
+
+   (The policy file uses a `DISTRIBUTION_ID_PLACEHOLDER` token that `aws-bootstrap.sh` substitutes;
+   substitute it the same way before applying, or apply the already-substituted version.)
+
+7. **Clerk (separate):** add `https://my.probius.app` to the existing Clerk instance's allowed
+   origins so sign-in works. Production-instance migration (`clerk.`/`accounts.` DNS, `pk_live_`)
+   is a later follow-up.
+
+**Verify custom domains:**
+
+```bash
+curl -i https://api.probius.app/health          # {"status":"ok"}, ACAO: https://my.probius.app
+curl -sI https://probius.app                     # 301 → https://my.probius.app/
+```
+
+Open `https://my.probius.app` → sign in → take a simulation; Network tab shows calls to
+`api.probius.app` with no CORS errors.
+
 ## Teardown (if ever needed)
 
 ```bash
