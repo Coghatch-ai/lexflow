@@ -127,7 +127,7 @@ export default function SpacedRepetition() {
   if (status === 'loading') {
     return (
       <div className="bg-white rounded-xl p-6 shadow flex items-center justify-center h-48">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#0ea5e9]" />
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#16161a]" />
       </div>
     );
   }
@@ -137,18 +137,18 @@ export default function SpacedRepetition() {
     return (
       <div className="bg-white rounded-xl p-6 shadow">
         <div className="flex items-center gap-3 mb-6">
-          <div className="bg-[#0ea5e9] p-3 rounded-lg">
+          <div className="bg-[#16161a] p-3 rounded-lg">
             <RotateCcw className="w-6 h-6 text-white" />
           </div>
           <div>
-            <h3 className="text-xl font-bold text-[#0f172a]">Revisao Espacada</h3>
+            <h3 className="text-xl font-bold text-[#16161a]">Revisao Espacada</h3>
             <p className="text-sm text-gray-600">Revise no momento certo para maximizar retencao</p>
           </div>
         </div>
 
         <div className="grid md:grid-cols-3 gap-4 mb-6">
-          <div className="bg-[#0ea5e9]/5 rounded-lg p-4 text-center">
-            <p className="text-2xl font-bold text-[#0f172a]">{stats.dueToday}</p>
+          <div className="bg-[#16161a]/5 rounded-lg p-4 text-center">
+            <p className="text-2xl font-bold text-[#16161a]">{stats.dueToday}</p>
             <p className="text-sm text-gray-600">Revisoes Hoje</p>
           </div>
           <div className="bg-green-50 rounded-lg p-4 text-center">
@@ -169,8 +169,8 @@ export default function SpacedRepetition() {
           </p>
         </div>
 
-        <div className="bg-[#0ea5e9]/5 rounded-lg p-4">
-          <h4 className="font-semibold text-[#0f172a] mb-2">Como funciona?</h4>
+        <div className="bg-[#16161a]/5 rounded-lg p-4">
+          <h4 className="font-semibold text-[#16161a] mb-2">Como funciona?</h4>
           <ul className="space-y-1 text-sm text-gray-700">
             <li>- Questoes respondidas incorretamente entram na fila de revisao</li>
             <li>- Intervalos: 1 dia, 3 dias, 7 dias, 14 dias, 30 dias</li>
@@ -189,7 +189,7 @@ export default function SpacedRepetition() {
       <div className="space-y-4">
         <div className="flex items-center justify-between bg-white rounded-xl p-4 shadow">
           <div className="flex items-center gap-3">
-            <RotateCcw className="w-5 h-5 text-[#0ea5e9]" />
+            <RotateCcw className="w-5 h-5 text-[#16161a]" />
             <span className="text-sm font-medium text-gray-700">
               Revisao {currentIndex + 1} de {reviewQuestions.length}
             </span>
@@ -219,7 +219,7 @@ export default function SpacedRepetition() {
           <button
             onClick={handleAnswer}
             disabled={!selectedAnswer}
-            className="w-full bg-gradient-to-r from-[#1e3a5f] to-[#0c4a6e] text-white py-3 rounded-lg font-semibold hover:shadow-lg transition disabled:opacity-50 flex items-center justify-center gap-2"
+            className="w-full bg-gradient-to-r from-[#26262c] to-[#26262c] text-white py-3 rounded-lg font-semibold hover:shadow-lg transition disabled:opacity-50 flex items-center justify-center gap-2"
           >
             Confirmar
             <ChevronRight className="w-5 h-5" />
@@ -245,7 +245,7 @@ export default function SpacedRepetition() {
             ) : (
               <XCircle className="w-8 h-8 text-red-600" />
             )}
-            <h3 className="text-xl font-bold text-[#0f172a]">
+            <h3 className="text-xl font-bold text-[#16161a]">
               {lastCorrect ? 'Correto!' : 'Incorreto'}
             </h3>
           </div>
@@ -262,17 +262,17 @@ export default function SpacedRepetition() {
           </div>
 
           <div className="bg-white rounded-lg p-4 flex items-center gap-3">
-            <Calendar className="w-5 h-5 text-[#0ea5e9]" />
+            <Calendar className="w-5 h-5 text-[#16161a]" />
             <div>
               <p className="text-sm text-gray-600">Proxima revisao em</p>
-              <p className="font-bold text-[#0f172a]">{nextInterval} dia{nextInterval > 1 ? 's' : ''}</p>
+              <p className="font-bold text-[#16161a]">{nextInterval} dia{nextInterval > 1 ? 's' : ''}</p>
             </div>
           </div>
         </div>
 
         <button
           onClick={handleNext}
-          className="w-full bg-gradient-to-r from-[#1e3a5f] to-[#0c4a6e] text-white py-3 rounded-lg font-semibold hover:shadow-lg transition flex items-center justify-center gap-2"
+          className="w-full bg-gradient-to-r from-[#26262c] to-[#26262c] text-white py-3 rounded-lg font-semibold hover:shadow-lg transition flex items-center justify-center gap-2"
         >
           {currentIndex + 1 >= reviewQuestions.length ? 'Concluir Revisao' : 'Proxima Revisao'}
           <ChevronRight className="w-5 h-5" />
@@ -284,7 +284,7 @@ export default function SpacedRepetition() {
   // Done
   return (
     <div className="space-y-6">
-      <div className="bg-gradient-to-r from-[#0ea5e9] to-[#0f172a] rounded-xl p-6 text-white">
+      <div className="bg-gradient-to-r from-[#16161a] to-[#16161a] rounded-xl p-6 text-white">
         <h3 className="text-2xl font-bold mb-2">Revisao Concluida!</h3>
         <p className="text-white/80">Continue revisando regularmente para maximizar retencao</p>
       </div>
@@ -295,7 +295,7 @@ export default function SpacedRepetition() {
           <p className="text-gray-600">Acertos de {sessionTotal}</p>
         </div>
         <div className="bg-white rounded-xl p-6 shadow text-center">
-          <div className="text-4xl font-bold text-[#0f172a] mb-2">
+          <div className="text-4xl font-bold text-[#16161a] mb-2">
             {accuracyPct(sessionCorrect, sessionTotal)}%
           </div>
           <p className="text-gray-600">Acuracia na Sessao</p>
@@ -306,7 +306,7 @@ export default function SpacedRepetition() {
         onClick={() => {
           setStatus('empty');
         }}
-        className="w-full bg-gradient-to-r from-[#1e3a5f] to-[#0c4a6e] text-white py-3 rounded-lg font-semibold hover:shadow-lg transition"
+        className="w-full bg-gradient-to-r from-[#26262c] to-[#26262c] text-white py-3 rounded-lg font-semibold hover:shadow-lg transition"
       >
         Recarregar Revisoes
       </button>

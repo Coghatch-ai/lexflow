@@ -70,7 +70,7 @@ export default function GoalsPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="bg-gradient-to-r from-[#0f172a] to-[#1e3a5f] rounded-xl p-6 text-white">
+      <div className="bg-gradient-to-r from-[#16161a] to-[#26262c] rounded-xl p-6 text-white">
         <h2 className="text-2xl font-bold mb-2">Suas Metas de Estudo</h2>
         <p className="text-white/80">
           Estabeleca objetivos para cada disciplina e acompanhe seu progresso
@@ -81,7 +81,7 @@ export default function GoalsPage() {
       {!showForm && (
         <button
           onClick={() => setShowForm(true)}
-          className="w-full bg-white border-2 border-dashed border-[#0ea5e9] rounded-xl p-6 hover:bg-gray-50 transition flex items-center justify-center gap-2 text-[#0ea5e9] font-semibold"
+          className="w-full bg-white border-2 border-dashed border-[#16161a] rounded-xl p-6 hover:bg-gray-50 transition flex items-center justify-center gap-2 text-[#16161a] font-semibold"
         >
           <Plus className="w-5 h-5" />
           Adicionar Nova Meta
@@ -90,8 +90,8 @@ export default function GoalsPage() {
 
       {/* Add Goal Form */}
       {showForm && (
-        <div className="bg-white rounded-xl p-6 shadow border-2 border-[#0ea5e9]">
-          <h3 className="text-lg font-bold text-[#0f172a] mb-4">
+        <div className="bg-white rounded-xl p-6 shadow border-2 border-[#16161a]">
+          <h3 className="text-lg font-bold text-[#16161a] mb-4">
             {editingId ? 'Editar Meta' : 'Nova Meta'}
           </h3>
           <div className="space-y-4">
@@ -103,7 +103,7 @@ export default function GoalsPage() {
                 value={selectedDiscipline}
                 onChange={(e) => setSelectedDiscipline(e.target.value)}
                 disabled={!!editingId}
-                className="w-full px-4 py-2 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-[#0ea5e9]"
+                className="w-full px-4 py-2 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-[#16161a]"
               >
                 <option value="">Selecione uma disciplina</option>
                 {(editingId ? disciplineLov.options : availableDisciplines).map((o) => (
@@ -136,7 +136,7 @@ export default function GoalsPage() {
             <div className="flex gap-3">
               <button
                 onClick={handleAddGoal}
-                className="flex-1 bg-gradient-to-r from-[#1e3a5f] to-[#0c4a6e] text-white py-2 rounded-lg font-semibold hover:shadow-lg transition"
+                className="flex-1 bg-gradient-to-r from-[#26262c] to-[#26262c] text-white py-2 rounded-lg font-semibold hover:shadow-lg transition"
               >
                 {editingId ? 'Atualizar' : 'Criar Meta'}
               </button>
@@ -165,11 +165,11 @@ export default function GoalsPage() {
           >
             <div className="flex items-start justify-between mb-4">
               <div className="flex items-start gap-3 flex-1">
-                <div className="bg-[#0ea5e9]/10 p-3 rounded-lg">
-                  <Target className="w-6 h-6 text-[#0ea5e9]" />
+                <div className="bg-[#16161a]/10 p-3 rounded-lg">
+                  <Target className="w-6 h-6 text-[#16161a]" />
                 </div>
                 <div className="flex-1">
-                  <h3 className="font-bold text-lg text-[#0f172a]">
+                  <h3 className="font-bold text-lg text-[#16161a]">
                     {disciplineLov.labelOf(goal.discipline)}
                   </h3>
                   <p className="text-sm text-gray-600">
@@ -203,7 +203,7 @@ export default function GoalsPage() {
             <div className="space-y-2">
               <div className="flex justify-between text-sm">
                 <span className="text-gray-600">Progresso</span>
-                <span className="font-semibold text-[#0f172a]">
+                <span className="font-semibold text-[#16161a]">
                   {goal.progress}%
                 </span>
               </div>
@@ -213,8 +213,8 @@ export default function GoalsPage() {
                     goal.progress >= 100
                       ? 'bg-green-500'
                       : goal.progress >= 70
-                        ? 'bg-[#0ea5e9]'
-                        : 'bg-[#1e3a5f]'
+                        ? 'bg-[#16161a]'
+                        : 'bg-[#26262c]'
                   }`}
                   style={{ width: `${goal.progress}%` }}
                 />

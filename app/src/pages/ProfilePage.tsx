@@ -30,10 +30,10 @@ export default function ProfilePage() {
   return (
     <div className="space-y-6">
       {/* User Info Card */}
-      <div className="bg-gradient-to-r from-[#0f172a] to-[#1e3a5f] rounded-xl p-8 text-white shadow-lg">
+      <div className="bg-gradient-to-r from-[#16161a] to-[#26262c] rounded-xl p-8 text-white shadow-lg">
         <div className="flex items-center gap-4 mb-4">
-          <div className="bg-[#0ea5e9] p-4 rounded-full">
-            <User className="w-8 h-8 text-white" />
+          <div className="bg-[#1f1f25] p-4 rounded-full ring-1 ring-white/15">
+            <User className="w-8 h-8 text-[#d9ab53]" strokeWidth={1.75} />
           </div>
           <div>
             <h2 className="text-2xl font-bold">{user?.name}</h2>
@@ -55,17 +55,17 @@ export default function ProfilePage() {
         <div className="bg-white rounded-xl p-6 shadow hover:shadow-lg transition">
           <div className="flex items-center justify-between mb-4">
             <p className="text-gray-600 text-sm font-medium">Acuracia Geral</p>
-            <TrendingUp className="w-5 h-5 text-[#0ea5e9]" />
+            <TrendingUp className="w-5 h-5 text-[#16161a]" />
           </div>
-          <p className="text-3xl font-bold text-[#0f172a]">{stats.accuracy}%</p>
+          <p className="text-3xl font-bold text-[#16161a]">{stats.accuracy}%</p>
         </div>
 
         <div className="bg-white rounded-xl p-6 shadow hover:shadow-lg transition">
           <div className="flex items-center justify-between mb-4">
             <p className="text-gray-600 text-sm font-medium">Questoes</p>
-            <BookOpen className="w-5 h-5 text-[#0ea5e9]" />
+            <BookOpen className="w-5 h-5 text-[#16161a]" />
           </div>
-          <p className="text-3xl font-bold text-[#0f172a]">
+          <p className="text-3xl font-bold text-[#16161a]">
             {stats.totalAnswered}
           </p>
           <p className="text-xs text-gray-500 mt-1">
@@ -76,9 +76,9 @@ export default function ProfilePage() {
         <div className="bg-white rounded-xl p-6 shadow hover:shadow-lg transition">
           <div className="flex items-center justify-between mb-4">
             <p className="text-gray-600 text-sm font-medium">Simulados</p>
-            <Award className="w-5 h-5 text-[#0ea5e9]" />
+            <Award className="w-5 h-5 text-[#16161a]" />
           </div>
-          <p className="text-3xl font-bold text-[#0f172a]">
+          <p className="text-3xl font-bold text-[#16161a]">
             {stats.totalSessions}
           </p>
         </div>
@@ -88,9 +88,9 @@ export default function ProfilePage() {
             <p className="text-gray-600 text-sm font-medium">
               Tempo Medio
             </p>
-            <Clock className="w-5 h-5 text-[#0ea5e9]" />
+            <Clock className="w-5 h-5 text-[#16161a]" />
           </div>
-          <p className="text-3xl font-bold text-[#0f172a]">
+          <p className="text-3xl font-bold text-[#16161a]">
             {stats.averageTimePerQuestion}s
           </p>
         </div>
@@ -100,7 +100,7 @@ export default function ProfilePage() {
       <div className="grid md:grid-cols-2 gap-6">
         {/* Top Disciplines */}
         <div className="bg-white rounded-xl p-6 shadow">
-          <h3 className="text-lg font-bold text-[#0f172a] mb-4 flex items-center gap-2">
+          <h3 className="text-lg font-bold text-[#16161a] mb-4 flex items-center gap-2">
             <TrendingUp className="w-5 h-5 text-green-600" />
             Seus Pontos Fortes
           </h3>
@@ -134,7 +134,7 @@ export default function ProfilePage() {
 
         {/* Weak Disciplines */}
         <div className="bg-white rounded-xl p-6 shadow">
-          <h3 className="text-lg font-bold text-[#0f172a] mb-4 flex items-center gap-2">
+          <h3 className="text-lg font-bold text-[#16161a] mb-4 flex items-center gap-2">
             <TrendingUp className="w-5 h-5 text-orange-600 transform -scale-y-100" />
             Areas de Melhoria
           </h3>
@@ -169,7 +169,7 @@ export default function ProfilePage() {
 
       {/* Account Info */}
       <div className="bg-white rounded-xl p-6 shadow">
-        <h3 className="text-lg font-bold text-[#0f172a] mb-4">Informacoes da Conta</h3>
+        <h3 className="text-lg font-bold text-[#16161a] mb-4">Informacoes da Conta</h3>
         <div className="space-y-3">
           <div className="flex justify-between items-center py-2 border-b border-gray-200">
             <span className="text-gray-600">Email</span>
@@ -181,7 +181,7 @@ export default function ProfilePage() {
           </div>
           <div className="flex justify-between items-center py-2">
             <span className="text-gray-600">Tipo de Conta</span>
-            <span className="font-medium text-[#0ea5e9] bg-[#0ea5e9]/10 px-3 py-1 rounded-full text-sm">
+            <span className="font-medium text-[#16161a] bg-[#16161a]/10 px-3 py-1 rounded-full text-sm">
               Usuario
             </span>
           </div>

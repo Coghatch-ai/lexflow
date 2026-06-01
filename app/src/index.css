@@ -1,25 +1,78 @@
-@import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Fraunces:wght@600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Hanken+Grotesk:wght@400;500;600;700&display=swap");
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* ---------------------------------------------------------------------------
+ * LexFlow · "Chambers"
+ * An internal study instrument for Brazilian bar-exam prep. Black is the brand:
+ * graphite-cool ink dominates, a single brass "seal" accent marks intent, and
+ * hairline rules replace heavy cards. Cool neutrals (hue ~265) — deliberately
+ * NOT the warm editorial paper of sibling apps. Pure black/white never appear.
+ * ------------------------------------------------------------------------ */
+
 :root {
-  --color-lex-dark: #0f172a;
-  --color-lex-primary: #1e3a5f;
-  --color-lex-accent: #0ea5e9;
-  --color-lex-gold: #f59e0b;
-  --color-lex-white: #ffffff;
-  --color-lex-gray-light: #f8fafc;
+  /* Ink — the brand. Cool graphite, never pure black. */
+  --ink: #16161a;
+  --ink-raised: #1f1f25;
+  --ink-line: #2c2c34; /* hairlines drawn ON dark surfaces */
+  --ink-soft: #3f3f46;
+  --ink-mute: #6b6b75;
+
+  /* Paper — cool off-white surfaces. */
+  --paper: #f4f4f6;
+  --paper-sink: #ececef;
+  --surface: #ffffff;
+  --line: #e5e5ea;
+  --line-strong: #d3d3da;
+
+  /* Seal — brass accent. Deep enough to carry on light, warm on dark. */
+  --gold: #9a7322;
+  --gold-ink: #b8893b;
+  --gold-bright: #d9ab53;
+  --gold-wash: #f6efdd;
+
+  /* Semantic — cool greens, clay reds. Used for data, not decoration. */
+  --pos: #3f7a52;
+  --pos-wash: #e9f1ea;
+  --neg: #b04638;
+  --neg-wash: #f6e9e7;
+  --warn: #b07d22;
+  --warn-wash: #f6efdd;
+
+  /* Legacy bolt tokens, remapped so any stragglers resolve on-brand. */
+  --color-lex-dark: var(--ink);
+  --color-lex-primary: var(--ink-raised);
+  --color-lex-accent: var(--gold-ink);
+  --color-lex-gold: var(--gold-ink);
+  --color-lex-white: var(--surface);
+  --color-lex-gray-light: var(--paper);
+
+  /* Fluid type scale */
+  --fs-hero: clamp(1.9rem, 1.3rem + 2.4vw, 3rem);
+  --fs-display: clamp(1.5rem, 1.2rem + 1.2vw, 2.1rem);
+  --fs-section: clamp(1.1rem, 0.98rem + 0.5vw, 1.35rem);
+
+  /* Motion */
+  --ease-out-quart: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 html {
   scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
-  font-family: "DM Sans", sans-serif;
-  background-color: var(--color-lex-gray-light);
+  font-family:
+    "Hanken Grotesk",
+    -apple-system,
+    BlinkMacSystemFont,
+    sans-serif;
+  background-color: var(--paper);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 h1,
@@ -28,32 +81,169 @@ h3,
 h4,
 h5,
 h6 {
-  font-family: "Fraunces", serif;
-  font-weight: 700;
+  font-family: "Space Grotesk", sans-serif;
+  font-weight: 600;
+  letter-spacing: -0.018em;
+  color: var(--ink);
+}
+
+/* Tabular figures everywhere a metric lives — numerals must align. */
+.tnum,
+[class*="text-3xl"],
+[class*="text-4xl"] {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+/* Crisp, branded focus — keyboard users get a gold seal, not a blurry glow. */
+*:focus-visible {
+  outline: 2px solid var(--gold-ink);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+::selection {
+  background: var(--gold-bright);
+  color: var(--ink);
+}
+
+/* Cool, slim scrollbars to match the instrument feel. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+*::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: 99px;
+  border: 2px solid var(--paper);
 }
 
 @layer components {
+  /* The eyebrow — small, tracked, uppercase label that sets a legal/clerical
+     tone and replaces the templated "icon chip above a heading". */
+  .eyebrow {
+    @apply inline-flex items-center gap-1.5 text-[0.6875rem] font-semibold uppercase tracking-[0.16em];
+    color: var(--ink-mute);
+    font-family: "Space Grotesk", sans-serif;
+  }
+
+  /* A solid ink panel — the new "hero". Flat, confident, with a seal rule. */
+  .panel-ink {
+    background-color: var(--ink);
+    color: var(--surface);
+    border-radius: 14px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* Surface card: hairline border + whisper shadow, not a floating bubble. */
+  .card-default {
+    background-color: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 1.5rem;
+    transition:
+      border-color 0.2s var(--ease-out-quart),
+      box-shadow 0.2s var(--ease-out-quart);
+  }
+  .card-default:hover {
+    border-color: var(--line-strong);
+    box-shadow: 0 8px 24px -14px rgba(16, 16, 20, 0.18);
+  }
+
   .btn-primary {
-    @apply bg-gradient-to-r from-[#1e3a5f] to-[#0c4a6e] text-white py-3 px-6 rounded-lg font-semibold hover:shadow-lg transition disabled:opacity-50;
+    background-color: var(--ink);
+    color: var(--surface);
+    @apply py-3 px-6 font-semibold transition disabled:opacity-40 disabled:cursor-not-allowed;
+    border-radius: 10px;
+    border: 1px solid var(--ink);
+  }
+  .btn-primary:hover:not(:disabled) {
+    background-color: var(--ink-raised);
   }
 
   .btn-secondary {
-    @apply bg-white text-[#1e3a5f] border-2 border-[#1e3a5f] py-3 px-6 rounded-lg font-semibold hover:bg-[#1e3a5f] hover:text-white transition;
+    background-color: transparent;
+    color: var(--ink);
+    border: 1px solid var(--line-strong);
+    @apply py-3 px-6 font-semibold transition;
+    border-radius: 10px;
+  }
+  .btn-secondary:hover {
+    background-color: var(--paper-sink);
+    border-color: var(--ink);
   }
 
-  .card-default {
-    @apply bg-white rounded-xl p-6 shadow hover:shadow-lg transition;
-  }
-
+  /* Badges read as printed stamps: tinted wash + same-hue ink text. */
   .badge-success {
-    @apply inline-block px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm font-semibold;
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-semibold;
+    background: var(--pos-wash);
+    color: var(--pos);
   }
-
   .badge-warning {
-    @apply inline-block px-3 py-1 bg-yellow-100 text-yellow-700 rounded-full text-sm font-semibold;
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-semibold;
+    background: var(--warn-wash);
+    color: var(--warn);
   }
-
   .badge-danger {
-    @apply inline-block px-3 py-1 bg-red-100 text-red-700 rounded-full text-sm font-semibold;
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-semibold;
+    background: var(--neg-wash);
+    color: var(--neg);
+  }
+  .badge-seal {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-semibold;
+    background: var(--gold-wash);
+    color: var(--gold);
+  }
+}
+
+/* One orchestrated page-load: content rises in a short stagger. */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.stagger > * {
+  animation: rise 0.5s var(--ease-out-quart) both;
+}
+.stagger > *:nth-child(1) {
+  animation-delay: 0.02s;
+}
+.stagger > *:nth-child(2) {
+  animation-delay: 0.07s;
+}
+.stagger > *:nth-child(3) {
+  animation-delay: 0.12s;
+}
+.stagger > *:nth-child(4) {
+  animation-delay: 0.17s;
+}
+.stagger > *:nth-child(5) {
+  animation-delay: 0.22s;
+}
+.stagger > *:nth-child(6) {
+  animation-delay: 0.27s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
   }
 }

@@ -141,17 +141,17 @@ export default function RealExamSimulation() {
     return (
       <div className="bg-white rounded-xl p-6 shadow">
         <div className="flex items-center gap-3 mb-6">
-          <div className="bg-[#0ea5e9] p-3 rounded-lg">
+          <div className="bg-[#16161a] p-3 rounded-lg">
             <Flag className="w-6 h-6 text-white" />
           </div>
           <div>
-            <h3 className="text-xl font-bold text-[#0f172a]">Simulado Estilo Prova Real</h3>
+            <h3 className="text-xl font-bold text-[#16161a]">Simulado Estilo Prova Real</h3>
             <p className="text-sm text-gray-600">Simule as condicoes reais do exame</p>
           </div>
         </div>
 
-        <div className="bg-[#0ea5e9]/5 rounded-lg p-4 mb-6 space-y-2">
-          <h4 className="font-semibold text-[#0f172a]">Configuracao do Simulado:</h4>
+        <div className="bg-[#16161a]/5 rounded-lg p-4 mb-6 space-y-2">
+          <h4 className="font-semibold text-[#16161a]">Configuracao do Simulado:</h4>
           <ul className="space-y-1 text-sm text-gray-700">
             <li>- {QUESTIONS_PER_EXAM} questoes (como a prova real)</li>
             <li>- 5 horas de duracao</li>
@@ -178,7 +178,7 @@ export default function RealExamSimulation() {
         <button
           onClick={startExam}
           disabled={loading}
-          className="w-full bg-gradient-to-r from-[#1e3a5f] to-[#0c4a6e] text-white py-3 rounded-lg font-semibold hover:shadow-lg transition disabled:opacity-50 flex items-center justify-center gap-2"
+          className="w-full bg-gradient-to-r from-[#26262c] to-[#26262c] text-white py-3 rounded-lg font-semibold hover:shadow-lg transition disabled:opacity-50 flex items-center justify-center gap-2"
         >
           <Flag className="w-5 h-5" />
           {loading ? 'Carregando...' : 'Iniciar Simulado Real'}
@@ -197,21 +197,21 @@ export default function RealExamSimulation() {
         <div className={`rounded-xl p-4 shadow ${isUrgent ? 'bg-red-50 border-2 border-red-300' : 'bg-white'}`}>
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2">
-              <Clock className={`w-5 h-5 ${isUrgent ? 'text-red-600 animate-pulse' : 'text-[#0f172a]'}`} />
-              <span className={`text-lg font-bold ${isUrgent ? 'text-red-600' : 'text-[#0f172a]'}`}>
+              <Clock className={`w-5 h-5 ${isUrgent ? 'text-red-600 animate-pulse' : 'text-[#16161a]'}`} />
+              <span className={`text-lg font-bold ${isUrgent ? 'text-red-600' : 'text-[#16161a]'}`}>
                 {formatTime(timeLeft)}
               </span>
             </div>
             <div className="flex items-center gap-4 text-sm text-gray-600">
               <span>{answeredCount}/{questions.length} respondidas</span>
               {flaggedCount > 0 && (
-                <span className="text-[#0ea5e9] font-medium">{flaggedCount} sinalizadas</span>
+                <span className="text-[#16161a] font-medium">{flaggedCount} sinalizadas</span>
               )}
             </div>
           </div>
           <div className="w-full bg-gray-200 rounded-full h-2">
             <div
-              className={`h-2 rounded-full transition-all ${isUrgent ? 'bg-red-500' : 'bg-[#0ea5e9]'}`}
+              className={`h-2 rounded-full transition-all ${isUrgent ? 'bg-red-500' : 'bg-[#16161a]'}`}
               style={{ width: `${timePercentage}%` }}
             />
           </div>
@@ -219,13 +219,13 @@ export default function RealExamSimulation() {
 
         <div className="bg-white rounded-xl p-4 shadow">
           <div className="flex items-center justify-between mb-3">
-            <span className="font-bold text-[#0f172a]">Questao {currentIndex + 1}</span>
+            <span className="font-bold text-[#16161a]">Questao {currentIndex + 1}</span>
             <div className="flex gap-2">
               <button
                 onClick={toggleFlag}
                 className={`p-2 rounded-lg transition ${
                   flagged.has(currentIndex)
-                    ? 'bg-[#0ea5e9] text-white'
+                    ? 'bg-[#16161a] text-white'
                     : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                 }`}
                 title="Sinalizar para revisao"
@@ -234,7 +234,7 @@ export default function RealExamSimulation() {
               </button>
               <button
                 onClick={() => setShowConfirmSubmit(true)}
-                className="px-4 py-2 bg-[#0f172a] text-white rounded-lg text-sm font-semibold hover:bg-[#1e3a5f] transition"
+                className="px-4 py-2 bg-[#16161a] text-white rounded-lg text-sm font-semibold hover:bg-[#26262c] transition"
               >
                 Encerrar
               </button>
@@ -280,11 +280,11 @@ export default function RealExamSimulation() {
                 onClick={() => setCurrentIndex(idx)}
                 className={`w-full aspect-square rounded text-xs font-medium transition ${
                   idx === currentIndex
-                    ? 'bg-[#0f172a] text-white'
+                    ? 'bg-[#16161a] text-white'
                     : flagged.has(idx)
-                      ? 'bg-[#0ea5e9] text-white'
+                      ? 'bg-[#16161a] text-white'
                       : answers.has(idx)
-                        ? 'bg-[#1e3a5f] text-white'
+                        ? 'bg-[#26262c] text-white'
                         : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                 }`}
               >
@@ -294,11 +294,11 @@ export default function RealExamSimulation() {
           </div>
           <div className="flex items-center gap-4 mt-3 text-xs text-gray-500">
             <div className="flex items-center gap-1">
-              <div className="w-3 h-3 rounded bg-[#1e3a5f]" />
+              <div className="w-3 h-3 rounded bg-[#26262c]" />
               <span>Respondida</span>
             </div>
             <div className="flex items-center gap-1">
-              <div className="w-3 h-3 rounded bg-[#0ea5e9]" />
+              <div className="w-3 h-3 rounded bg-[#16161a]" />
               <span>Sinalizada</span>
             </div>
             <div className="flex items-center gap-1">
@@ -311,7 +311,7 @@ export default function RealExamSimulation() {
         {showConfirmSubmit && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-xl p-6 max-w-md w-full shadow-2xl">
-              <h3 className="text-xl font-bold text-[#0f172a] mb-4">Encerrar Simulado?</h3>
+              <h3 className="text-xl font-bold text-[#16161a] mb-4">Encerrar Simulado?</h3>
               <p className="text-gray-600 mb-2">
                 Voce respondeu <span className="font-bold">{answeredCount}</span> de {questions.length} questoes.
               </p>
@@ -332,7 +332,7 @@ export default function RealExamSimulation() {
                     setShowConfirmSubmit(false);
                     handleSubmit();
                   }}
-                  className="flex-1 bg-[#0f172a] text-white py-2 rounded-lg font-semibold hover:bg-[#1e3a5f] transition"
+                  className="flex-1 bg-[#16161a] text-white py-2 rounded-lg font-semibold hover:bg-[#26262c] transition"
                 >
                   Encerrar
                 </button>
@@ -355,14 +355,14 @@ export default function RealExamSimulation() {
 
     return (
       <div className="space-y-6">
-        <div className="bg-gradient-to-r from-[#0ea5e9] to-[#0f172a] rounded-xl p-6 text-white">
+        <div className="bg-gradient-to-r from-[#16161a] to-[#16161a] rounded-xl p-6 text-white">
           <h3 className="text-2xl font-bold mb-2">Simulado Finalizado!</h3>
           <p className="text-white/80">Veja como foi seu desempenho</p>
         </div>
 
         <div className="grid md:grid-cols-4 gap-4">
           <div className="bg-white rounded-xl p-6 shadow text-center">
-            <div className="text-4xl font-bold text-[#0f172a] mb-2">{accuracy}%</div>
+            <div className="text-4xl font-bold text-[#16161a] mb-2">{accuracy}%</div>
             <p className="text-gray-600">Acuracia</p>
           </div>
           <div className="bg-white rounded-xl p-6 shadow text-center">
@@ -380,13 +380,13 @@ export default function RealExamSimulation() {
             <p className="text-gray-600">Erros</p>
           </div>
           <div className="bg-white rounded-xl p-6 shadow text-center">
-            <div className="text-4xl font-bold text-[#0ea5e9] mb-2">{formatTime(timeUsed)}</div>
+            <div className="text-4xl font-bold text-[#16161a] mb-2">{formatTime(timeUsed)}</div>
             <p className="text-gray-600">Tempo Usado</p>
           </div>
         </div>
 
         <div className="bg-white rounded-xl p-6 shadow">
-          <h4 className="text-lg font-bold text-[#0f172a] mb-4">Revisao por Questao</h4>
+          <h4 className="text-lg font-bold text-[#16161a] mb-4">Revisao por Questao</h4>
           <div className="space-y-2 max-h-[500px] overflow-y-auto">
             {questions.map((q, idx) => {
               const userAnswer = answers.get(idx);
@@ -429,7 +429,7 @@ export default function RealExamSimulation() {
             setAnswers(new Map());
             setFlagged(new Set());
           }}
-          className="w-full bg-gradient-to-r from-[#1e3a5f] to-[#0c4a6e] text-white py-3 rounded-lg font-semibold hover:shadow-lg transition"
+          className="w-full bg-gradient-to-r from-[#26262c] to-[#26262c] text-white py-3 rounded-lg font-semibold hover:shadow-lg transition"
         >
           Fazer Outro Simulado Real
         </button>

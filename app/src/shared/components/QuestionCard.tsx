@@ -29,7 +29,7 @@ export default function QuestionCard({
           <span className="font-medium">{disciplineLabel}</span> -{" "}
           <span className="font-medium">{examBoardLabel}</span>
         </p>
-        <h3 className="text-lg font-semibold text-[#0f172a]">{questionText}</h3>
+        <h3 className="text-lg font-semibold text-[#16161a]">{questionText}</h3>
       </div>
 
       <div className="space-y-3 mb-6">
@@ -41,14 +41,14 @@ export default function QuestionCard({
             }}
             className={`w-full text-left p-4 border-2 rounded-lg transition ${
               selectedAnswer === option
-                ? "border-[#0ea5e9] bg-[#0ea5e9]/5"
-                : "border-gray-200 hover:border-[#0ea5e9]/50"
+                ? "border-[#16161a] bg-[#16161a]/5"
+                : "border-gray-200 hover:border-[#16161a]/50"
             }`}
           >
             <div className="flex items-start gap-3">
               <div
                 className={`w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 mt-0.5 ${
-                  selectedAnswer === option ? "border-[#0ea5e9] bg-[#0ea5e9]" : "border-gray-300"
+                  selectedAnswer === option ? "border-[#16161a] bg-[#16161a]" : "border-gray-300"
                 }`}
               >
                 {selectedAnswer === option && <div className="w-2 h-2 bg-white rounded-full" />}

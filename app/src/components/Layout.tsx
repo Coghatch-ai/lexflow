@@ -21,15 +21,11 @@ interface LayoutProps {
 type Page = 'home' | 'testing' | 'analytics' | 'goals' | 'profile';
 
 const navItems: Array<{ id: Page; label: string; icon: React.ReactNode }> = [
-  { id: 'home', label: 'Inicio', icon: <Home className="w-5 h-5" /> },
-  { id: 'testing', label: 'Simulados', icon: <BookOpen className="w-5 h-5" /> },
-  {
-    id: 'analytics',
-    label: 'Analytics',
-    icon: <BarChart3 className="w-5 h-5" />,
-  },
-  { id: 'goals', label: 'Metas', icon: <Target className="w-5 h-5" /> },
-  { id: 'profile', label: 'Perfil', icon: <User className="w-5 h-5" /> },
+  { id: 'home', label: 'Inicio', icon: <Home className="w-[18px] h-[18px]" /> },
+  { id: 'testing', label: 'Simulados', icon: <BookOpen className="w-[18px] h-[18px]" /> },
+  { id: 'analytics', label: 'Analytics', icon: <BarChart3 className="w-[18px] h-[18px]" /> },
+  { id: 'goals', label: 'Metas', icon: <Target className="w-[18px] h-[18px]" /> },
+  { id: 'profile', label: 'Perfil', icon: <User className="w-[18px] h-[18px]" /> },
 ];
 
 export default function Layout({
@@ -40,110 +36,132 @@ export default function Layout({
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { user, signOut } = useSession();
 
-  const handleLogout = () => {
-    signOut();
-  };
+  const initials = (user?.name ?? 'LexFlow')
+    .split(' ')
+    .slice(0, 2)
+    .map((p) => p.charAt(0))
+    .join('')
+    .toUpperCase();
 
   return (
-    <div className="flex h-screen bg-[#F8FAFC]">
+    <div className="flex h-screen bg-paper">
       {/* Sidebar */}
-      <div
-        className={`fixed inset-y-0 left-0 z-50 w-64 bg-gradient-to-b from-[#0f172a] to-[#1e3a5f] transform transition-transform duration-300 ease-in-out md:relative md:translate-x-0 ${
+      <aside
+        className={`fixed inset-y-0 left-0 z-50 w-[16.5rem] bg-ink transform transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] md:relative md:translate-x-0 ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
         <div className="flex flex-col h-full">
-          {/* Logo */}
-          <div className="p-6 border-b border-[#0ea5e9]/20">
-            <div className="flex items-center gap-3">
-              <div className="bg-[#0ea5e9] p-2 rounded-lg">
-                <Scale className="w-6 h-6 text-white" />
-              </div>
-              <div>
-                <h1 className="text-xl font-bold text-white">LexFlow</h1>
-                <p className="text-xs text-[#0ea5e9]">Seu caminho para aprovacao</p>
-              </div>
+          {/* Wordmark */}
+          <div className="px-6 pt-7 pb-6">
+            <div className="flex items-center gap-2.5">
+              <Scale className="w-5 h-5 text-seal-bright" strokeWidth={1.75} />
+              <span className="font-display text-lg font-bold tracking-tightish text-surface">
+                Lex<span className="text-seal-bright">Flow</span>
+              </span>
             </div>
+            <p className="mt-2 text-[0.7rem] leading-relaxed text-ink-mute">
+              Preparatório · Exame de Ordem
+            </p>
           </div>
 
+          <div className="mx-6 h-px bg-[var(--ink-line)]" />
+
           {/* Navigation */}
-          <nav className="flex-1 overflow-y-auto px-4 py-6 space-y-2">
-            {navItems.map((item) => (
-              <button
-                key={item.id}
-                onClick={() => {
-                  onPageChange(item.id);
-                  setSidebarOpen(false);
-                }}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${
-                  currentPage === item.id
-                    ? 'bg-[#0ea5e9] text-white font-semibold'
-                    : 'text-white hover:bg-[#1e3a5f] text-opacity-80'
-                }`}
-              >
-                {item.icon}
-                <span>{item.label}</span>
-              </button>
-            ))}
+          <nav className="flex-1 overflow-y-auto px-3 py-5 space-y-0.5">
+            <p className="px-3 pb-2 eyebrow">Navegação</p>
+            {navItems.map((item) => {
+              const active = currentPage === item.id;
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => {
+                    onPageChange(item.id);
+                    setSidebarOpen(false);
+                  }}
+                  aria-current={active ? 'page' : undefined}
+                  className={`group relative w-full flex items-center gap-3 rounded-lg pl-4 pr-3 py-2.5 text-sm transition-colors ${
+                    active
+                      ? 'bg-[var(--ink-raised)] text-surface font-semibold'
+                      : 'text-[var(--ink-mute)] hover:text-surface hover:bg-white/[0.05] font-medium'
+                  }`}
+                >
+                  <span
+                    className={`absolute left-0 top-1/2 -translate-y-1/2 h-5 w-[3px] rounded-full bg-seal-bright transition-opacity ${
+                      active ? 'opacity-100' : 'opacity-0'
+                    }`}
+                  />
+                  <span className={active ? 'text-seal-bright' : ''}>{item.icon}</span>
+                  <span>{item.label}</span>
+                </button>
+              );
+            })}
           </nav>
 
-          {/* User Info & Logout */}
-          <div className="p-4 border-t border-[#0ea5e9]/20 space-y-3">
-            <div className="px-4 py-3 bg-[#1e3a5f] rounded-lg">
-              <p className="text-xs text-[#0ea5e9] font-medium">Conectado como</p>
-              <p className="text-sm text-white font-semibold truncate">
-                {user?.name}
-              </p>
-              <p className="text-xs text-white/70 truncate">{user?.email}</p>
+          {/* User + logout */}
+          <div className="px-3 pb-5">
+            <div className="mx-1 mb-3 h-px bg-[var(--ink-line)]" />
+            <div className="flex items-center gap-3 rounded-lg px-3 py-2.5">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-[var(--ink-raised)] font-display text-xs font-bold text-seal-bright ring-1 ring-[var(--ink-line)]">
+                {initials}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-semibold text-surface">{user?.name}</p>
+                <p className="truncate text-[0.7rem] text-ink-mute">{user?.email}</p>
+              </div>
             </div>
             <button
-              onClick={handleLogout}
-              className="w-full flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white py-2 rounded-lg font-medium transition"
+              onClick={() => signOut()}
+              className="mt-1 flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-ink-mute transition-colors hover:bg-[#b04638]/20 hover:text-[#e9a59c]"
             >
-              <LogOut className="w-4 h-4" />
+              <LogOut className="w-[18px] h-[18px]" />
               Sair
             </button>
           </div>
         </div>
 
-        {/* Close button for mobile */}
+        {/* Close (mobile) */}
         <button
           onClick={() => setSidebarOpen(false)}
-          className="absolute top-4 right-4 md:hidden text-white hover:bg-[#1e3a5f] p-2 rounded-lg"
+          aria-label="Fechar menu"
+          className="absolute top-5 right-4 md:hidden text-ink-mute hover:text-surface p-1.5 rounded-md"
         >
-          <X className="w-6 h-6" />
+          <X className="w-5 h-5" />
         </button>
-      </div>
+      </aside>
 
-      {/* Main Content */}
+      {/* Main column */}
       <div className="flex-1 overflow-auto">
         {/* Header */}
-        <div className="bg-white border-b border-gray-200 p-4 md:p-6 sticky top-0 z-40">
-          <div className="flex items-center justify-between">
+        <header className="sticky top-0 z-40 border-b border-line bg-surface/85 backdrop-blur-md">
+          <div className="flex items-center gap-3 px-4 md:px-8 h-16">
             <button
               onClick={() => setSidebarOpen(true)}
-              className="md:hidden p-2 hover:bg-gray-100 rounded-lg"
+              aria-label="Abrir menu"
+              className="md:hidden -ml-1 p-2 rounded-md text-ink-soft hover:bg-paper-sink"
             >
-              <Menu className="w-6 h-6 text-gray-700" />
+              <Menu className="w-5 h-5" />
             </button>
-            <h2 className="text-2xl font-bold text-[#0f172a]">
-              {navItems.find((item) => item.id === currentPage)?.label}
-            </h2>
-            <div className="w-10"></div>
+            <div className="min-w-0">
+              <p className="eyebrow leading-none">LexFlow</p>
+              <h2 className="mt-1 font-display text-lg md:text-xl font-bold leading-none">
+                {navItems.find((item) => item.id === currentPage)?.label}
+              </h2>
+            </div>
           </div>
-        </div>
+        </header>
 
-        {/* Page Content */}
-        <div className="p-4 md:p-6 max-w-7xl mx-auto">{children}</div>
+        {/* Page content */}
+        <div className="px-4 md:px-8 py-6 md:py-8 max-w-[78rem] mx-auto">{children}</div>
 
-        {/* Footer */}
-        <footer className="text-center text-xs text-gray-400 py-6">
+        <footer className="px-8 pb-8 pt-2 text-xs text-ink-mute">
+          <span className="inline-block h-1 w-1 rounded-full bg-seal align-middle mr-2" />
           Powered by{' '}
           <a
             href="https://mrhewbuc.com"
             target="_blank"
             rel="noopener noreferrer"
-            className="font-medium text-gray-500 hover:text-[#0ea5e9]"
+            className="font-medium text-ink-soft underline-offset-2 hover:underline hover:text-ink"
           >
             Mr. Hewbuc
           </a>
@@ -152,8 +170,9 @@ export default function Layout({
 
       {/* Mobile overlay */}
       {sidebarOpen && (
-        <div
-          className="fixed inset-0 bg-black/50 md:hidden z-40"
+        <button
+          aria-label="Fechar menu"
+          className="fixed inset-0 bg-ink/50 md:hidden z-40 cursor-default"
           onClick={() => setSidebarOpen(false)}
         />
       )}

@@ -79,7 +79,7 @@ export default function TestingPage() {
   if (!mode) {
     return (
       <div className="space-y-6">
-        <div className="bg-gradient-to-r from-[#0f172a] to-[#1e3a5f] rounded-xl p-6 text-white">
+        <div className="bg-gradient-to-r from-[#16161a] to-[#26262c] rounded-xl p-6 text-white">
           <h3 className="text-xl font-bold mb-2">Escolha o Modo de Estudo</h3>
           <p className="text-white/80">
             Selecione o tipo de simulado que melhor atende suas necessidades
@@ -90,12 +90,12 @@ export default function TestingPage() {
           {/* Standard */}
           <button
             onClick={() => setMode('standard')}
-            className="bg-white rounded-xl p-6 shadow hover:shadow-lg transition text-left border-2 border-transparent hover:border-[#0ea5e9]"
+            className="bg-white rounded-xl p-6 shadow hover:shadow-lg transition text-left border-2 border-transparent hover:border-[#16161a]"
           >
-            <div className="bg-[#1e3a5f] p-3 rounded-lg w-fit mb-4">
+            <div className="bg-[#26262c] p-3 rounded-lg w-fit mb-4">
               <BookOpen className="w-6 h-6 text-white" />
             </div>
-            <h4 className="text-lg font-bold text-[#0f172a] mb-2">Simulado Padrao</h4>
+            <h4 className="text-lg font-bold text-[#16161a] mb-2">Simulado Padrao</h4>
             <p className="text-sm text-gray-600">
               10 questoes com filtros por disciplina, banca e dificuldade. Feedback imediato.
             </p>
@@ -104,31 +104,31 @@ export default function TestingPage() {
           {/* Adaptive */}
           <button
             onClick={() => setMode('adaptive')}
-            className="bg-white rounded-xl p-6 shadow hover:shadow-lg transition text-left border-2 border-transparent hover:border-[#0ea5e9]"
+            className="bg-white rounded-xl p-6 shadow hover:shadow-lg transition text-left border-2 border-transparent hover:border-[#16161a]"
           >
-            <div className="bg-[#0ea5e9] p-3 rounded-lg w-fit mb-4">
+            <div className="bg-[#16161a] p-3 rounded-lg w-fit mb-4">
               <span className="text-white text-xl font-bold">A</span>
             </div>
-            <h4 className="text-lg font-bold text-[#0f172a] mb-2">Simulado Adaptativo</h4>
+            <h4 className="text-lg font-bold text-[#16161a] mb-2">Simulado Adaptativo</h4>
             <p className="text-sm text-gray-600">
               Dificuldade ajusta automaticamente conforme seu desempenho em tempo real.
             </p>
-            <span className="inline-block mt-2 text-xs font-bold text-[#0ea5e9] bg-[#0ea5e9]/10 px-2 py-1 rounded">INTELIGENTE</span>
+            <span className="inline-block mt-2 text-xs font-bold text-[#16161a] bg-[#16161a]/10 px-2 py-1 rounded">INTELIGENTE</span>
           </button>
 
           {/* Spaced Repetition */}
           <button
             onClick={() => setMode('spaced')}
-            className="bg-white rounded-xl p-6 shadow hover:shadow-lg transition text-left border-2 border-transparent hover:border-[#0ea5e9]"
+            className="bg-white rounded-xl p-6 shadow hover:shadow-lg transition text-left border-2 border-transparent hover:border-[#16161a]"
           >
-            <div className="bg-[#1e3a5f] p-3 rounded-lg w-fit mb-4">
+            <div className="bg-[#26262c] p-3 rounded-lg w-fit mb-4">
               <span className="text-white text-xl font-bold">R</span>
             </div>
-            <h4 className="text-lg font-bold text-[#0f172a] mb-2">Revisao Espacada</h4>
+            <h4 className="text-lg font-bold text-[#16161a] mb-2">Revisao Espacada</h4>
             <p className="text-sm text-gray-600">
               Revise questoes nos intervalos ideais para maximizar retencao a longo prazo.
             </p>
-            <span className="inline-block mt-2 text-xs font-bold text-[#1e3a5f] bg-[#1e3a5f]/10 px-2 py-1 rounded">RETENCAO</span>
+            <span className="inline-block mt-2 text-xs font-bold text-[#26262c] bg-[#26262c]/10 px-2 py-1 rounded">RETENCAO</span>
           </button>
 
           {/* Real Exam */}
@@ -139,7 +139,7 @@ export default function TestingPage() {
             <div className="bg-red-600 p-3 rounded-lg w-fit mb-4">
               <span className="text-white text-xl font-bold">P</span>
             </div>
-            <h4 className="text-lg font-bold text-[#0f172a] mb-2">Simulado Prova Real</h4>
+            <h4 className="text-lg font-bold text-[#16161a] mb-2">Simulado Prova Real</h4>
             <p className="text-sm text-gray-600">
               80 questoes, 5 horas, sem feedback. Simule as condicoes reais do exame.
             </p>
@@ -229,13 +229,13 @@ export default function TestingPage() {
         <div className="flex items-center gap-3 mb-2">
           <button
             onClick={() => setMode(null)}
-            className="text-sm text-[#0ea5e9] hover:text-[#1e3a5f] font-medium transition"
+            className="text-sm text-[#16161a] hover:text-[#26262c] font-medium transition"
           >
             Voltar aos modos
           </button>
         </div>
 
-        <div className="bg-gradient-to-r from-[#0f172a] to-[#1e3a5f] rounded-xl p-6 text-white">
+        <div className="bg-gradient-to-r from-[#16161a] to-[#26262c] rounded-xl p-6 text-white">
           <h3 className="text-xl font-bold mb-2">Simulado Padrao</h3>
           <p className="text-white/80">
             Configure os filtros e comece a resolver questoes reais de provas anteriores.
@@ -248,7 +248,7 @@ export default function TestingPage() {
             <select
               value={discipline}
               onChange={(e) => setDiscipline(e.target.value)}
-              className="w-full px-4 py-2 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-[#0ea5e9]"
+              className="w-full px-4 py-2 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-[#16161a]"
             >
               <option value="">Todas</option>
               {disciplineLov.options.map((o) => (
@@ -262,7 +262,7 @@ export default function TestingPage() {
             <select
               value={examBoard}
               onChange={(e) => setExamBoard(e.target.value)}
-              className="w-full px-4 py-2 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-[#0ea5e9]"
+              className="w-full px-4 py-2 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-[#16161a]"
             >
               <option value="">Todas</option>
               {examBoardLov.options.map((o) => (
@@ -276,7 +276,7 @@ export default function TestingPage() {
             <select
               value={difficulty}
               onChange={(e) => setDifficulty(e.target.value)}
-              className="w-full px-4 py-2 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-[#0ea5e9]"
+              className="w-full px-4 py-2 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-[#16161a]"
             >
               <option value="">Todas</option>
               {difficultyLov.options.map((o) => (
@@ -289,7 +289,7 @@ export default function TestingPage() {
         <button
           onClick={loadQuestions}
           disabled={loading}
-          className="w-full bg-gradient-to-r from-[#1e3a5f] to-[#0c4a6e] text-white py-3 rounded-lg font-semibold hover:shadow-lg transition disabled:opacity-50 flex items-center justify-center gap-2"
+          className="w-full bg-gradient-to-r from-[#26262c] to-[#26262c] text-white py-3 rounded-lg font-semibold hover:shadow-lg transition disabled:opacity-50 flex items-center justify-center gap-2"
         >
           <BookOpen className="w-5 h-5" />
           {loading ? 'Carregando...' : 'Comecar Simulado'}
@@ -308,7 +308,7 @@ export default function TestingPage() {
               setMode(null);
               setStatus('not-started');
             }}
-            className="text-sm text-[#0ea5e9] hover:text-[#1e3a5f] font-medium transition"
+            className="text-sm text-[#16161a] hover:text-[#26262c] font-medium transition"
           >
             Voltar aos modos
           </button>
@@ -326,7 +326,7 @@ export default function TestingPage() {
           </div>
           <div className="w-full bg-gray-200 rounded-full h-2">
             <div
-              className="bg-gradient-to-r from-[#0ea5e9] to-[#1e3a5f] h-2 rounded-full transition-all"
+              className="bg-gradient-to-r from-[#16161a] to-[#26262c] h-2 rounded-full transition-all"
               style={{ width: `${progress}%` }}
             />
           </div>
@@ -345,7 +345,7 @@ export default function TestingPage() {
           <button
             onClick={handleNext}
             disabled={!selectedAnswer}
-            className="w-full bg-gradient-to-r from-[#1e3a5f] to-[#0c4a6e] text-white py-3 rounded-lg font-semibold hover:shadow-lg transition disabled:opacity-50 flex items-center justify-center gap-2"
+            className="w-full bg-gradient-to-r from-[#26262c] to-[#26262c] text-white py-3 rounded-lg font-semibold hover:shadow-lg transition disabled:opacity-50 flex items-center justify-center gap-2"
           >
             {currentIndex + 1 === questions.length ? 'Finalizar' : 'Proxima'}
             <ChevronRight className="w-5 h-5" />
@@ -358,14 +358,14 @@ export default function TestingPage() {
   // Completed state
   return (
     <div className="space-y-6">
-      <div className="bg-gradient-to-r from-[#0ea5e9] to-[#0f172a] rounded-xl p-6 text-white">
+      <div className="bg-gradient-to-r from-[#16161a] to-[#16161a] rounded-xl p-6 text-white">
         <h3 className="text-2xl font-bold mb-2">Simulado Finalizado!</h3>
         <p className="text-white/80">Seus resultados foram salvos com sucesso.</p>
       </div>
 
       <div className="grid md:grid-cols-3 gap-4">
         <div className="bg-white rounded-xl p-6 shadow text-center">
-          <div className="text-4xl font-bold text-[#0f172a] mb-2">{accuracy}%</div>
+          <div className="text-4xl font-bold text-[#16161a] mb-2">{accuracy}%</div>
           <p className="text-gray-600">Acuracia</p>
         </div>
         <div className="bg-white rounded-xl p-6 shadow text-center">
@@ -385,7 +385,7 @@ export default function TestingPage() {
       </div>
 
       <div className="bg-white rounded-xl p-6 shadow">
-        <h4 className="text-lg font-bold text-[#0f172a] mb-4">Resumo das Questoes</h4>
+        <h4 className="text-lg font-bold text-[#16161a] mb-4">Resumo das Questoes</h4>
         <div className="space-y-2 max-h-96 overflow-y-auto">
           {questions.map((q, idx) => {
             const answer = answers[idx];
@@ -425,7 +425,7 @@ export default function TestingPage() {
         </button>
         <button
           onClick={() => setStatus('not-started')}
-          className="flex-1 bg-gradient-to-r from-[#1e3a5f] to-[#0c4a6e] text-white py-3 rounded-lg font-semibold hover:shadow-lg transition"
+          className="flex-1 bg-gradient-to-r from-[#26262c] to-[#26262c] text-white py-3 rounded-lg font-semibold hover:shadow-lg transition"
         >
           Refazer Simulado
         </button>

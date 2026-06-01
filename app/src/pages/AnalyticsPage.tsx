@@ -63,12 +63,12 @@ export default function AnalyticsPage() {
     total: e.totalAnswered,
   }));
 
-  const COLORS = ['#0f172a', '#1e3a5f', '#0ea5e9', '#0c4a6e', '#38bdf8'];
+  const COLORS = ['#16161a', '#b8893b', '#3f7a52', '#6b6b75', '#d9ab53'];
 
   return (
     <div className="space-y-6">
       <div className="bg-white rounded-xl p-6 shadow">
-        <h2 className="text-2xl font-bold text-[#0f172a] mb-2">
+        <h2 className="text-2xl font-bold text-[#16161a] mb-2">
           Analise Detalhada de Desempenho
         </h2>
         <p className="text-gray-600">
@@ -78,35 +78,35 @@ export default function AnalyticsPage() {
 
       {sessionData.length > 0 && (
         <div className="bg-white rounded-xl p-6 shadow">
-          <h3 className="text-lg font-bold text-[#0f172a] mb-4">
+          <h3 className="text-lg font-bold text-[#16161a] mb-4">
             Tendencia de Acuracia (Ultimos Simulados)
           </h3>
           <ResponsiveContainer width="100%" height={300}>
             <LineChart data={sessionData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#e5e5ea" />
               <XAxis
                 dataKey="date"
-                stroke="#666"
+                stroke="#6b6b75"
                 tick={{ fontSize: 12 }}
                 angle={-45}
                 textAnchor="end"
                 height={80}
               />
-              <YAxis stroke="#666" tick={{ fontSize: 12 }} />
+              <YAxis stroke="#6b6b75" tick={{ fontSize: 12 }} />
               <Tooltip
                 formatter={(value: number) => `${value}%`}
                 contentStyle={{
                   backgroundColor: '#fff',
-                  border: '2px solid #0f172a',
+                  border: '1px solid #d3d3da',
                   borderRadius: '8px',
                 }}
               />
               <Line
                 type="monotone"
                 dataKey="accuracy"
-                stroke="#0ea5e9"
-                strokeWidth={2}
-                dot={{ fill: '#0ea5e9', r: 4 }}
+                stroke="#b8893b"
+                strokeWidth={2.5}
+                dot={{ fill: '#b8893b', r: 3 }}
                 activeDot={{ r: 6 }}
               />
             </LineChart>
@@ -117,30 +117,30 @@ export default function AnalyticsPage() {
       <div className="grid lg:grid-cols-2 gap-6">
         {disciplineData.length > 0 && (
           <div className="bg-white rounded-xl p-6 shadow">
-            <h3 className="text-lg font-bold text-[#0f172a] mb-4">
+            <h3 className="text-lg font-bold text-[#16161a] mb-4">
               Acuracia por Disciplina
             </h3>
             <ResponsiveContainer width="100%" height={300}>
               <BarChart data={disciplineData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
+                <CartesianGrid strokeDasharray="3 3" stroke="#e5e5ea" />
                 <XAxis
                   dataKey="discipline"
-                  stroke="#666"
+                  stroke="#6b6b75"
                   tick={{ fontSize: 11 }}
                   angle={-45}
                   textAnchor="end"
                   height={100}
                 />
-                <YAxis stroke="#666" tick={{ fontSize: 12 }} />
+                <YAxis stroke="#6b6b75" tick={{ fontSize: 12 }} />
                 <Tooltip
                   formatter={(value: number) => `${value}%`}
                   contentStyle={{
                     backgroundColor: '#fff',
-                    border: '2px solid #0f172a',
+                    border: '1px solid #d3d3da',
                     borderRadius: '8px',
                   }}
                 />
-                <Bar dataKey="accuracy" fill="#0ea5e9" radius={[8, 8, 0, 0]} />
+                <Bar dataKey="accuracy" fill="#16161a" radius={[8, 8, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -148,7 +148,7 @@ export default function AnalyticsPage() {
 
         {examBoardData.length > 0 && (
           <div className="bg-white rounded-xl p-6 shadow">
-            <h3 className="text-lg font-bold text-[#0f172a] mb-4">
+            <h3 className="text-lg font-bold text-[#16161a] mb-4">
               Desempenho por Banca
             </h3>
             <ResponsiveContainer width="100%" height={300}>
@@ -160,7 +160,7 @@ export default function AnalyticsPage() {
                   labelLine={true}
                   label={(entry: ExamBoardData) => `${entry.name}: ${entry.value}%`}
                   outerRadius={80}
-                  fill="#8884d8"
+                  fill="#16161a"
                   dataKey="value"
                 >
                   {examBoardData.map((_entry, index: number) => (
@@ -171,7 +171,7 @@ export default function AnalyticsPage() {
                   formatter={(value: number) => `${value}%`}
                   contentStyle={{
                     backgroundColor: '#fff',
-                    border: '2px solid #0f172a',
+                    border: '1px solid #d3d3da',
                     borderRadius: '8px',
                   }}
                 />
@@ -182,23 +182,23 @@ export default function AnalyticsPage() {
       </div>
 
       <div className="bg-white rounded-xl p-6 shadow">
-        <h3 className="text-lg font-bold text-[#0f172a] mb-4">
+        <h3 className="text-lg font-bold text-[#16161a] mb-4">
           Detalhes por Disciplina
         </h3>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b-2 border-gray-200">
-                <th className="text-left py-3 px-4 font-semibold text-[#0f172a]">
+                <th className="text-left py-3 px-4 font-semibold text-[#16161a]">
                   Disciplina
                 </th>
-                <th className="text-center py-3 px-4 font-semibold text-[#0f172a]">
+                <th className="text-center py-3 px-4 font-semibold text-[#16161a]">
                   Acuracia
                 </th>
-                <th className="text-center py-3 px-4 font-semibold text-[#0f172a]">
+                <th className="text-center py-3 px-4 font-semibold text-[#16161a]">
                   Acertos
                 </th>
-                <th className="text-center py-3 px-4 font-semibold text-[#0f172a]">
+                <th className="text-center py-3 px-4 font-semibold text-[#16161a]">
                   Total
                 </th>
               </tr>

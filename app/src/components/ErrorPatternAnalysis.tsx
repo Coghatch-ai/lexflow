@@ -100,7 +100,7 @@ export default function ErrorPatternAnalysis() {
             <AlertTriangle className="w-6 h-6 text-red-600" />
           </div>
           <div>
-            <h3 className="text-xl font-bold text-[#0f172a]">Analise de Padroes de Erro</h3>
+            <h3 className="text-xl font-bold text-[#16161a]">Analise de Padroes de Erro</h3>
             <p className="text-sm text-gray-600">Identifique onde e porque voce erra</p>
           </div>
         </div>
@@ -112,7 +112,7 @@ export default function ErrorPatternAnalysis() {
     );
   }
 
-  const COLORS = ['#0f172a', '#1e3a5f', '#0ea5e9', '#0c4a6e', '#38bdf8', '#7dd3fc'];
+  const COLORS = ['#16161a', '#26262c', '#16161a', '#26262c', '#b8893b', '#d9ab53'];
   const overallErrorRate = Math.round((totalErrors / totalAnswered) * 100);
 
   return (
@@ -123,7 +123,7 @@ export default function ErrorPatternAnalysis() {
             <AlertTriangle className="w-6 h-6 text-red-600" />
           </div>
           <div>
-            <h3 className="text-xl font-bold text-[#0f172a]">Analise de Padroes de Erro</h3>
+            <h3 className="text-xl font-bold text-[#16161a]">Analise de Padroes de Erro</h3>
             <p className="text-sm text-gray-600">Identifique onde e porque voce erra</p>
           </div>
         </div>
@@ -133,8 +133,8 @@ export default function ErrorPatternAnalysis() {
             <p className="text-3xl font-bold text-red-600">{totalErrors}</p>
             <p className="text-sm text-gray-600">Total de erros</p>
           </div>
-          <div className="bg-[#0ea5e9]/5 rounded-lg p-4 text-center">
-            <p className="text-3xl font-bold text-[#0f172a]">{overallErrorRate}%</p>
+          <div className="bg-[#16161a]/5 rounded-lg p-4 text-center">
+            <p className="text-3xl font-bold text-[#16161a]">{overallErrorRate}%</p>
             <p className="text-sm text-gray-600">Taxa de erro geral</p>
           </div>
           <div className="bg-yellow-50 rounded-lg p-4 text-center">
@@ -146,8 +146,8 @@ export default function ErrorPatternAnalysis() {
 
       {errorByDiscipline.length > 0 && (
         <div className="bg-white rounded-xl p-6 shadow">
-          <h4 className="font-bold text-[#0f172a] mb-4 flex items-center gap-2">
-            <BookOpen className="w-5 h-5 text-[#0ea5e9]" />
+          <h4 className="font-bold text-[#16161a] mb-4 flex items-center gap-2">
+            <BookOpen className="w-5 h-5 text-[#16161a]" />
             Erros por Disciplina
           </h4>
           <ResponsiveContainer width="100%" height={300}>
@@ -165,7 +165,7 @@ export default function ErrorPatternAnalysis() {
                 formatter={(value: number) => `${value}%`}
                 contentStyle={{
                   backgroundColor: '#fff',
-                  border: '2px solid #0f172a',
+                  border: '2px solid #16161a',
                   borderRadius: '8px',
                 }}
               />
@@ -178,8 +178,8 @@ export default function ErrorPatternAnalysis() {
       <div className="grid lg:grid-cols-2 gap-6">
         {errorByBoard.length > 0 && (
           <div className="bg-white rounded-xl p-6 shadow">
-            <h4 className="font-bold text-[#0f172a] mb-4 flex items-center gap-2">
-              <BarChart3 className="w-5 h-5 text-[#0ea5e9]" />
+            <h4 className="font-bold text-[#16161a] mb-4 flex items-center gap-2">
+              <BarChart3 className="w-5 h-5 text-[#16161a]" />
               Erros por Banca
             </h4>
             <ResponsiveContainer width="100%" height={250}>
@@ -201,7 +201,7 @@ export default function ErrorPatternAnalysis() {
                   formatter={(value: number) => `${value}%`}
                   contentStyle={{
                     backgroundColor: '#fff',
-                    border: '2px solid #0f172a',
+                    border: '2px solid #16161a',
                     borderRadius: '8px',
                   }}
                 />
@@ -212,8 +212,8 @@ export default function ErrorPatternAnalysis() {
 
         {errorByTime.length > 0 && (
           <div className="bg-white rounded-xl p-6 shadow">
-            <h4 className="font-bold text-[#0f172a] mb-4 flex items-center gap-2">
-              <Clock className="w-5 h-5 text-[#0ea5e9]" />
+            <h4 className="font-bold text-[#16161a] mb-4 flex items-center gap-2">
+              <Clock className="w-5 h-5 text-[#16161a]" />
               Erros por Tempo de Resposta
             </h4>
             <div className="space-y-4">
@@ -237,7 +237,7 @@ export default function ErrorPatternAnalysis() {
             </div>
 
             {errorByTime.length > 0 && errorByTime[0].errorRate > 0 && (
-              <div className="mt-4 p-3 bg-[#0ea5e9]/5 rounded-lg">
+              <div className="mt-4 p-3 bg-[#16161a]/5 rounded-lg">
                 <p className="text-sm text-gray-700">
                   {errorByTime[0].errorRate > errorByTime[errorByTime.length - 1]?.errorRate
                     ? 'Voce erra mais quando responde rapido. Tente dedicar mais tempo a cada questao.'
@@ -251,7 +251,7 @@ export default function ErrorPatternAnalysis() {
 
       {recurringErrors.length > 0 && (
         <div className="bg-white rounded-xl p-6 shadow">
-          <h4 className="font-bold text-[#0f172a] mb-4 flex items-center gap-2">
+          <h4 className="font-bold text-[#16161a] mb-4 flex items-center gap-2">
             <TrendingDown className="w-5 h-5 text-red-600" />
             Erros Recorrentes (questoes que voce errou 2+ vezes)
           </h4>
@@ -259,10 +259,10 @@ export default function ErrorPatternAnalysis() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b-2 border-gray-200">
-                  <th className="text-left py-3 px-4 font-semibold text-[#0f172a]">Disciplina</th>
-                  <th className="text-center py-3 px-4 font-semibold text-[#0f172a]">Vezes respondida</th>
-                  <th className="text-center py-3 px-4 font-semibold text-[#0f172a]">Vezes errada</th>
-                  <th className="text-center py-3 px-4 font-semibold text-[#0f172a]">Ultima tentativa</th>
+                  <th className="text-left py-3 px-4 font-semibold text-[#16161a]">Disciplina</th>
+                  <th className="text-center py-3 px-4 font-semibold text-[#16161a]">Vezes respondida</th>
+                  <th className="text-center py-3 px-4 font-semibold text-[#16161a]">Vezes errada</th>
+                  <th className="text-center py-3 px-4 font-semibold text-[#16161a]">Ultima tentativa</th>
                 </tr>
               </thead>
               <tbody>
@@ -287,7 +287,7 @@ export default function ErrorPatternAnalysis() {
       )}
 
       <div className="bg-white rounded-xl p-6 shadow">
-        <h4 className="font-bold text-[#0f172a] mb-4">Insights e Recomendacoes</h4>
+        <h4 className="font-bold text-[#16161a] mb-4">Insights e Recomendacoes</h4>
         <div className="space-y-3">
           {errorByDiscipline.length > 0 && errorByDiscipline[0].errorRate > 50 && (
             <div className="flex items-start gap-3 p-3 bg-red-50 rounded-lg">

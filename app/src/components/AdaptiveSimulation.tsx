@@ -224,11 +224,11 @@ export default function AdaptiveSimulation() {
     return (
       <div className="bg-white rounded-xl p-6 shadow">
         <div className="flex items-center gap-3 mb-6">
-          <div className="bg-[#0ea5e9] p-3 rounded-lg">
+          <div className="bg-[#16161a] p-3 rounded-lg">
             <Brain className="w-6 h-6 text-white" />
           </div>
           <div>
-            <h3 className="text-xl font-bold text-[#0f172a]">Simulado Adaptativo</h3>
+            <h3 className="text-xl font-bold text-[#16161a]">Simulado Adaptativo</h3>
             <p className="text-sm text-gray-600">
               A dificuldade ajusta automaticamente conforme seu desempenho
             </p>
@@ -243,7 +243,7 @@ export default function AdaptiveSimulation() {
             <select
               value={selectedDiscipline}
               onChange={(e) => setSelectedDiscipline(e.target.value)}
-              className="w-full px-4 py-2 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-[#0ea5e9]"
+              className="w-full px-4 py-2 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-[#16161a]"
             >
               <option value="">Todas as disciplinas</option>
               {disciplineLov.options.map((o) => (
@@ -272,8 +272,8 @@ export default function AdaptiveSimulation() {
           </div>
         </div>
 
-        <div className="bg-[#0ea5e9]/5 rounded-lg p-4 mb-6">
-          <h4 className="font-semibold text-[#0f172a] mb-2">Como funciona?</h4>
+        <div className="bg-[#16161a]/5 rounded-lg p-4 mb-6">
+          <h4 className="font-semibold text-[#16161a] mb-2">Como funciona?</h4>
           <ul className="space-y-1 text-sm text-gray-700">
             <li>- Comeca no nivel medio</li>
             <li>- 2 acertos seguidos: sobe a dificuldade</li>
@@ -285,7 +285,7 @@ export default function AdaptiveSimulation() {
         <button
           onClick={startSimulation}
           disabled={loading}
-          className="w-full bg-gradient-to-r from-[#1e3a5f] to-[#0c4a6e] text-white py-3 rounded-lg font-semibold hover:shadow-lg transition disabled:opacity-50 flex items-center justify-center gap-2"
+          className="w-full bg-gradient-to-r from-[#26262c] to-[#26262c] text-white py-3 rounded-lg font-semibold hover:shadow-lg transition disabled:opacity-50 flex items-center justify-center gap-2"
         >
           <Zap className="w-5 h-5" />
           {loading ? 'Carregando...' : 'Iniciar Simulado Adaptativo'}
@@ -300,7 +300,7 @@ export default function AdaptiveSimulation() {
       <div className="space-y-4">
         <div className="flex items-center justify-between bg-white rounded-xl p-4 shadow">
           <div className="flex items-center gap-3">
-            <Brain className="w-5 h-5 text-[#0ea5e9]" />
+            <Brain className="w-5 h-5 text-[#16161a]" />
             <span className="text-sm font-medium text-gray-700">Nivel atual:</span>
             <span className={`px-3 py-1 rounded-full text-sm font-bold ${DIFFICULTY_COLORS[adaptive.currentDifficulty]}`}>
               {difficultyLov.labelOf(adaptive.currentDifficulty)}
@@ -319,7 +319,7 @@ export default function AdaptiveSimulation() {
           </div>
           <div className="w-full bg-gray-200 rounded-full h-2">
             <div
-              className="bg-gradient-to-r from-[#0ea5e9] to-[#1e3a5f] h-2 rounded-full transition-all"
+              className="bg-gradient-to-r from-[#16161a] to-[#26262c] h-2 rounded-full transition-all"
               style={{ width: `${(adaptive.totalAnswered / totalQuestions) * 100}%` }}
             />
           </div>
@@ -338,7 +338,7 @@ export default function AdaptiveSimulation() {
           <button
             onClick={handleAnswer}
             disabled={!selectedAnswer}
-            className="w-full bg-gradient-to-r from-[#1e3a5f] to-[#0c4a6e] text-white py-3 rounded-lg font-semibold hover:shadow-lg transition disabled:opacity-50 flex items-center justify-center gap-2"
+            className="w-full bg-gradient-to-r from-[#26262c] to-[#26262c] text-white py-3 rounded-lg font-semibold hover:shadow-lg transition disabled:opacity-50 flex items-center justify-center gap-2"
           >
             Confirmar Resposta
             <ChevronRight className="w-5 h-5" />
@@ -366,7 +366,7 @@ export default function AdaptiveSimulation() {
             ) : (
               <XCircle className="w-8 h-8 text-red-600" />
             )}
-            <h3 className="text-xl font-bold text-[#0f172a]">
+            <h3 className="text-xl font-bold text-[#16161a]">
               {lastCorrect ? 'Resposta Correta!' : 'Resposta Incorreta'}
             </h3>
           </div>
@@ -381,17 +381,17 @@ export default function AdaptiveSimulation() {
           <div className="bg-white rounded-lg p-4">
             <p className="text-sm font-medium text-gray-700 mb-1">Explicacao:</p>
             <p className="text-gray-800">{currentQuestion.explanation}</p>
-            <p className="text-sm text-[#0ea5e9] mt-2 font-medium">
+            <p className="text-sm text-[#16161a] mt-2 font-medium">
               {currentQuestion.legislation_title}
             </p>
           </div>
         </div>
 
         {difficultyChanged && (
-          <div className="bg-[#0ea5e9]/10 border-2 border-[#0ea5e9] rounded-xl p-4 flex items-center gap-3">
-            <Zap className="w-5 h-5 text-[#0ea5e9]" />
+          <div className="bg-[#16161a]/10 border-2 border-[#16161a] rounded-xl p-4 flex items-center gap-3">
+            <Zap className="w-5 h-5 text-[#16161a]" />
             <div>
-              <p className="font-semibold text-[#0f172a]">Dificuldade ajustada!</p>
+              <p className="font-semibold text-[#16161a]">Dificuldade ajustada!</p>
               <p className="text-sm text-gray-700">
                 De <span className={`font-bold ${DIFFICULTY_COLORS[adaptive.currentDifficulty]}`}>{difficultyLov.labelOf(adaptive.currentDifficulty)}</span> para{' '}
                 <span className={`font-bold ${DIFFICULTY_COLORS[nextDiff]}`}>{difficultyLov.labelOf(nextDiff)}</span>
@@ -402,7 +402,7 @@ export default function AdaptiveSimulation() {
 
         <button
           onClick={handleNext}
-          className="w-full bg-gradient-to-r from-[#1e3a5f] to-[#0c4a6e] text-white py-3 rounded-lg font-semibold hover:shadow-lg transition flex items-center justify-center gap-2"
+          className="w-full bg-gradient-to-r from-[#26262c] to-[#26262c] text-white py-3 rounded-lg font-semibold hover:shadow-lg transition flex items-center justify-center gap-2"
         >
           {adaptive.totalAnswered >= totalQuestions ? 'Ver Resultado' : 'Proxima Questao'}
           <ChevronRight className="w-5 h-5" />
@@ -420,14 +420,14 @@ export default function AdaptiveSimulation() {
 
   return (
     <div className="space-y-6">
-      <div className="bg-gradient-to-r from-[#0ea5e9] to-[#0f172a] rounded-xl p-6 text-white">
+      <div className="bg-gradient-to-r from-[#16161a] to-[#16161a] rounded-xl p-6 text-white">
         <h3 className="text-2xl font-bold mb-2">Simulado Adaptativo Finalizado!</h3>
         <p className="text-white/80">Veja como seu desempenho evoluiu</p>
       </div>
 
       <div className="grid md:grid-cols-3 gap-4">
         <div className="bg-white rounded-xl p-6 shadow text-center">
-          <div className="text-4xl font-bold text-[#0f172a] mb-2">{accuracy}%</div>
+          <div className="text-4xl font-bold text-[#16161a] mb-2">{accuracy}%</div>
           <p className="text-gray-600">Acuracia Final</p>
         </div>
         <div className="bg-white rounded-xl p-6 shadow text-center">
@@ -435,13 +435,13 @@ export default function AdaptiveSimulation() {
           <p className="text-gray-600">Acertos de {adaptive.totalAnswered}</p>
         </div>
         <div className="bg-white rounded-xl p-6 shadow text-center">
-          <div className="text-4xl font-bold text-[#0ea5e9] mb-2">{Math.floor(timer / 60)}:{String(timer % 60).padStart(2, '0')}</div>
+          <div className="text-4xl font-bold text-[#16161a] mb-2">{Math.floor(timer / 60)}:{String(timer % 60).padStart(2, '0')}</div>
           <p className="text-gray-600">Tempo Total</p>
         </div>
       </div>
 
       <div className="bg-white rounded-xl p-6 shadow">
-        <h4 className="text-lg font-bold text-[#0f172a] mb-4">Distribuicao de Dificuldade</h4>
+        <h4 className="text-lg font-bold text-[#16161a] mb-4">Distribuicao de Dificuldade</h4>
         <div className="space-y-3">
           <div className="flex items-center gap-3">
             <span className="w-16 text-sm font-medium text-gray-700">Facil</span>
@@ -480,7 +480,7 @@ export default function AdaptiveSimulation() {
             difficultyHistory: [],
           });
         }}
-        className="w-full bg-gradient-to-r from-[#1e3a5f] to-[#0c4a6e] text-white py-3 rounded-lg font-semibold hover:shadow-lg transition"
+        className="w-full bg-gradient-to-r from-[#26262c] to-[#26262c] text-white py-3 rounded-lg font-semibold hover:shadow-lg transition"
       >
         Fazer Outro Simulado Adaptativo
       </button>

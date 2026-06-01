@@ -1,15 +1,21 @@
 import { useSession } from '../auth';
 import OabExamCalendar from '../components/OabExamCalendar';
-import {
-  BookOpen,
-  TrendingUp,
-  Target,
-  Clock,
-  Zap,
-  AlertCircle,
-} from 'lucide-react';
+import { Target, AlertCircle, ArrowUpRight } from 'lucide-react';
 import { trpc } from '../shared/lib/trpc';
 import { accuracyPct } from '@shared/domain/scoring';
+
+const TIPS = [
+  'Realize simulados regularmente para familiarizar-se com o formato da prova.',
+  'Foque nas disciplinas onde tem menor acurácia.',
+  'Use o dashboard de Analytics para identificar padrões de erro.',
+  'Defina metas realistas em cada disciplina.',
+];
+
+const STEPS = [
+  { n: '01', title: 'Começar um simulado', body: 'Vá para "Simulados" e escolha uma disciplina para treinar.' },
+  { n: '02', title: 'Definir metas', body: 'Use "Metas" para estabelecer objetivos em cada disciplina.' },
+  { n: '03', title: 'Acompanhar progresso', body: 'Veja seus gráficos e estatísticas em "Analytics".' },
+];
 
 export default function HomePage() {
   const { user } = useSession();
@@ -26,160 +32,117 @@ export default function HomePage() {
     recentSession: last
       ? {
           accuracy: accuracyPct(last.correctAnswers, last.totalQuestions),
-          discipline: last.discipline,
           date: new Date(last.createdAt).toLocaleDateString('pt-BR'),
         }
       : undefined,
   };
 
+  const firstName = user?.name?.split(' ')[0] ?? '';
+
+  const ledger: Array<{ label: string; value: string; sub: string; flag?: boolean }> = [
+    {
+      label: 'Acurácia geral',
+      value: `${stats.accuracy}%`,
+      sub: `${stats.totalCorrect} acertos de ${stats.totalAnswered}`,
+      flag: stats.accuracy >= 70,
+    },
+    {
+      label: 'Simulados',
+      value: `${stats.totalSessions}`,
+      sub: 'Manter o ritmo é importante',
+    },
+    {
+      label: 'Desempenho recente',
+      value: stats.recentSession ? `${stats.recentSession.accuracy}%` : '—',
+      sub: stats.recentSession ? stats.recentSession.date : 'Sem simulados ainda',
+    },
+    {
+      label: 'Questões respondidas',
+      value: `${stats.totalAnswered}`,
+      sub: 'Total acumulado',
+    },
+  ];
+
   return (
-    <div className="space-y-6">
-      {/* Welcome Card */}
-      <div className="bg-gradient-to-r from-[#0f172a] to-[#1e3a5f] rounded-xl p-8 text-white shadow-lg">
-        <h1 className="text-3xl font-bold mb-2">
-          Bem-vindo de volta, {user?.name}!
+    <div className="space-y-6 stagger">
+      {/* Greeting strip */}
+      <section className="panel-ink px-7 py-7 md:px-9 md:py-8">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full"
+          style={{ background: 'radial-gradient(closest-side, rgba(217,171,83,0.16), transparent)' }}
+        />
+        <p className="eyebrow !text-seal-bright">Painel</p>
+        <h1 className="mt-3 font-display text-[var(--fs-display)] font-bold leading-tight text-surface">
+          Bem-vindo de volta{firstName ? `, ${firstName}` : ''}.
         </h1>
-        <p className="text-white/80 max-w-lg">
-          Voce esta no caminho certo para sua aprovacao. Mantenha o ritmo
-          e aproveite todas as ferramentas disponiveis.
+        <p className="mt-2 max-w-xl text-sm leading-relaxed text-ink-mute">
+          Você está no caminho certo. Mantenha o ritmo e aproveite cada ferramenta do preparatório.
         </p>
-      </div>
+      </section>
 
-      {/* Stats Grid */}
-      <div className="grid md:grid-cols-4 gap-4">
-        {/* Accuracy */}
-        <div className="bg-white rounded-xl p-6 shadow hover:shadow-lg transition">
-          <div className="flex items-start justify-between mb-4">
-            <div className="bg-sky-100 p-3 rounded-lg">
-              <TrendingUp className="w-6 h-6 text-sky-600" />
+      {/* Ledger — one bordered block, hairlines drawn by a 1px grid gap. */}
+      <section className="overflow-hidden rounded-xl border border-line">
+        <div className="grid grid-cols-2 gap-px bg-line lg:grid-cols-4">
+          {ledger.map((s) => (
+            <div key={s.label} className="bg-surface px-6 py-5">
+              <div className="flex items-center justify-between gap-2">
+                <p className="eyebrow">{s.label}</p>
+                {s.flag && <span className="badge-success">Ótimo</span>}
+              </div>
+              <p className="mt-3 font-display text-4xl font-bold tabular-nums leading-none text-ink">
+                {s.value}
+              </p>
+              <p className="mt-2 text-xs text-ink-mute">{s.sub}</p>
             </div>
-            {stats.accuracy >= 70 && (
-              <span className="text-xs font-bold text-green-600 bg-green-100 px-2 py-1 rounded">
-                Otimo!
-              </span>
-            )}
-          </div>
-          <p className="text-gray-600 text-sm mb-2">Acuracia Geral</p>
-          <p className="text-3xl font-bold text-[#0f172a]">
-            {stats.accuracy}%
-          </p>
-          <p className="text-xs text-gray-500 mt-2">
-            {stats.totalCorrect} acertos de {stats.totalAnswered}
-          </p>
+          ))}
         </div>
+      </section>
 
-        {/* Sessions */}
-        <div className="bg-white rounded-xl p-6 shadow hover:shadow-lg transition">
-          <div className="bg-green-100 p-3 rounded-lg mb-4 w-fit">
-            <BookOpen className="w-6 h-6 text-green-600" />
+      {/* Guidance */}
+      <section className="grid gap-6 lg:grid-cols-2">
+        <div className="card-default">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-[18px] h-[18px] text-seal" />
+            <h3 className="font-display text-base font-bold">Dicas de estudo</h3>
           </div>
-          <p className="text-gray-600 text-sm mb-2">Simulados Realizados</p>
-          <p className="text-3xl font-bold text-[#0f172a]">
-            {stats.totalSessions}
-          </p>
-          <p className="text-xs text-gray-500 mt-2">Manter o ritmo e importante</p>
-        </div>
-
-        {/* Recent Performance */}
-        <div className="bg-white rounded-xl p-6 shadow hover:shadow-lg transition">
-          <div className="bg-amber-100 p-3 rounded-lg mb-4 w-fit">
-            <Zap className="w-6 h-6 text-amber-600" />
-          </div>
-          <p className="text-gray-600 text-sm mb-2">Desempenho Recente</p>
-          {stats.recentSession ? (
-            <>
-              <p className="text-3xl font-bold text-[#0f172a]">
-                {stats.recentSession.accuracy}%
-              </p>
-              <p className="text-xs text-gray-500 mt-2">
-                {stats.recentSession.date}
-              </p>
-            </>
-          ) : (
-            <p className="text-gray-400 text-sm">Sem simulados ainda</p>
-          )}
-        </div>
-
-        {/* Questions Answered */}
-        <div className="bg-white rounded-xl p-6 shadow hover:shadow-lg transition">
-          <div className="bg-orange-100 p-3 rounded-lg mb-4 w-fit">
-            <Clock className="w-6 h-6 text-orange-600" />
-          </div>
-          <p className="text-gray-600 text-sm mb-2">Questoes Respondidas</p>
-          <p className="text-3xl font-bold text-[#0f172a]">
-            {stats.totalAnswered}
-          </p>
-          <p className="text-xs text-gray-500 mt-2">Total acumulado</p>
-        </div>
-      </div>
-
-      {/* Recommendations */}
-      <div className="grid md:grid-cols-2 gap-6">
-        {/* Study Tips */}
-        <div className="bg-white rounded-xl p-6 shadow">
-          <h3 className="font-bold text-lg text-[#0f172a] mb-4 flex items-center gap-2">
-            <AlertCircle className="w-5 h-5 text-[#0ea5e9]" />
-            Dicas de Estudo
-          </h3>
-          <ul className="space-y-3">
-            <li className="flex items-start gap-3">
-              <div className="w-2 h-2 rounded-full bg-[#0ea5e9] mt-2 flex-shrink-0" />
-              <span className="text-gray-700 text-sm">
-                Realize simulados regularmente para familiarizar-se com o formato
-                da prova
-              </span>
-            </li>
-            <li className="flex items-start gap-3">
-              <div className="w-2 h-2 rounded-full bg-[#0ea5e9] mt-2 flex-shrink-0" />
-              <span className="text-gray-700 text-sm">
-                Foque nas disciplinas onde tem menor acuracia
-              </span>
-            </li>
-            <li className="flex items-start gap-3">
-              <div className="w-2 h-2 rounded-full bg-[#0ea5e9] mt-2 flex-shrink-0" />
-              <span className="text-gray-700 text-sm">
-                Use o dashboard de analytics para identificar padroes de erro
-              </span>
-            </li>
-            <li className="flex items-start gap-3">
-              <div className="w-2 h-2 rounded-full bg-[#0ea5e9] mt-2 flex-shrink-0" />
-              <span className="text-gray-700 text-sm">
-                Defina metas realistas em cada disciplina
-              </span>
-            </li>
+          <ul className="mt-5 space-y-3.5">
+            {TIPS.map((tip) => (
+              <li key={tip} className="flex items-start gap-3 text-sm text-ink-soft">
+                <span className="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full bg-seal" />
+                <span className="leading-relaxed">{tip}</span>
+              </li>
+            ))}
           </ul>
         </div>
 
-        {/* Next Steps */}
-        <div className="bg-gradient-to-br from-[#0ea5e9] to-[#0f172a] rounded-xl p-6 text-white shadow">
-          <h3 className="font-bold text-lg mb-4 flex items-center gap-2">
-            <Target className="w-5 h-5" />
-            Proximos Passos
-          </h3>
-          <div className="space-y-3">
-            <div className="bg-white/10 rounded-lg p-3 backdrop-blur">
-              <p className="font-semibold mb-1">1. Comecar um Simulado</p>
-              <p className="text-sm text-white/80">
-                Va para "Simulados" e escolha uma disciplina para treinar
-              </p>
-            </div>
-            <div className="bg-white/10 rounded-lg p-3 backdrop-blur">
-              <p className="font-semibold mb-1">2. Definir Metas</p>
-              <p className="text-sm text-white/80">
-                Use "Metas" para estabelecer objetivos em cada disciplina
-              </p>
-            </div>
-            <div className="bg-white/10 rounded-lg p-3 backdrop-blur">
-              <p className="font-semibold mb-1">3. Acompanhar Progresso</p>
-              <p className="text-sm text-white/80">
-                Veja seus graficos e estatisticas em "Analytics"
-              </p>
-            </div>
+        <div className="panel-ink p-6">
+          <div className="flex items-center gap-2">
+            <Target className="w-[18px] h-[18px] text-seal-bright" />
+            <h3 className="font-display text-base font-bold text-surface">Próximos passos</h3>
           </div>
+          <ol className="mt-5 space-y-3">
+            {STEPS.map((step) => (
+              <li
+                key={step.n}
+                className="group flex items-start gap-4 rounded-lg border border-[var(--ink-line)] px-4 py-3"
+              >
+                <span className="font-display text-sm font-bold text-seal-bright tabular-nums">
+                  {step.n}
+                </span>
+                <div className="min-w-0">
+                  <p className="flex items-center gap-1.5 text-sm font-semibold text-surface">
+                    {step.title}
+                    <ArrowUpRight className="w-3.5 h-3.5 text-ink-mute" />
+                  </p>
+                  <p className="mt-0.5 text-xs leading-relaxed text-ink-mute">{step.body}</p>
+                </div>
+              </li>
+            ))}
+          </ol>
         </div>
-      </div>
+      </section>
 
-      {/* OAB Exam Calendar */}
       <OabExamCalendar />
     </div>
   );

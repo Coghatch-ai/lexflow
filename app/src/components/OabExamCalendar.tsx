@@ -109,9 +109,9 @@ export default function OabExamCalendar() {
   return (
     <div className="space-y-6">
       {/* Countdown Card */}
-      <div className="bg-gradient-to-r from-[#0f172a] to-[#1e3a5f] rounded-xl p-8 text-white shadow-lg">
+      <div className="bg-gradient-to-r from-[#16161a] to-[#26262c] rounded-xl p-8 text-white shadow-lg">
         <div className="flex items-center gap-3 mb-4">
-          <Calendar className="w-8 h-8 text-[#0ea5e9]" />
+          <Calendar className="w-7 h-7 text-[#d9ab53]" strokeWidth={1.75} />
           <h3 className="text-2xl font-bold">Proxima Prova OAB</h3>
         </div>
 
@@ -158,8 +158,8 @@ export default function OabExamCalendar() {
 
       {/* Registration Info */}
       <div className="bg-white rounded-xl p-6 shadow">
-        <h4 className="font-bold text-[#0f172a] mb-4 flex items-center gap-2">
-          <Target className="w-5 h-5 text-[#0ea5e9]" />
+        <h4 className="font-bold text-[#16161a] mb-4 flex items-center gap-2">
+          <Target className="w-5 h-5 text-[#16161a]" />
           Informacoes da Inscricao
         </h4>
         <div className="space-y-3">
@@ -172,14 +172,14 @@ export default function OabExamCalendar() {
           {examInfo.registrationDeadline && (
             <div className="flex justify-between items-center py-2 border-b border-gray-100">
               <span className="text-gray-600">Prazo de inscricao</span>
-              <span className="font-semibold text-[#0f172a]">
+              <span className="font-semibold text-[#16161a]">
                 {examInfo.registrationDeadline.toLocaleDateString('pt-BR')}
               </span>
             </div>
           )}
           <div className="flex justify-between items-center py-2">
             <span className="text-gray-600">Data da prova</span>
-            <span className="font-semibold text-[#0f172a]">
+            <span className="font-semibold text-[#16161a]">
               {examInfo.nextDate.toLocaleDateString('pt-BR')}
             </span>
           </div>
@@ -188,25 +188,25 @@ export default function OabExamCalendar() {
 
       {/* Study Recommendations */}
       <div className="bg-white rounded-xl p-6 shadow">
-        <h4 className="font-bold text-[#0f172a] mb-4 flex items-center gap-2">
-          <Clock className="w-5 h-5 text-[#0ea5e9]" />
+        <h4 className="font-bold text-[#16161a] mb-4 flex items-center gap-2">
+          <Clock className="w-5 h-5 text-[#16161a]" />
           Recomendacoes de Estudo
         </h4>
         <div className="grid md:grid-cols-2 gap-4">
-          <div className="bg-[#0ea5e9]/5 rounded-lg p-4">
-            <p className="text-2xl font-bold text-[#0f172a]">{questionsPerDay}</p>
+          <div className="bg-[#16161a]/5 rounded-lg p-4">
+            <p className="text-2xl font-bold text-[#16161a]">{questionsPerDay}</p>
             <p className="text-sm text-gray-600">Questoes por dia recomendadas</p>
           </div>
-          <div className="bg-[#0ea5e9]/5 rounded-lg p-4">
-            <p className="text-2xl font-bold text-[#0f172a]">{simulationsPerWeek}</p>
+          <div className="bg-[#16161a]/5 rounded-lg p-4">
+            <p className="text-2xl font-bold text-[#16161a]">{simulationsPerWeek}</p>
             <p className="text-sm text-gray-600">Simulados por semana</p>
           </div>
-          <div className="bg-[#0ea5e9]/5 rounded-lg p-4">
-            <p className="text-2xl font-bold text-[#0f172a]">{weeksUntil}</p>
+          <div className="bg-[#16161a]/5 rounded-lg p-4">
+            <p className="text-2xl font-bold text-[#16161a]">{weeksUntil}</p>
             <p className="text-sm text-gray-600">Semanas de preparo</p>
           </div>
-          <div className="bg-[#0ea5e9]/5 rounded-lg p-4">
-            <p className="text-2xl font-bold text-[#0f172a]">
+          <div className="bg-[#16161a]/5 rounded-lg p-4">
+            <p className="text-2xl font-bold text-[#16161a]">
               {Math.ceil(questionsPerDay * 1.5)}
             </p>
             <p className="text-sm text-gray-600">Minutos de estudo por dia</p>
@@ -216,11 +216,11 @@ export default function OabExamCalendar() {
 
       {/* Timeline */}
       <div className="bg-white rounded-xl p-6 shadow">
-        <h4 className="font-bold text-[#0f172a] mb-4">Cronograma Sugerido</h4>
+        <h4 className="font-bold text-[#16161a] mb-4">Cronograma Sugerido</h4>
         <div className="space-y-4">
           {weeksUntil > 8 && (
             <div className="flex gap-3">
-              <div className="w-3 h-3 rounded-full bg-[#0f172a] mt-1.5 flex-shrink-0" />
+              <div className="w-3 h-3 rounded-full bg-[#16161a] mt-1.5 flex-shrink-0" />
               <div>
                 <p className="font-semibold text-gray-800">Semanas 1-4: Revisao Geral</p>
                 <p className="text-sm text-gray-600">Estude todas as 11 disciplinas, focando nos conceitos basicos</p>
@@ -229,7 +229,7 @@ export default function OabExamCalendar() {
           )}
           {weeksUntil > 4 && (
             <div className="flex gap-3">
-              <div className="w-3 h-3 rounded-full bg-[#1e3a5f] mt-1.5 flex-shrink-0" />
+              <div className="w-3 h-3 rounded-full bg-[#26262c] mt-1.5 flex-shrink-0" />
               <div>
                 <p className="font-semibold text-gray-800">Semanas 5-8: Simulados Intensivos</p>
                 <p className="text-sm text-gray-600">Faca simulados completos e identifique pontos fracos</p>
@@ -237,7 +237,7 @@ export default function OabExamCalendar() {
             </div>
           )}
           <div className="flex gap-3">
-            <div className="w-3 h-3 rounded-full bg-[#0ea5e9] mt-1.5 flex-shrink-0" />
+            <div className="w-3 h-3 rounded-full bg-[#16161a] mt-1.5 flex-shrink-0" />
             <div>
               <p className="font-semibold text-gray-800">Ultimas 4 semanas: Revisao Focada</p>
               <p className="text-sm text-gray-600">Foque nas disciplinas com menor acuracia e faca revisao espacada</p>
