@@ -36,7 +36,7 @@ export default function Layout({
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { user, signOut } = useSession();
 
-  const initials = (user?.name ?? 'LexFlow')
+  const initials = (user?.name ?? 'Probius')
     .split(' ')
     .slice(0, 2)
     .map((p) => p.charAt(0))
@@ -57,7 +57,7 @@ export default function Layout({
             <div className="flex items-center gap-2.5">
               <Scale className="w-5 h-5 text-seal-bright" strokeWidth={1.75} />
               <span className="font-display text-lg font-bold tracking-tightish text-surface">
-                Lex<span className="text-seal-bright">Flow</span>
+                Prob<span className="text-seal-bright">ius</span>
               </span>
             </div>
             <p className="mt-2 text-[0.7rem] leading-relaxed text-ink-mute">
@@ -143,7 +143,7 @@ export default function Layout({
               <Menu className="w-5 h-5" />
             </button>
             <div className="min-w-0">
-              <p className="eyebrow leading-none">LexFlow</p>
+              <p className="eyebrow leading-none">Probius</p>
               <h2 className="mt-1 font-display text-lg md:text-xl font-bold leading-none">
                 {navItems.find((item) => item.id === currentPage)?.label}
               </h2>

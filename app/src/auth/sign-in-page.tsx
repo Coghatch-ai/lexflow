@@ -21,7 +21,7 @@ export function SignInPage(): ReactElement {
         <div className="relative flex items-center gap-2.5">
           <Scale className="w-6 h-6 text-seal-bright" strokeWidth={1.75} />
           <span className="font-display text-xl font-bold tracking-tightish">
-            Lex<span className="text-seal-bright">Flow</span>
+            Prob<span className="text-seal-bright">ius</span>
           </span>
         </div>
 
@@ -49,7 +49,7 @@ export function SignInPage(): ReactElement {
         <div className="md:hidden mb-8 flex items-center gap-2.5">
           <Scale className="w-6 h-6 text-seal" strokeWidth={1.75} />
           <span className="font-display text-xl font-bold tracking-tightish text-ink">
-            Lex<span className="text-seal">Flow</span>
+            Prob<span className="text-seal">ius</span>
           </span>
         </div>
 
