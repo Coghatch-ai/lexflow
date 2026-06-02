@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useSession } from '../auth';
+import { trpc } from '../shared/lib/trpc';
 import {
   Home,
   BookOpen,
@@ -10,6 +11,7 @@ import {
   Menu,
   X,
   Scale,
+  Shield,
 } from 'lucide-react';
 
 interface LayoutProps {
@@ -18,7 +20,7 @@ interface LayoutProps {
   onPageChange: (page: string) => void;
 }
 
-type Page = 'home' | 'testing' | 'analytics' | 'goals' | 'profile';
+type Page = 'home' | 'testing' | 'analytics' | 'goals' | 'profile' | 'admin';
 
 const navItems: Array<{ id: Page; label: string; icon: React.ReactNode }> = [
   { id: 'home', label: 'Inicio', icon: <Home className="w-[18px] h-[18px]" /> },
@@ -35,6 +37,8 @@ export default function Layout({
 }: LayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { user, signOut } = useSession();
+  const me = trpc.users.me.useQuery();
+  const isAdmin = me.data?.role === 'admin';
 
   const initials = (user?.name ?? 'Probius')
     .split(' ')
@@ -96,6 +100,31 @@ export default function Layout({
                 </button>
               );
             })}
+            {isAdmin && (
+              <>
+                <div className="mx-1 mt-3 mb-2 h-px bg-[var(--ink-line)]" />
+                <p className="px-3 pb-1 eyebrow">Admin</p>
+                <button
+                  onClick={() => { onPageChange('admin'); setSidebarOpen(false); }}
+                  aria-current={currentPage === 'admin' ? 'page' : undefined}
+                  className={`group relative w-full flex items-center gap-3 rounded-lg pl-4 pr-3 py-2.5 text-sm transition-colors ${
+                    currentPage === 'admin'
+                      ? 'bg-[var(--ink-raised)] text-surface font-semibold'
+                      : 'text-[var(--ink-mute)] hover:text-surface hover:bg-white/[0.05] font-medium'
+                  }`}
+                >
+                  <span
+                    className={`absolute left-0 top-1/2 -translate-y-1/2 h-5 w-[3px] rounded-full bg-seal-bright transition-opacity ${
+                      currentPage === 'admin' ? 'opacity-100' : 'opacity-0'
+                    }`}
+                  />
+                  <span className={currentPage === 'admin' ? 'text-seal-bright' : ''}>
+                    <Shield className="w-[18px] h-[18px]" />
+                  </span>
+                  <span>Admin</span>
+                </button>
+              </>
+            )}
           </nav>
 
           {/* User + logout */}
@@ -145,7 +174,7 @@ export default function Layout({
             <div className="min-w-0">
               <p className="eyebrow leading-none">Probius</p>
               <h2 className="mt-1 font-display text-lg md:text-xl font-bold leading-none">
-                {navItems.find((item) => item.id === currentPage)?.label}
+                {currentPage === 'admin' ? 'Admin' : navItems.find((item) => item.id === currentPage)?.label}
               </h2>
             </div>
           </div>

@@ -19,6 +19,7 @@
     "db:migrate": "tsx scripts/migrate.ts",
     "db:seed": "tsx scripts/seed.ts",
     "db:create-user": "tsx scripts/create-user.ts",
+    "db:make-admin": "tsx scripts/make-admin.ts",
     "smoke": "tsx scripts/smoke.ts"
   },
   "dependencies": {

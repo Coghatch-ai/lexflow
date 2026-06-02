@@ -6,8 +6,9 @@ import TestingPage from "./pages/TestingPage";
 import AnalyticsPage from "./pages/AnalyticsPage";
 import GoalsPage from "./pages/GoalsPage";
 import ProfilePage from "./pages/ProfilePage";
+import AdminPage from "./pages/AdminPage";
 
-type Page = "home" | "testing" | "analytics" | "goals" | "profile";
+type Page = "home" | "testing" | "analytics" | "goals" | "profile" | "admin";
 
 function renderPage(page: Page): ReactElement {
   switch (page) {
@@ -19,6 +20,8 @@ function renderPage(page: Page): ReactElement {
       return <GoalsPage />;
     case "profile":
       return <ProfilePage />;
+    case "admin":
+      return <AdminPage />;
     case "home":
       return <HomePage />;
   }
