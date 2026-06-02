@@ -91,12 +91,13 @@ Pages stay eslint-quarantined (typecheck + build clean); full max-strict hardeni
 - **Network:** shared VPC, SG `sg-0d065bb06c8c04a68`, subnets `subnet-0cc43286651b1e2d9`,
   `subnet-03602b4d349546b6b`, `subnet-0ffadc50f6a7a1f26`. **No NAT.**
 - **Secrets:** SSM Parameter Store at `/lexflow/api/{env}/*` (resolved at deploy by `template.yaml`).
-- **Stack:** `lexflow-api-prod`. Frontend bucket `lexflow-frontend-mrhewbuc` + CloudFront (no custom domain yet).
-- **Live (deployed):** API `https://8cz98sohhk.execute-api.sa-east-1.amazonaws.com/prod`;
-  frontend `https://d1qru6bxdnwd2r.cloudfront.net` (CloudFront `E31A7ZWGZ815JT`).
+- **Stack:** `lexflow-api-prod`. Frontend bucket `lexflow-frontend-mrhewbuc` + CloudFront `E31A7ZWGZ815JT`.
+- **Live (deployed):** API `https://api.probius.app` (execute-api default still resolves);
+  frontend `https://my.probius.app` (CloudFront `d1qru6bxdnwd2r.cloudfront.net` still resolves).
+  DNS managed in Cloudflare (CNAME, DNS-only/grey cloud).
 - **Repo:** `Coghatch-ai/lexflow`; OIDC role `lexflow-github-actions-role`; PROD env secrets
   `AWS_ROLE_ARN` / `CLOUDFRONT_DISTRIBUTION_ID` / `VITE_CLERK_PUBLISHABLE_KEY` / `VITE_API_URL`.
-  Bootstrap script: `infra/aws-bootstrap.sh` (+ `infra/deploy-runbook.md`).
+  See `infra/deploy-runbook.md` for bootstrap + custom domain steps.
 - **Deploy via GitHub Actions only** (`deploy-api.yml`, `deploy-app.yml`). NEVER `sam deploy` from a laptop.
 - **Migrations:** `db:generate` → review SQL → `db:migrate`. NEVER apply SQL manually to RDS.
 

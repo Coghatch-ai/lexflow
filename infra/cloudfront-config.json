@@ -3,6 +3,16 @@
   "Comment": "lexflow frontend SPA",
   "Enabled": true,
   "DefaultRootObject": "index.html",
+  "Aliases": {
+    "Quantity": 1,
+    "Items": ["my.probius.app"]
+  },
+  "ViewerCertificate": {
+    "ACMCertificateArn": "arn:aws:acm:us-east-1:394559824800:certificate/831dde06-3d7a-4ee0-953d-d0b53ab94562",
+    "SSLSupportMethod": "sni-only",
+    "MinimumProtocolVersion": "TLSv1.2_2021",
+    "CertificateSource": "acm"
+  },
   "Origins": {
     "Quantity": 1,
     "Items": [

@@ -1,7 +1,7 @@
-# LexFlow deploy runbook (Phase 1)
+# LexFlow deploy runbook
 
 One-time setup to deploy lexflow end-to-end via GitHub Actions. Region `sa-east-1`,
-account `394559824800`, repo `Coghatch-ai/lexflow`, no custom domain.
+account `394559824800`, repo `Coghatch-ai/lexflow`.
 
 Steps marked **[you]** run on your machine with the `dev` IAM user; **[claude]** I drive.
 
@@ -74,6 +74,70 @@ aws cloudformation describe-stacks --region sa-east-1 --stack-name lexflow-api-p
 
 - Open `https://<CLOUDFRONT_DOMAIN>` → sign in with Clerk → take a standard simulation →
   the dashboard/analytics update (browser → API Gateway → Lambda → RDS, all live).
+
+---
+
+## Custom domain setup (one-time, post-bootstrap)
+
+Custom domains: `my.probius.app` (frontend) and `api.probius.app` (API).
+ACM certs — both already issued:
+
+- `my.probius.app` → `arn:aws:acm:us-east-1:394559824800:certificate/831dde06-3d7a-4ee0-953d-d0b53ab94562` (us-east-1, for CloudFront)
+- `api.probius.app` → `arn:aws:acm:sa-east-1:394559824800:certificate/4004112d-a1b0-4046-9b4f-8801af5e7c23` (sa-east-1, for API Gateway)
+
+### 1. API Gateway custom domain (declarative)
+
+The `Domain` block is declared in `template.yaml`. Merging to `main` triggers `deploy-api.yml`,
+which runs `sam deploy` and creates the `api.probius.app` API GW domain automatically.
+
+Read the CNAME target after deploy:
+
+```bash
+aws cloudformation describe-stacks --region sa-east-1 --stack-name lexflow-api-prod \
+  --query "Stacks[0].Outputs[?OutputKey=='CustomDomainName'].OutputValue" --output text
+```
+
+### 2. CloudFront alias + cert (imperative)
+
+CloudFront was created by `aws-bootstrap.sh` (already deleted — it was a one-time op). Update it:
+
+```bash
+CONFIG=$(aws cloudfront get-distribution-config --id E31A7ZWGZ815JT)
+ETAG=$(echo "$CONFIG" | jq -r '.ETag')
+PATCHED=$(echo "$CONFIG" | jq '.DistributionConfig |
+  .Aliases = {"Quantity": 1, "Items": ["my.probius.app"]} |
+  .ViewerCertificate = {
+    "ACMCertificateArn": "arn:aws:acm:us-east-1:394559824800:certificate/831dde06-3d7a-4ee0-953d-d0b53ab94562",
+    "SSLSupportMethod": "sni-only",
+    "MinimumProtocolVersion": "TLSv1.2_2021",
+    "CertificateSource": "acm"
+  } |
+  del(.ViewerCertificate.CloudFrontDefaultCertificate)')
+aws cloudfront update-distribution \
+  --id E31A7ZWGZ815JT \
+  --if-match "$ETAG" \
+  --distribution-config "$PATCHED"
+```
+
+### 3. DNS — Cloudflare (dashboard, DNS only / grey cloud)
+
+| Name  | Type  | Value                            |
+| ----- | ----- | -------------------------------- |
+| `my`  | CNAME | `d1qru6bxdnwd2r.cloudfront.net`  |
+| `api` | CNAME | `<CustomDomainName from step 1>` |
+
+**Important:** set both records to **DNS only** (grey cloud). Do not proxy through Cloudflare — CloudFront and API Gateway handle TLS termination themselves.
+
+### 4. Frontend env + Clerk
+
+```bash
+gh secret set VITE_API_URL --env PROD --repo Coghatch-ai/lexflow
+# value: https://api.probius.app
+```
+
+Then dispatch `deploy-app.yml` (workflow_dispatch).
+
+In the Clerk dashboard, add `https://my.probius.app` to allowed origins and redirect URLs.
 
 ## Teardown (if ever needed)
 

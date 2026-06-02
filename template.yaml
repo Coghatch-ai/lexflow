@@ -29,8 +29,12 @@ Resources:
     Type: AWS::Serverless::HttpApi
     Properties:
       StageName: !Ref Environment
-      # No custom domain yet — the frontend is served from the CloudFront default
-      # domain. Allow any origin; auth is via bearer token (no cookies).
+      Domain:
+        DomainName: api.probius.app
+        CertificateArn: arn:aws:acm:sa-east-1:394559824800:certificate/4004112d-a1b0-4046-9b4f-8801af5e7c23
+        EndpointConfiguration: REGIONAL
+        SecurityPolicy: TLS_1_2
+      # Bearer-token auth (no cookies); custom domain: api.probius.app
       CorsConfiguration:
         AllowOrigins: ["*"]
         AllowHeaders:
@@ -97,8 +101,14 @@ Resources:
             Method: ANY
 
 Outputs:
+  ApiUrl:
+    Description: Custom domain URL (use this as VITE_API_URL)
+    Value: "https://api.probius.app"
   ApiGatewayUrl:
-    Description: API Gateway endpoint (use this as VITE_API_URL)
+    Description: Original API Gateway endpoint (still resolves)
     Value: !Sub "https://${LexFlowHttpApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}"
+  CustomDomainName:
+    Description: Regional CNAME target for api.probius.app DNS record in Cloudflare
+    Value: !GetAtt LexFlowHttpApi.DomainName.RegionalDomainName
   FunctionArn:
     Value: !GetAtt LexFlowApiFunction.Arn
