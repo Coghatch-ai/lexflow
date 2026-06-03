@@ -6,12 +6,31 @@
 // not user-scoped.
 
 import { z } from "zod";
-import { and, asc, eq, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { db } from "../../db/client";
-import { oabQuestions, spacedRepetitionConfig } from "../../../drizzle/schema";
+import {
+  examCalendarEvents,
+  examCalendars,
+  oabQuestions,
+  spacedRepetitionConfig,
+} from "../../../drizzle/schema";
 import { adminProcedure, router } from "../procedures";
 import { adminQuestionInputSchema } from "../../../shared/domain/admin-question";
 import { DEFAULT_SM2_CONFIG } from "../../../shared/domain/spaced-repetition";
+
+const calendarEventInput = z.object({
+  label: z.string().min(1),
+  dateText: z.string().min(1),
+  sortOrder: z.number().int().default(0),
+});
+
+const calendarInput = z.object({
+  title: z.string().min(1),
+  note: z.string().optional(),
+  active: z.boolean().default(true),
+  sortOrder: z.number().int().default(0),
+  events: z.array(calendarEventInput),
+});
 
 const sm2ConfigInput = z.object({
   defaultEaseFactor: z.number().min(1).max(5),
@@ -35,6 +54,112 @@ function generateId(): string {
 }
 
 export const adminRouter = router({
+  calendars: router({
+    list: adminProcedure.query(async () => {
+      const cals = await db
+        .select()
+        .from(examCalendars)
+        .orderBy(asc(examCalendars.sortOrder), asc(examCalendars.createdAt));
+
+      if (cals.length === 0) return [];
+
+      const events = await db
+        .select()
+        .from(examCalendarEvents)
+        .where(
+          inArray(
+            examCalendarEvents.calendarId,
+            cals.map((c) => c.id),
+          ),
+        )
+        .orderBy(asc(examCalendarEvents.sortOrder), asc(examCalendarEvents.createdAt));
+
+      return cals.map((cal) => ({
+        ...cal,
+        events: events.filter((e) => e.calendarId === cal.id),
+      }));
+    }),
+
+    create: adminProcedure.input(calendarInput).mutation(async ({ input }) => {
+      const now = new Date().toISOString();
+      const [cal] = await db
+        .insert(examCalendars)
+        .values({
+          title: input.title,
+          note: input.note ?? null,
+          active: input.active,
+          sortOrder: input.sortOrder,
+          createdAt: now,
+          lastUpdAt: now,
+        })
+        .returning({ id: examCalendars.id });
+      if (cal === undefined) throw new Error("calendar insert returned no row");
+
+      if (input.events.length > 0) {
+        await db.insert(examCalendarEvents).values(
+          input.events.map((e) => ({
+            calendarId: cal.id,
+            label: e.label,
+            dateText: e.dateText,
+            sortOrder: e.sortOrder,
+            createdAt: now,
+            lastUpdAt: now,
+          })),
+        );
+      }
+      return { id: cal.id };
+    }),
+
+    update: adminProcedure
+      .input(calendarInput.extend({ id: z.string().uuid() }))
+      .mutation(async ({ input }) => {
+        const now = new Date().toISOString();
+        await db
+          .update(examCalendars)
+          .set({
+            title: input.title,
+            note: input.note ?? null,
+            active: input.active,
+            sortOrder: input.sortOrder,
+            lastUpdAt: now,
+          })
+          .where(eq(examCalendars.id, input.id));
+
+        // Replace all events atomically.
+        await db.delete(examCalendarEvents).where(eq(examCalendarEvents.calendarId, input.id));
+        if (input.events.length > 0) {
+          await db.insert(examCalendarEvents).values(
+            input.events.map((e) => ({
+              calendarId: input.id,
+              label: e.label,
+              dateText: e.dateText,
+              sortOrder: e.sortOrder,
+              createdAt: now,
+              lastUpdAt: now,
+            })),
+          );
+        }
+        return { ok: true as const };
+      }),
+
+    toggleActive: adminProcedure
+      .input(z.object({ id: z.string().uuid(), active: z.boolean() }))
+      .mutation(async ({ input }) => {
+        await db
+          .update(examCalendars)
+          .set({ active: input.active, lastUpdAt: new Date().toISOString() })
+          .where(eq(examCalendars.id, input.id));
+        return { ok: true as const };
+      }),
+
+    delete: adminProcedure
+      .input(z.object({ id: z.string().uuid() }))
+      .mutation(async ({ input }) => {
+        await db.delete(examCalendars).where(eq(examCalendars.id, input.id));
+        return { ok: true as const };
+      }),
+  }),
+
   spacedRepetition: router({
     getConfig: adminProcedure.query(async () => {
       const [row] = await db.select().from(spacedRepetitionConfig).limit(1);

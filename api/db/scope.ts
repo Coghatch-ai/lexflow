@@ -18,6 +18,8 @@ const TABLE_SCOPE: Record<string, ScopeType> = {
   oab_questions: { type: "global" },
   list_of_values: { type: "global" },
   spaced_repetition_config: { type: "global" },
+  exam_calendars: { type: "global" },
+  exam_calendar_events: { type: "global" },
 
   // Per-user owned tables
   user_answers: { type: "user" },

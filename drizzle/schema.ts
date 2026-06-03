@@ -260,6 +260,38 @@ export const goalNotifications = pgTable(
   (t) => [index("idx_goal_notif_user").on(t.userId), index("idx_goal_notif_goal").on(t.goalId)],
 );
 
+// ── Exam calendar ─────────────────────────────────────────────────────────────
+
+// One entry per exam cycle (e.g. "46º EXAME DE ORDEM UNIFICADO"). Global, admin-managed.
+export const examCalendars = pgTable(
+  "exam_calendars",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    title: text("title").notNull(),
+    note: text("note"), // e.g. "* Sujeito a alterações"
+    active: boolean("active").notNull().default(true),
+    sortOrder: integer("sort_order").notNull().default(0),
+    ...systemFields,
+  },
+  (t) => [index("idx_exam_calendars_sort").on(t.sortOrder)],
+);
+
+// Individual milestones within a calendar (e.g. "Prova Objetiva – 1ª fase: 03/05/2026").
+export const examCalendarEvents = pgTable(
+  "exam_calendar_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    calendarId: uuid("calendar_id")
+      .notNull()
+      .references(() => examCalendars.id, { onDelete: "cascade" }),
+    label: text("label").notNull(), // event name
+    dateText: text("date_text").notNull(), // free-text date (supports ranges)
+    sortOrder: integer("sort_order").notNull().default(0),
+    ...systemFields,
+  },
+  (t) => [index("idx_exam_cal_events_cal").on(t.calendarId)],
+);
+
 // ── List of values (picklists) ────────────────────────────────────────────────
 
 // Global reference catalog for dropdowns. `type` is an UPPER_SNAKE discriminator
@@ -300,4 +332,15 @@ export const userQuestionStatesRelations = relations(userQuestionStates, ({ one 
 export const userGoalsRelations = relations(userGoals, ({ one, many }) => ({
   user: one(users, { fields: [userGoals.userId], references: [users.id] }),
   notifications: many(goalNotifications),
+}));
+
+export const examCalendarsRelations = relations(examCalendars, ({ many }) => ({
+  events: many(examCalendarEvents),
+}));
+
+export const examCalendarEventsRelations = relations(examCalendarEvents, ({ one }) => ({
+  calendar: one(examCalendars, {
+    fields: [examCalendarEvents.calendarId],
+    references: [examCalendars.id],
+  }),
 }));
