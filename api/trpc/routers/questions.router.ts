@@ -4,10 +4,11 @@
 // (questions the signed-in user has gotten wrong). Gated behind auth.
 
 import { z } from "zod";
-import { and, eq, sql, type SQL } from "drizzle-orm";
+import { and, eq, lte, sql, type SQL } from "drizzle-orm";
 import { db } from "../../db/client";
-import { oabQuestions, userAnswers } from "../../../drizzle/schema";
+import { oabQuestions, spacedRepetitionConfig, userQuestionStates } from "../../../drizzle/schema";
 import { protectedProcedure, router } from "../procedures";
+import { DEFAULT_SM2_CONFIG } from "../../../shared/domain/spaced-repetition";
 
 const listInput = z.object({
   discipline: z.string().min(1).optional(),
@@ -39,8 +40,7 @@ export const questionsRouter = router({
     return rows.map((r) => r.discipline);
   }),
 
-  // Distinct questions the user has answered incorrectly (most recent first) —
-  // drives the spaced-repetition review flow.
+  // Questions due for SM-2 review (next_review_at <= now). Ordered most-overdue first.
   reviewQueue: protectedProcedure.query(async ({ ctx }) => {
     return db
       .select({
@@ -53,15 +53,49 @@ export const questionsRouter = router({
         examBoard: oabQuestions.examBoard,
         difficulty: oabQuestions.difficulty,
         legislationTitle: oabQuestions.legislationTitle,
-        lastAnsweredAt: sql<string>`max(${userAnswers.createdAt})`,
-        timesAnswered: sql<number>`count(*)::int`,
-        timesCorrect: sql<number>`sum(case when ${userAnswers.correct} then 1 else 0 end)::int`,
+        interval: userQuestionStates.interval,
+        repetitions: userQuestionStates.repetitions,
+        easeFactor: userQuestionStates.easeFactor,
+        nextReviewAt: userQuestionStates.nextReviewAt,
+        lastCorrect: userQuestionStates.lastCorrect,
       })
-      .from(userAnswers)
-      .innerJoin(oabQuestions, eq(userAnswers.questionId, oabQuestions.id))
-      .where(and(eq(userAnswers.userId, ctx.userId), eq(userAnswers.correct, false)))
-      .groupBy(oabQuestions.id)
-      .orderBy(sql`max(${userAnswers.createdAt}) desc`)
+      .from(userQuestionStates)
+      .innerJoin(oabQuestions, eq(userQuestionStates.questionId, oabQuestions.id))
+      .where(
+        and(
+          eq(userQuestionStates.userId, ctx.userId),
+          lte(userQuestionStates.nextReviewAt, sql`now()`),
+        ),
+      )
+      .orderBy(userQuestionStates.nextReviewAt)
       .limit(20);
+  }),
+
+  // Count of questions with next_review_at <= now — for the dashboard badge.
+  dueCount: protectedProcedure.query(async ({ ctx }) => {
+    const [row] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(userQuestionStates)
+      .where(
+        and(
+          eq(userQuestionStates.userId, ctx.userId),
+          lte(userQuestionStates.nextReviewAt, sql`now()`),
+        ),
+      );
+    return { count: row?.count ?? 0 };
+  }),
+
+  // Public SM-2 config (readable by all authenticated users for display purposes).
+  sm2Config: protectedProcedure.query(async () => {
+    const [row] = await db.select().from(spacedRepetitionConfig).limit(1);
+    if (row === undefined) return DEFAULT_SM2_CONFIG;
+    return {
+      defaultEaseFactor: parseFloat(row.defaultEaseFactor),
+      minEaseFactor: parseFloat(row.minEaseFactor),
+      easeFactorCorrectBonus: parseFloat(row.easeFactorCorrectBonus),
+      easeFactorWrongPenalty: parseFloat(row.easeFactorWrongPenalty),
+      initialInterval: row.initialInterval,
+      secondInterval: row.secondInterval,
+    };
   }),
 });

@@ -17,6 +17,7 @@ const TABLE_SCOPE: Record<string, ScopeType> = {
   users: { type: "global" },
   oab_questions: { type: "global" },
   list_of_values: { type: "global" },
+  spaced_repetition_config: { type: "global" },
 
   // Per-user owned tables
   user_answers: { type: "user" },
@@ -26,6 +27,7 @@ const TABLE_SCOPE: Record<string, ScopeType> = {
   exam_board_performance: { type: "user" },
   user_goals: { type: "user" },
   goal_notifications: { type: "user" },
+  user_question_states: { type: "user" },
 };
 
 function tableName(table: PgTable): string {

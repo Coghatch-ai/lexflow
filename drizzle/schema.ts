@@ -176,6 +176,56 @@ export const examBoardPerformance = pgTable(
   ],
 );
 
+// ── Spaced repetition ────────────────────────────────────────────────────────
+
+// Per-user SM-2 state for each question answered. Updated on every answer via
+// sessions.record. Used by questions.reviewQueue to surface "due today" cards.
+export const userQuestionStates = pgTable(
+  "user_question_states",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    questionId: text("question_id")
+      .notNull()
+      .references(() => oabQuestions.id),
+    interval: integer("interval").notNull().default(1), // days until next review
+    repetitions: integer("repetitions").notNull().default(0), // successful reviews in a row
+    easeFactor: numeric("ease_factor", { precision: 4, scale: 2 }).notNull().default("2.50"),
+    nextReviewAt: timestamp("next_review_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    lastCorrect: boolean("last_correct"),
+    ...systemFields,
+  },
+  (t) => [
+    unique("uq_user_question_state").on(t.userId, t.questionId),
+    index("idx_uqs_user").on(t.userId),
+    index("idx_uqs_next_review").on(t.userId, t.nextReviewAt),
+  ],
+);
+
+// Global single-row config for the SM-2 algorithm — editable by admins.
+// Always insert/update with id = 'default'. Read defaults from shared/domain/spaced-repetition.ts
+// when the row doesn't exist yet.
+export const spacedRepetitionConfig = pgTable("spaced_repetition_config", {
+  id: text("id").primaryKey().default("default"),
+  defaultEaseFactor: numeric("default_ease_factor", { precision: 4, scale: 2 })
+    .notNull()
+    .default("2.50"),
+  minEaseFactor: numeric("min_ease_factor", { precision: 4, scale: 2 }).notNull().default("1.30"),
+  easeFactorCorrectBonus: numeric("ease_factor_correct_bonus", { precision: 4, scale: 2 })
+    .notNull()
+    .default("0.10"),
+  easeFactorWrongPenalty: numeric("ease_factor_wrong_penalty", { precision: 4, scale: 2 })
+    .notNull()
+    .default("0.20"),
+  initialInterval: integer("initial_interval").notNull().default(1),
+  secondInterval: integer("second_interval").notNull().default(6),
+  ...systemFields,
+});
+
 // ── Goals & notifications ─────────────────────────────────────────────────────
 
 export const userGoals = pgTable(
@@ -236,6 +286,15 @@ export const usersRelations = relations(users, ({ many, one }) => ({
   sessions: many(studySessions),
   goals: many(userGoals),
   stats: one(userPerformanceStats),
+  questionStates: many(userQuestionStates),
+}));
+
+export const userQuestionStatesRelations = relations(userQuestionStates, ({ one }) => ({
+  user: one(users, { fields: [userQuestionStates.userId], references: [users.id] }),
+  question: one(oabQuestions, {
+    fields: [userQuestionStates.questionId],
+    references: [oabQuestions.id],
+  }),
 }));
 
 export const userGoalsRelations = relations(userGoals, ({ one, many }) => ({

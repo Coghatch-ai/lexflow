@@ -15,6 +15,13 @@
       "when": 1780141128623,
       "tag": "0001_slim_wendigo",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1780494345205,
+      "tag": "0002_sour_iron_man",
+      "breakpoints": true
     }
   ]
 }

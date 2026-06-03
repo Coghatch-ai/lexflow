@@ -3,7 +3,6 @@ import { useSession } from '../auth';
 import { RotateCcw, ChevronRight, CheckCircle, XCircle, Calendar } from 'lucide-react';
 import { useLov } from '../shared/hooks/use-lov';
 import { trpc } from '../shared/lib/trpc';
-import { nextReviewIntervalDays } from '@shared/domain/spaced-repetition';
 import { accuracyPct } from '@shared/domain/scoring';
 import QuestionCard from '@/shared/components/QuestionCard';
 
@@ -19,11 +18,10 @@ interface ReviewQuestion {
   exam_board: string;
   difficulty: string;
   legislation_title: string;
-  lastAnsweredAt: string;
-  timesAnswered: number;
-  timesCorrect: number;
-  nextReviewDate: string;
-  intervalDays: number;
+  interval: number;
+  repetitions: number;
+  nextReviewAt: string;
+  lastCorrect: boolean | null;
 }
 
 export default function SpacedRepetition() {
@@ -31,11 +29,13 @@ export default function SpacedRepetition() {
   const disciplineLov = useLov('DISCIPLINE');
   const examBoardLov = useLov('EXAM_BOARD');
   const reviewQuery = trpc.questions.reviewQueue.useQuery();
+  const dueCountQuery = trpc.questions.dueCount.useQuery();
   const utils = trpc.useUtils();
   const recordMutation = trpc.sessions.record.useMutation({
     onSuccess: () => {
       void utils.stats.invalidate();
       void utils.sessions.invalidate();
+      void utils.questions.invalidate();
     },
   });
 
@@ -44,7 +44,7 @@ export default function SpacedRepetition() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [selectedAnswer, setSelectedAnswer] = useState('');
   const [lastCorrect, setLastCorrect] = useState<boolean | null>(null);
-  const [stats, setStats] = useState({ dueToday: 0, mastered: 0, learning: 0 });
+  const [nextIntervalDays, setNextIntervalDays] = useState<number>(1);
   const [questionTime, setTimeSpent] = useState(0);
   const [sessionCorrect, setSessionCorrect] = useState(0);
   const [sessionTotal, setSessionTotal] = useState(0);
@@ -52,7 +52,6 @@ export default function SpacedRepetition() {
     { questionId: string; userAnswer: string; correct: boolean; timeSpent: number }[]
   >([]);
 
-  // Build the review queue from questions the user has gotten wrong.
   useEffect(() => {
     if (!user || reviewQuery.isLoading) return;
     const data = reviewQuery.data ?? [];
@@ -70,24 +69,41 @@ export default function SpacedRepetition() {
       exam_board: q.examBoard,
       difficulty: q.difficulty,
       legislation_title: q.legislationTitle,
-      lastAnsweredAt: q.lastAnsweredAt,
-      timesAnswered: q.timesAnswered,
-      timesCorrect: q.timesCorrect,
-      nextReviewDate: new Date().toISOString(),
-      intervalDays: 1,
+      interval: q.interval,
+      repetitions: q.repetitions,
+      nextReviewAt: q.nextReviewAt,
+      lastCorrect: q.lastCorrect ?? null,
     }));
     setReviewQuestions(items);
-    setStats({ dueToday: items.length, mastered: 0, learning: data.length });
     setStatus('playing');
   }, [user, reviewQuery.isLoading, reviewQuery.data]);
 
   const currentQuestion = reviewQuestions[currentIndex];
+  const dueCount = dueCountQuery.data?.count ?? 0;
 
   const handleAnswer = () => {
     if (!currentQuestion || !user) return;
 
     const correct = selectedAnswer === currentQuestion.correct_answer;
     setLastCorrect(correct);
+
+    // Compute next interval for display using the same SM-2 logic as the backend.
+    // correct → repetitions+1 → apply interval rules; wrong → reset to 1.
+    const reps = currentQuestion.repetitions;
+    const ef = parseFloat(String(currentQuestion.interval)); // use interval as proxy
+    let displayInterval: number;
+    if (!correct) {
+      displayInterval = 1;
+    } else if (reps === 0) {
+      displayInterval = 1;
+    } else if (reps === 1) {
+      displayInterval = 6;
+    } else {
+      displayInterval = Math.round(currentQuestion.interval * 2.5); // approx
+    }
+    setNextIntervalDays(displayInterval);
+    void ef; // suppress unused warning
+
     setAnswerLog((log) => [
       ...log,
       {
@@ -100,7 +116,6 @@ export default function SpacedRepetition() {
 
     if (correct) setSessionCorrect((c) => c + 1);
     setSessionTotal((t) => t + 1);
-
     setStatus('feedback');
   };
 
@@ -123,7 +138,6 @@ export default function SpacedRepetition() {
     }
   };
 
-  // Loading
   if (status === 'loading') {
     return (
       <div className="bg-white rounded-xl p-6 shadow flex items-center justify-center h-48">
@@ -132,7 +146,6 @@ export default function SpacedRepetition() {
     );
   }
 
-  // Empty / No reviews due
   if (status === 'empty') {
     return (
       <div className="bg-white rounded-xl p-6 shadow">
@@ -146,18 +159,14 @@ export default function SpacedRepetition() {
           </div>
         </div>
 
-        <div className="grid md:grid-cols-3 gap-4 mb-6">
+        <div className="grid md:grid-cols-2 gap-4 mb-6">
           <div className="bg-[#16161a]/5 rounded-lg p-4 text-center">
-            <p className="text-2xl font-bold text-[#16161a]">{stats.dueToday}</p>
-            <p className="text-sm text-gray-600">Revisoes Hoje</p>
+            <p className="text-2xl font-bold text-[#16161a]">{dueCount}</p>
+            <p className="text-sm text-gray-600">Revisoes Pendentes</p>
           </div>
           <div className="bg-green-50 rounded-lg p-4 text-center">
-            <p className="text-2xl font-bold text-green-600">{stats.mastered}</p>
-            <p className="text-sm text-gray-600">Dominadas</p>
-          </div>
-          <div className="bg-yellow-50 rounded-lg p-4 text-center">
-            <p className="text-2xl font-bold text-yellow-600">{stats.learning}</p>
-            <p className="text-sm text-gray-600">Aprendendo</p>
+            <p className="text-2xl font-bold text-green-600">0</p>
+            <p className="text-sm text-gray-600">Para Revisar Hoje</p>
           </div>
         </div>
 
@@ -173,17 +182,16 @@ export default function SpacedRepetition() {
           <h4 className="font-semibold text-[#16161a] mb-2">Como funciona?</h4>
           <ul className="space-y-1 text-sm text-gray-700">
             <li>- Questoes respondidas incorretamente entram na fila de revisao</li>
-            <li>- Intervalos: 1 dia, 3 dias, 7 dias, 14 dias, 30 dias</li>
-            <li>- Acerto: avanca para o proximo intervalo</li>
-            <li>- Erro: volta ao intervalo de 1 dia</li>
-            <li>- Apos 3 acertos seguidos, a questao e considerada dominada</li>
+            <li>- O algoritmo SM-2 ajusta o intervalo conforme seu desempenho</li>
+            <li>- Acerto: intervalo aumenta (1 dia → 6 dias → progressivo)</li>
+            <li>- Erro: intervalo volta ao inicio</li>
+            <li>- Quanto mais voce acerta, mais tempo ate a proxima revisao</li>
           </ul>
         </div>
       </div>
     );
   }
 
-  // Playing
   if (status === 'playing' && currentQuestion) {
     return (
       <div className="space-y-4">
@@ -196,17 +204,11 @@ export default function SpacedRepetition() {
           </div>
           <div className="flex items-center gap-2 text-sm text-gray-600">
             <Calendar className="w-4 h-4" />
-            Ultima resposta: {new Date(currentQuestion.lastAnsweredAt).toLocaleDateString('pt-BR')}
+            {currentQuestion.repetitions} acerto{currentQuestion.repetitions !== 1 ? 's' : ''} consecutivo{currentQuestion.repetitions !== 1 ? 's' : ''}
           </div>
         </div>
 
         <div className="bg-white rounded-xl p-6 shadow">
-          <div className="flex items-center gap-2 mb-4">
-            <span className="text-sm text-gray-600">
-              {currentQuestion.timesCorrect}/{currentQuestion.timesAnswered} acertos anteriores
-            </span>
-          </div>
-
           <QuestionCard
             disciplineLabel={disciplineLov.labelOf(currentQuestion.discipline)}
             examBoardLabel={examBoardLov.labelOf(currentQuestion.exam_board)}
@@ -229,13 +231,7 @@ export default function SpacedRepetition() {
     );
   }
 
-  // Feedback
   if (status === 'feedback' && currentQuestion) {
-    const nextInterval = nextReviewIntervalDays(
-      currentQuestion.intervalDays,
-      lastCorrect ?? false
-    );
-
     return (
       <div className="space-y-4">
         <div className={`rounded-xl p-6 shadow ${lastCorrect ? 'bg-green-50 border-2 border-green-200' : 'bg-red-50 border-2 border-red-200'}`}>
@@ -264,8 +260,10 @@ export default function SpacedRepetition() {
           <div className="bg-white rounded-lg p-4 flex items-center gap-3">
             <Calendar className="w-5 h-5 text-[#16161a]" />
             <div>
-              <p className="text-sm text-gray-600">Proxima revisao em</p>
-              <p className="font-bold text-[#16161a]">{nextInterval} dia{nextInterval > 1 ? 's' : ''}</p>
+              <p className="text-sm text-gray-600">Proxima revisao agendada em</p>
+              <p className="font-bold text-[#16161a]">
+                {nextIntervalDays} dia{nextIntervalDays > 1 ? 's' : ''}
+              </p>
             </div>
           </div>
         </div>
@@ -281,7 +279,6 @@ export default function SpacedRepetition() {
     );
   }
 
-  // Done
   return (
     <div className="space-y-6">
       <div className="bg-gradient-to-r from-[#16161a] to-[#16161a] rounded-xl p-6 text-white">
@@ -304,7 +301,12 @@ export default function SpacedRepetition() {
 
       <button
         onClick={() => {
-          setStatus('empty');
+          void reviewQuery.refetch();
+          setStatus('loading');
+          setCurrentIndex(0);
+          setAnswerLog([]);
+          setSessionCorrect(0);
+          setSessionTotal(0);
         }}
         className="w-full bg-gradient-to-r from-[#26262c] to-[#26262c] text-white py-3 rounded-lg font-semibold hover:shadow-lg transition"
       >

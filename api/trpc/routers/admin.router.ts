@@ -8,9 +8,19 @@
 import { z } from "zod";
 import { and, asc, eq, sql, type SQL } from "drizzle-orm";
 import { db } from "../../db/client";
-import { oabQuestions } from "../../../drizzle/schema";
+import { oabQuestions, spacedRepetitionConfig } from "../../../drizzle/schema";
 import { adminProcedure, router } from "../procedures";
 import { adminQuestionInputSchema } from "../../../shared/domain/admin-question";
+import { DEFAULT_SM2_CONFIG } from "../../../shared/domain/spaced-repetition";
+
+const sm2ConfigInput = z.object({
+  defaultEaseFactor: z.number().min(1).max(5),
+  minEaseFactor: z.number().min(1).max(3),
+  easeFactorCorrectBonus: z.number().min(0).max(1),
+  easeFactorWrongPenalty: z.number().min(0).max(1),
+  initialInterval: z.number().int().min(1).max(7),
+  secondInterval: z.number().int().min(2).max(60),
+});
 
 const listInput = z.object({
   discipline: z.string().min(1).optional(),
@@ -25,6 +35,51 @@ function generateId(): string {
 }
 
 export const adminRouter = router({
+  spacedRepetition: router({
+    getConfig: adminProcedure.query(async () => {
+      const [row] = await db.select().from(spacedRepetitionConfig).limit(1);
+      if (row === undefined) return DEFAULT_SM2_CONFIG;
+      return {
+        defaultEaseFactor: parseFloat(row.defaultEaseFactor),
+        minEaseFactor: parseFloat(row.minEaseFactor),
+        easeFactorCorrectBonus: parseFloat(row.easeFactorCorrectBonus),
+        easeFactorWrongPenalty: parseFloat(row.easeFactorWrongPenalty),
+        initialInterval: row.initialInterval,
+        secondInterval: row.secondInterval,
+      };
+    }),
+
+    updateConfig: adminProcedure.input(sm2ConfigInput).mutation(async ({ input }) => {
+      const now = new Date().toISOString();
+      await db
+        .insert(spacedRepetitionConfig)
+        .values({
+          id: "default",
+          defaultEaseFactor: input.defaultEaseFactor.toFixed(2),
+          minEaseFactor: input.minEaseFactor.toFixed(2),
+          easeFactorCorrectBonus: input.easeFactorCorrectBonus.toFixed(2),
+          easeFactorWrongPenalty: input.easeFactorWrongPenalty.toFixed(2),
+          initialInterval: input.initialInterval,
+          secondInterval: input.secondInterval,
+          createdAt: now,
+          lastUpdAt: now,
+        })
+        .onConflictDoUpdate({
+          target: spacedRepetitionConfig.id,
+          set: {
+            defaultEaseFactor: input.defaultEaseFactor.toFixed(2),
+            minEaseFactor: input.minEaseFactor.toFixed(2),
+            easeFactorCorrectBonus: input.easeFactorCorrectBonus.toFixed(2),
+            easeFactorWrongPenalty: input.easeFactorWrongPenalty.toFixed(2),
+            initialInterval: input.initialInterval,
+            secondInterval: input.secondInterval,
+            lastUpdAt: now,
+          },
+        });
+      return { ok: true as const };
+    }),
+  }),
+
   questions: router({
     list: adminProcedure.input(listInput).query(async ({ input }) => {
       const conds: SQL[] = [];
