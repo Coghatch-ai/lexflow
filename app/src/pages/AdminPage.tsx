@@ -11,7 +11,6 @@ import {
   Check,
   X,
   AlertCircle,
-  SlidersHorizontal,
 } from 'lucide-react';
 import { trpc } from '../shared/lib/trpc';
 import { useLov } from '../shared/hooks/use-lov';
@@ -118,10 +117,10 @@ const BLANK_FORM: AdminQuestionInput = {
 };
 
 // ---------------------------------------------------------------------------
-// Main component
+// Access gate — shared by all admin pages
 // ---------------------------------------------------------------------------
 
-export default function AdminPage() {
+function AdminGate({ children }: { children: React.ReactNode }) {
   const me = trpc.users.me.useQuery();
 
   if (me.isLoading) {
@@ -142,17 +141,17 @@ export default function AdminPage() {
     );
   }
 
-  return <AdminPanel />;
+  return <>{children}</>;
 }
 
 // ---------------------------------------------------------------------------
-// AdminPanel — rendered only for admin users
+// Questões page — list / form / import tabs
 // ---------------------------------------------------------------------------
 
-type Tab = 'list' | 'form' | 'import' | 'algorithm' | 'calendar';
+type QuestionsTab = 'list' | 'form' | 'import';
 
-function AdminPanel() {
-  const [activeTab, setActiveTab] = useState<Tab>('list');
+function QuestionsPanel() {
+  const [activeTab, setActiveTab] = useState<QuestionsTab>('list');
   const [editingQuestion, setEditingQuestion] = useState<AdminQuestionInput | null>(null);
 
   function openEdit(q: AdminQuestionInput) {
@@ -165,26 +164,17 @@ function AdminPanel() {
     setActiveTab('form');
   }
 
-  const tabs: Array<{ id: Tab; label: string }> = [
+  const tabs: Array<{ id: QuestionsTab; label: string }> = [
     { id: 'list', label: 'Administrar Questões' },
     { id: 'form', label: editingQuestion ? 'Editar' : 'Adicionar' },
     { id: 'import', label: 'Importar CSV' },
-    { id: 'algorithm', label: 'Algoritmo' },
-    { id: 'calendar', label: 'Calendário' },
   ];
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Shield className="w-6 h-6 text-[#d9ab53]" strokeWidth={1.75} />
-          <div>
-            <h1 className="font-display text-xl font-bold text-ink">Admin</h1>
-            <p className="text-sm text-ink-mute">Gerenciar catálogo de questões OAB</p>
-          </div>
-        </div>
-        {activeTab !== 'algorithm' && activeTab !== 'calendar' && (
+        <p className="text-sm text-ink-mute">Gerencie o catálogo de questões OAB — adicione, edite ou importe via CSV.</p>
+        {activeTab !== 'import' && (
           <button
             onClick={openCreate}
             className="flex items-center gap-2 px-4 py-2 bg-[#d9ab53] text-[#16161a] text-sm font-semibold rounded-lg hover:bg-[#e0b86a] transition-colors"
@@ -195,7 +185,6 @@ function AdminPanel() {
         )}
       </div>
 
-      {/* Tabs */}
       <div className="border-b border-line">
         <div className="flex gap-1">
           {tabs.map((tab) => (
@@ -214,30 +203,29 @@ function AdminPanel() {
         </div>
       </div>
 
-      {/* Tab content */}
-      {activeTab === 'list' && (
-        <QuestionsList onEdit={openEdit} onCreate={openCreate} />
-      )}
+      {activeTab === 'list' && <QuestionsList onEdit={openEdit} onCreate={openCreate} />}
       {activeTab === 'form' && (
         <QuestionForm
           initial={editingQuestion}
-          onSuccess={() => {
-            setEditingQuestion(null);
-            setActiveTab('list');
-          }}
-          onCancel={() => {
-            setEditingQuestion(null);
-            setActiveTab('list');
-          }}
+          onSuccess={() => { setEditingQuestion(null); setActiveTab('list'); }}
+          onCancel={() => { setEditingQuestion(null); setActiveTab('list'); }}
         />
       )}
-      {activeTab === 'import' && (
-        <CsvImport onSuccess={() => setActiveTab('list')} />
-      )}
-      {activeTab === 'algorithm' && <AlgorithmConfig />}
-      {activeTab === 'calendar' && <CalendarAdmin />}
+      {activeTab === 'import' && <CsvImport onSuccess={() => setActiveTab('list')} />}
     </div>
   );
+}
+
+export function AdminQuestionsPage() {
+  return <AdminGate><QuestionsPanel /></AdminGate>;
+}
+
+export function AdminAlgorithmPage() {
+  return <AdminGate><AlgorithmConfig /></AdminGate>;
+}
+
+export function AdminCalendarPage() {
+  return <AdminGate><CalendarAdmin /></AdminGate>;
 }
 
 // ---------------------------------------------------------------------------
@@ -352,15 +340,7 @@ function AlgorithmConfig() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-3">
-        <SlidersHorizontal className="w-5 h-5 text-[#d9ab53]" />
-        <div>
-          <h2 className="text-base font-bold text-ink">Configuração do Algoritmo SM-2</h2>
-          <p className="text-sm text-ink-mute">
-            Ajuste os parâmetros da revisão espaçada. Valores afetam novos cálculos imediatamente.
-          </p>
-        </div>
-      </div>
+      <p className="text-sm text-ink-mute">Ajuste os parâmetros SM-2 da revisão espaçada. Valores afetam novos cálculos imediatamente.</p>
 
       <div className="grid gap-4">
         {fields.map((f) => (
@@ -1184,10 +1164,7 @@ function CalendarAdmin() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-base font-bold text-ink">Calendário de Exames</h2>
-          <p className="text-sm text-ink-mute">Gerencie os ciclos de exame exibidos na página inicial.</p>
-        </div>
+        <p className="text-sm text-ink-mute">Gerencie os ciclos de exame exibidos na página inicial.</p>
         {!showForm && (
           <button
             onClick={() => { resetForm(); setShowForm(true); }}

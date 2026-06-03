@@ -12,6 +12,8 @@ import { goalsRouter } from "./routers/goals.router";
 import { listOfValuesRouter } from "./routers/list-of-values.router";
 import { adminRouter } from "./routers/admin.router";
 import { calendarsRouter } from "./routers/calendars.router";
+import { notesRouter } from "./routers/notes.router";
+import { bookmarksRouter } from "./routers/bookmarks.router";
 
 export const appRouter = router({
   health: publicProcedure.query(() => ({ status: "ok" as const })),
@@ -23,6 +25,8 @@ export const appRouter = router({
   lov: listOfValuesRouter,
   admin: adminRouter,
   calendars: calendarsRouter,
+  notes: notesRouter,
+  bookmarks: bookmarksRouter,
 });
 
 export type AppRouter = typeof appRouter;

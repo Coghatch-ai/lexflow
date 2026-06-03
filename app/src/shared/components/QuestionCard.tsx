@@ -1,9 +1,11 @@
 // Shared answer-question UI used by every simulation screen (standard,
 // adaptive, spaced repetition, real exam). Renders the discipline/exam-board
-// line, the question text, and the selectable answer options with the
-// selection-circle UI. The caller owns the surrounding card wrapper, any
-// header/timer, and the Confirm/Next action button — this component only
-// renders the inner block so the rendered design stays identical everywhere.
+// line, the question text, the selectable answer options, and optionally the
+// bookmark toggle + notes textarea when the caller provides those handlers.
+// The caller owns the surrounding card wrapper, any header/timer, and the
+// Confirm/Next action button.
+
+import { Bookmark } from "lucide-react";
 
 type QuestionCardProps = {
   disciplineLabel: string;
@@ -12,6 +14,10 @@ type QuestionCardProps = {
   options: string[];
   selectedAnswer: string;
   onSelect: (option: string) => void;
+  note?: string;
+  onNoteChange?: (text: string) => void;
+  isBookmarked?: boolean;
+  onToggleBookmark?: () => void;
 };
 
 export default function QuestionCard({
@@ -21,6 +27,10 @@ export default function QuestionCard({
   options,
   selectedAnswer,
   onSelect,
+  note,
+  onNoteChange,
+  isBookmarked,
+  onToggleBookmark,
 }: QuestionCardProps): React.JSX.Element {
   return (
     <>
@@ -58,6 +68,39 @@ export default function QuestionCard({
           </button>
         ))}
       </div>
+
+      {(onToggleBookmark !== undefined || onNoteChange !== undefined) && (
+        <div className="border-t border-gray-100 pt-4 space-y-3 mb-2">
+          {onToggleBookmark !== undefined && (
+            <button
+              onClick={onToggleBookmark}
+              className={`flex items-center gap-2 text-sm font-medium transition ${
+                isBookmarked === true ? "text-[#16161a]" : "text-gray-400 hover:text-[#16161a]"
+              }`}
+            >
+              <Bookmark
+                className="w-4 h-4"
+                fill={isBookmarked === true ? "currentColor" : "none"}
+              />
+              {isBookmarked === true ? "Salvo para depois" : "Salvar para depois"}
+            </button>
+          )}
+          {onNoteChange !== undefined && (
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Anotações</label>
+              <textarea
+                value={note ?? ""}
+                onChange={(e) => {
+                  onNoteChange(e.target.value);
+                }}
+                placeholder="Digite sua anotação..."
+                rows={2}
+                className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:border-[#16161a] resize-none text-gray-700 placeholder-gray-400"
+              />
+            </div>
+          )}
+        </div>
+      )}
     </>
   );
 }

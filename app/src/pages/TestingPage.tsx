@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useSession } from '../auth';
 import { Clock, CheckCircle, XCircle, ChevronRight, BookOpen } from 'lucide-react';
 import { useLov } from '../shared/hooks/use-lov';
@@ -44,6 +44,56 @@ export default function TestingPage() {
       void utils.sessions.invalidate();
     },
   });
+
+  const notesQuery = trpc.notes.list.useQuery();
+  const bookmarksQuery = trpc.bookmarks.list.useQuery();
+  const notesMutation = trpc.notes.upsert.useMutation();
+  const deleteNoteMutation = trpc.notes.delete.useMutation();
+  const bookmarksMutation = trpc.bookmarks.toggle.useMutation();
+  const [localNotes, setLocalNotes] = useState<Map<string, string>>(new Map());
+  const [bookmarkedIds, setBookmarkedIds] = useState<Set<string>>(new Set());
+  const noteDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (!notesQuery.data) return;
+    const map = new Map<string, string>();
+    notesQuery.data.forEach((n) => map.set(n.questionId, n.noteText));
+    setLocalNotes(map);
+  }, [notesQuery.data]);
+
+  useEffect(() => {
+    if (!bookmarksQuery.data) return;
+    setBookmarkedIds(new Set(bookmarksQuery.data));
+  }, [bookmarksQuery.data]);
+
+  useEffect(() => {
+    return () => {
+      if (noteDebounceRef.current) clearTimeout(noteDebounceRef.current);
+    };
+  }, []);
+
+  const handleNoteChange = (questionId: string, text: string) => {
+    setLocalNotes((prev) => new Map(prev).set(questionId, text));
+    if (noteDebounceRef.current) clearTimeout(noteDebounceRef.current);
+    noteDebounceRef.current = setTimeout(() => {
+      if (text.trim().length > 0) {
+        notesMutation.mutate({ questionId, noteText: text });
+      } else {
+        deleteNoteMutation.mutate({ questionId });
+      }
+    }, 1000);
+  };
+
+  const handleToggleBookmark = (questionId: string) => {
+    setBookmarkedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(questionId)) next.delete(questionId);
+      else next.add(questionId);
+      return next;
+    });
+    bookmarksMutation.mutate({ questionId });
+  };
+
   const [mode, setMode] = useState<Mode | null>(null);
   const [status, setStatus] = useState<QuestionStatus>('not-started');
   const [questions, setQuestions] = useState<Question[]>([]);
@@ -340,6 +390,10 @@ export default function TestingPage() {
             options={currentQuestion.options}
             selectedAnswer={selectedAnswer}
             onSelect={setSelectedAnswer}
+            note={localNotes.get(currentQuestion.id) ?? ''}
+            onNoteChange={(text) => handleNoteChange(currentQuestion.id, text)}
+            isBookmarked={bookmarkedIds.has(currentQuestion.id)}
+            onToggleBookmark={() => handleToggleBookmark(currentQuestion.id)}
           />
 
           <button

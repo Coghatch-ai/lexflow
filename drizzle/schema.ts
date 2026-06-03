@@ -260,6 +260,39 @@ export const goalNotifications = pgTable(
   (t) => [index("idx_goal_notif_user").on(t.userId), index("idx_goal_notif_goal").on(t.goalId)],
 );
 
+// ── Notes & bookmarks ─────────────────────────────────────────────────────────
+
+export const userQuestionNotes = pgTable(
+  "user_question_notes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    questionId: text("question_id")
+      .notNull()
+      .references(() => oabQuestions.id),
+    noteText: text("note_text").notNull(),
+    ...systemFields,
+  },
+  (t) => [unique("uq_user_question_note").on(t.userId, t.questionId)],
+);
+
+export const userBookmarks = pgTable(
+  "user_bookmarks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    questionId: text("question_id")
+      .notNull()
+      .references(() => oabQuestions.id),
+    ...systemFields,
+  },
+  (t) => [unique("uq_user_bookmark").on(t.userId, t.questionId)],
+);
+
 // ── Exam calendar ─────────────────────────────────────────────────────────────
 
 // One entry per exam cycle (e.g. "46º EXAME DE ORDEM UNIFICADO"). Global, admin-managed.
@@ -319,6 +352,8 @@ export const usersRelations = relations(users, ({ many, one }) => ({
   goals: many(userGoals),
   stats: one(userPerformanceStats),
   questionStates: many(userQuestionStates),
+  notes: many(userQuestionNotes),
+  bookmarks: many(userBookmarks),
 }));
 
 export const userQuestionStatesRelations = relations(userQuestionStates, ({ one }) => ({
@@ -342,5 +377,21 @@ export const examCalendarEventsRelations = relations(examCalendarEvents, ({ one 
   calendar: one(examCalendars, {
     fields: [examCalendarEvents.calendarId],
     references: [examCalendars.id],
+  }),
+}));
+
+export const userQuestionNotesRelations = relations(userQuestionNotes, ({ one }) => ({
+  user: one(users, { fields: [userQuestionNotes.userId], references: [users.id] }),
+  question: one(oabQuestions, {
+    fields: [userQuestionNotes.questionId],
+    references: [oabQuestions.id],
+  }),
+}));
+
+export const userBookmarksRelations = relations(userBookmarks, ({ one }) => ({
+  user: one(users, { fields: [userBookmarks.userId], references: [users.id] }),
+  question: one(oabQuestions, {
+    fields: [userBookmarks.questionId],
+    references: [oabQuestions.id],
   }),
 }));

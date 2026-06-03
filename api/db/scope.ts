@@ -30,6 +30,8 @@ const TABLE_SCOPE: Record<string, ScopeType> = {
   user_goals: { type: "user" },
   goal_notifications: { type: "user" },
   user_question_states: { type: "user" },
+  user_question_notes: { type: "user" },
+  user_bookmarks: { type: "user" },
 };
 
 function tableName(table: PgTable): string {

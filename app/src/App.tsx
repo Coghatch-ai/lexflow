@@ -6,9 +6,19 @@ import TestingPage from "./pages/TestingPage";
 import AnalyticsPage from "./pages/AnalyticsPage";
 import GoalsPage from "./pages/GoalsPage";
 import ProfilePage from "./pages/ProfilePage";
-import AdminPage from "./pages/AdminPage";
+import { AdminQuestionsPage, AdminAlgorithmPage, AdminCalendarPage } from "./pages/AdminPage";
+import SavedQuestionsPage from "./pages/SavedQuestionsPage";
 
-type Page = "home" | "testing" | "analytics" | "goals" | "profile" | "admin";
+type Page =
+  | "home"
+  | "testing"
+  | "analytics"
+  | "goals"
+  | "profile"
+  | "admin-questions"
+  | "admin-algorithm"
+  | "admin-calendar"
+  | "saved";
 
 function renderPage(page: Page): ReactElement {
   switch (page) {
@@ -20,8 +30,14 @@ function renderPage(page: Page): ReactElement {
       return <GoalsPage />;
     case "profile":
       return <ProfilePage />;
-    case "admin":
-      return <AdminPage />;
+    case "admin-questions":
+      return <AdminQuestionsPage />;
+    case "admin-algorithm":
+      return <AdminAlgorithmPage />;
+    case "admin-calendar":
+      return <AdminCalendarPage />;
+    case "saved":
+      return <SavedQuestionsPage />;
     case "home":
       return <HomePage />;
   }

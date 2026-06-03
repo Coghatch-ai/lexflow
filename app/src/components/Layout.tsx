@@ -11,7 +11,10 @@ import {
   Menu,
   X,
   Scale,
-  Shield,
+  FileText,
+  SlidersHorizontal,
+  CalendarDays,
+  Bookmark,
 } from 'lucide-react';
 
 interface LayoutProps {
@@ -20,13 +23,14 @@ interface LayoutProps {
   onPageChange: (page: string) => void;
 }
 
-type Page = 'home' | 'testing' | 'analytics' | 'goals' | 'profile' | 'admin';
+type Page = 'home' | 'testing' | 'analytics' | 'goals' | 'profile' | 'saved' | 'admin-questions' | 'admin-algorithm' | 'admin-calendar';
 
 const navItems: Array<{ id: Page; label: string; icon: React.ReactNode }> = [
   { id: 'home', label: 'Inicio', icon: <Home className="w-[18px] h-[18px]" /> },
   { id: 'testing', label: 'Simulados', icon: <BookOpen className="w-[18px] h-[18px]" /> },
   { id: 'analytics', label: 'Analytics', icon: <BarChart3 className="w-[18px] h-[18px]" /> },
   { id: 'goals', label: 'Metas', icon: <Target className="w-[18px] h-[18px]" /> },
+  { id: 'saved', label: 'Questões Salvas', icon: <Bookmark className="w-[18px] h-[18px]" /> },
   { id: 'profile', label: 'Perfil', icon: <User className="w-[18px] h-[18px]" /> },
 ];
 
@@ -104,25 +108,35 @@ export default function Layout({
               <>
                 <div className="mx-1 mt-3 mb-2 h-px bg-[var(--ink-line)]" />
                 <p className="px-3 pb-1 eyebrow">Admin</p>
-                <button
-                  onClick={() => { onPageChange('admin'); setSidebarOpen(false); }}
-                  aria-current={currentPage === 'admin' ? 'page' : undefined}
-                  className={`group relative w-full flex items-center gap-3 rounded-lg pl-4 pr-3 py-2.5 text-sm transition-colors ${
-                    currentPage === 'admin'
-                      ? 'bg-[var(--ink-raised)] text-surface font-semibold'
-                      : 'text-[var(--ink-mute)] hover:text-surface hover:bg-white/[0.05] font-medium'
-                  }`}
-                >
-                  <span
-                    className={`absolute left-0 top-1/2 -translate-y-1/2 h-5 w-[3px] rounded-full bg-seal-bright transition-opacity ${
-                      currentPage === 'admin' ? 'opacity-100' : 'opacity-0'
-                    }`}
-                  />
-                  <span className={currentPage === 'admin' ? 'text-seal-bright' : ''}>
-                    <Shield className="w-[18px] h-[18px]" />
-                  </span>
-                  <span>Admin</span>
-                </button>
+                {(
+                  [
+                    { id: 'admin-questions' as Page, label: 'Questões', icon: <FileText className="w-[18px] h-[18px]" /> },
+                    { id: 'admin-algorithm' as Page, label: 'Algoritmo', icon: <SlidersHorizontal className="w-[18px] h-[18px]" /> },
+                    { id: 'admin-calendar' as Page, label: 'Calendário', icon: <CalendarDays className="w-[18px] h-[18px]" /> },
+                  ] as const
+                ).map((item) => {
+                  const active = currentPage === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => { onPageChange(item.id); setSidebarOpen(false); }}
+                      aria-current={active ? 'page' : undefined}
+                      className={`group relative w-full flex items-center gap-3 rounded-lg pl-4 pr-3 py-2.5 text-sm transition-colors ${
+                        active
+                          ? 'bg-[var(--ink-raised)] text-surface font-semibold'
+                          : 'text-[var(--ink-mute)] hover:text-surface hover:bg-white/[0.05] font-medium'
+                      }`}
+                    >
+                      <span
+                        className={`absolute left-0 top-1/2 -translate-y-1/2 h-5 w-[3px] rounded-full bg-seal-bright transition-opacity ${
+                          active ? 'opacity-100' : 'opacity-0'
+                        }`}
+                      />
+                      <span className={active ? 'text-seal-bright' : ''}>{item.icon}</span>
+                      <span>{item.label}</span>
+                    </button>
+                  );
+                })}
               </>
             )}
           </nav>
@@ -174,7 +188,10 @@ export default function Layout({
             <div className="min-w-0">
               <p className="eyebrow leading-none">Probius</p>
               <h2 className="mt-1 font-display text-lg md:text-xl font-bold leading-none">
-                {currentPage === 'admin' ? 'Admin' : navItems.find((item) => item.id === currentPage)?.label}
+                {currentPage === 'admin-questions' ? 'Questões' :
+                 currentPage === 'admin-algorithm' ? 'Algoritmo' :
+                 currentPage === 'admin-calendar' ? 'Calendário' :
+                 navItems.find((item) => item.id === currentPage)?.label}
               </h2>
             </div>
           </div>

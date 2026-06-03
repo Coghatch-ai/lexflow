@@ -4,7 +4,7 @@
 // (questions the signed-in user has gotten wrong). Gated behind auth.
 
 import { z } from "zod";
-import { and, eq, lte, sql, type SQL } from "drizzle-orm";
+import { and, eq, inArray, lte, sql, type SQL } from "drizzle-orm";
 import { db } from "../../db/client";
 import { oabQuestions, spacedRepetitionConfig, userQuestionStates } from "../../../drizzle/schema";
 import { protectedProcedure, router } from "../procedures";
@@ -84,6 +84,14 @@ export const questionsRouter = router({
       );
     return { count: row?.count ?? 0 };
   }),
+
+  // Fetch a specific set of questions by ID — used by the "Questões Salvas" page.
+  byIds: protectedProcedure
+    .input(z.object({ ids: z.array(z.string()).max(500) }))
+    .query(async ({ input }) => {
+      if (input.ids.length === 0) return [];
+      return db.select().from(oabQuestions).where(inArray(oabQuestions.id, input.ids));
+    }),
 
   // Public SM-2 config (readable by all authenticated users for display purposes).
   sm2Config: protectedProcedure.query(async () => {
