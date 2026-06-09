@@ -36,6 +36,20 @@
       "when": 1780500809911,
       "tag": "0004_motionless_rattler",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1780952702364,
+      "tag": "0005_lucky_silver_samurai",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1780956036212,
+      "tag": "0006_wonderful_calypso",
+      "breakpoints": true
     }
   ]
 }

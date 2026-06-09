@@ -25,6 +25,7 @@ import {
   unique,
   uuid,
 } from "drizzle-orm/pg-core";
+import type { PlanConfig } from "../shared/domain/study-plan";
 
 // The four system audit columns present on every table without exception.
 const systemFields = {
@@ -59,11 +60,11 @@ export const oabQuestions = pgTable(
     questionText: text("question_text").notNull(),
     options: jsonb("options").$type<string[]>().notNull(),
     correctAnswer: text("correct_answer").notNull(),
-    legalBasis: text("legal_basis").notNull(),
+    legalBasis: text("legal_basis"),
     explanation: text("explanation").notNull(),
-    legislationLink: text("legislation_link").notNull(),
-    legislationTitle: text("legislation_title").notNull(),
-    difficulty: text("difficulty").notNull(), // 'easy' | 'medium' | 'hard'
+    legislationLink: text("legislation_link"),
+    legislationTitle: text("legislation_title"),
+    difficulty: text("difficulty").notNull().default("medium"), // 'easy' | 'medium' | 'hard'
     discipline: text("discipline").notNull(),
     topic: text("topic").notNull(),
     examBoard: text("exam_board").notNull(), // 'FGV' | 'CESPE'
@@ -260,6 +261,25 @@ export const goalNotifications = pgTable(
   (t) => [index("idx_goal_notif_user").on(t.userId), index("idx_goal_notif_goal").on(t.goalId)],
 );
 
+// ── Study plans ──────────────────────────────────────────────────────────────
+
+export const studyPlans = pgTable(
+  "study_plans",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    mode: text("mode").notNull(), // 'performance' | 'custom'
+    deadlineDays: integer("deadline_days").notNull(), // 15|30|45|60|90|120
+    targetDate: timestamp("target_date", { withTimezone: true, mode: "string" }).notNull(),
+    questionsPerDay: integer("questions_per_day").notNull(),
+    config: jsonb("config").$type<PlanConfig>().notNull(),
+    ...systemFields,
+  },
+  (t) => [index("idx_study_plans_user").on(t.userId)],
+);
+
 // ── Notes & bookmarks ─────────────────────────────────────────────────────────
 
 export const userQuestionNotes = pgTable(
@@ -350,6 +370,7 @@ export const usersRelations = relations(users, ({ many, one }) => ({
   answers: many(userAnswers),
   sessions: many(studySessions),
   goals: many(userGoals),
+  studyPlans: many(studyPlans),
   stats: one(userPerformanceStats),
   questionStates: many(userQuestionStates),
   notes: many(userQuestionNotes),
@@ -362,6 +383,10 @@ export const userQuestionStatesRelations = relations(userQuestionStates, ({ one 
     fields: [userQuestionStates.questionId],
     references: [oabQuestions.id],
   }),
+}));
+
+export const studyPlansRelations = relations(studyPlans, ({ one }) => ({
+  user: one(users, { fields: [studyPlans.userId], references: [users.id] }),
 }));
 
 export const userGoalsRelations = relations(userGoals, ({ one, many }) => ({

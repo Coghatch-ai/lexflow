@@ -5,7 +5,7 @@
 // pt-BR label shown to users. Add a row here + re-run `pnpm db:seed` to extend
 // a picklist — never hardcode a pt-BR string in components or the API.
 
-export type LovType = "DISCIPLINE" | "DIFFICULTY" | "EXAM_BOARD" | "PHASE";
+export type LovType = "DISCIPLINE" | "DIFFICULTY" | "EXAM_BOARD" | "PHASE" | "PLAN_DEADLINE";
 
 export type LovSeedRow = {
   type: LovType;
@@ -45,4 +45,12 @@ export const LOV_SEED: LovSeedRow[] = [
   // Exam phase
   { type: "PHASE", code: "1st", value: "1ª Fase", sortOrder: 1 },
   { type: "PHASE", code: "2nd", value: "2ª Fase", sortOrder: 2 },
+
+  // Study plan deadlines (code is the number of days as a string)
+  { type: "PLAN_DEADLINE", code: "15", value: "15 dias", sortOrder: 1 },
+  { type: "PLAN_DEADLINE", code: "30", value: "30 dias", sortOrder: 2 },
+  { type: "PLAN_DEADLINE", code: "45", value: "45 dias", sortOrder: 3 },
+  { type: "PLAN_DEADLINE", code: "60", value: "60 dias", sortOrder: 4 },
+  { type: "PLAN_DEADLINE", code: "90", value: "90 dias", sortOrder: 5 },
+  { type: "PLAN_DEADLINE", code: "120", value: "120 dias", sortOrder: 6 },
 ];

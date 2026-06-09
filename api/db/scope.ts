@@ -29,6 +29,7 @@ const TABLE_SCOPE: Record<string, ScopeType> = {
   exam_board_performance: { type: "user" },
   user_goals: { type: "user" },
   goal_notifications: { type: "user" },
+  study_plans: { type: "user" },
   user_question_states: { type: "user" },
   user_question_notes: { type: "user" },
   user_bookmarks: { type: "user" },

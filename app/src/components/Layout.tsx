@@ -15,6 +15,7 @@ import {
   SlidersHorizontal,
   CalendarDays,
   Bookmark,
+  ClipboardList,
 } from 'lucide-react';
 
 interface LayoutProps {
@@ -23,13 +24,14 @@ interface LayoutProps {
   onPageChange: (page: string) => void;
 }
 
-type Page = 'home' | 'testing' | 'analytics' | 'goals' | 'profile' | 'saved' | 'admin-questions' | 'admin-algorithm' | 'admin-calendar';
+type Page = 'home' | 'testing' | 'analytics' | 'goals' | 'study-plans' | 'profile' | 'saved' | 'admin-questions' | 'admin-algorithm' | 'admin-calendar';
 
 const navItems: Array<{ id: Page; label: string; icon: React.ReactNode }> = [
   { id: 'home', label: 'Inicio', icon: <Home className="w-[18px] h-[18px]" /> },
   { id: 'testing', label: 'Simulados', icon: <BookOpen className="w-[18px] h-[18px]" /> },
   { id: 'analytics', label: 'Analytics', icon: <BarChart3 className="w-[18px] h-[18px]" /> },
   { id: 'goals', label: 'Metas', icon: <Target className="w-[18px] h-[18px]" /> },
+  { id: 'study-plans', label: 'Planos de Estudo', icon: <ClipboardList className="w-[18px] h-[18px]" /> },
   { id: 'saved', label: 'Questões Salvas', icon: <Bookmark className="w-[18px] h-[18px]" /> },
   { id: 'profile', label: 'Perfil', icon: <User className="w-[18px] h-[18px]" /> },
 ];

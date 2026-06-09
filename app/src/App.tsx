@@ -8,12 +8,14 @@ import GoalsPage from "./pages/GoalsPage";
 import ProfilePage from "./pages/ProfilePage";
 import { AdminQuestionsPage, AdminAlgorithmPage, AdminCalendarPage } from "./pages/AdminPage";
 import SavedQuestionsPage from "./pages/SavedQuestionsPage";
+import StudyPlanPage from "./pages/StudyPlanPage";
 
 type Page =
   | "home"
   | "testing"
   | "analytics"
   | "goals"
+  | "study-plans"
   | "profile"
   | "admin-questions"
   | "admin-algorithm"
@@ -28,6 +30,8 @@ function renderPage(page: Page): ReactElement {
       return <AnalyticsPage />;
     case "goals":
       return <GoalsPage />;
+    case "study-plans":
+      return <StudyPlanPage />;
     case "profile":
       return <ProfilePage />;
     case "admin-questions":

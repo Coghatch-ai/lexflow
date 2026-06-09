@@ -9,6 +9,7 @@ import { questionsRouter } from "./routers/questions.router";
 import { sessionsRouter } from "./routers/sessions.router";
 import { statsRouter } from "./routers/stats.router";
 import { goalsRouter } from "./routers/goals.router";
+import { studyPlansRouter } from "./routers/study-plans.router";
 import { listOfValuesRouter } from "./routers/list-of-values.router";
 import { adminRouter } from "./routers/admin.router";
 import { calendarsRouter } from "./routers/calendars.router";
@@ -22,6 +23,7 @@ export const appRouter = router({
   sessions: sessionsRouter,
   stats: statsRouter,
   goals: goalsRouter,
+  studyPlans: studyPlansRouter,
   lov: listOfValuesRouter,
   admin: adminRouter,
   calendars: calendarsRouter,
