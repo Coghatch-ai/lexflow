@@ -18,10 +18,10 @@ export interface OabQuestion {
   questionText: string;
   options: string[];
   correctAnswer: string;
-  legalBasis: string;
+  legalBasis: string | null;
   explanation: string;
-  legislationLink: string;
-  legislationTitle: string;
+  legislationLink: string | null;
+  legislationTitle: string | null;
   difficulty: Difficulty;
   discipline: string;
   topic: string;

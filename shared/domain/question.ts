@@ -9,10 +9,10 @@ export type Question = {
   questionText: string;
   options: string[];
   correctAnswer: string;
-  legalBasis: string;
+  legalBasis: string | null;
   explanation: string;
-  legislationLink: string;
-  legislationTitle: string;
+  legislationLink: string | null;
+  legislationTitle: string | null;
   difficulty: string;
   discipline: string;
   topic: string;

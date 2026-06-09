@@ -826,7 +826,7 @@ function QuestionForm({
         <label className="block text-sm font-medium text-ink mb-1">Base Legal</label>
         <input
           type="text"
-          value={form.legalBasis}
+          value={form.legalBasis ?? ''}
           onChange={(e) => setField('legalBasis', e.target.value)}
           className="w-full text-sm border border-line rounded-lg px-3 py-2 bg-surface text-ink focus:outline-none focus:ring-1 focus:ring-[#d9ab53]"
           placeholder="Ex: CC/2002 Art. 205"
@@ -850,7 +850,7 @@ function QuestionForm({
           <label className="block text-sm font-medium text-ink mb-1">Título da Legislação</label>
           <input
             type="text"
-            value={form.legislationTitle}
+            value={form.legislationTitle ?? ''}
             onChange={(e) => setField('legislationTitle', e.target.value)}
             className="w-full text-sm border border-line rounded-lg px-3 py-2 bg-surface text-ink focus:outline-none focus:ring-1 focus:ring-[#d9ab53]"
             placeholder="Ex: Código Civil"
@@ -860,7 +860,7 @@ function QuestionForm({
           <label className="block text-sm font-medium text-ink mb-1">Link da Legislação</label>
           <input
             type="url"
-            value={form.legislationLink}
+            value={form.legislationLink ?? ''}
             onChange={(e) => setField('legislationLink', e.target.value)}
             className="w-full text-sm border border-line rounded-lg px-3 py-2 bg-surface text-ink focus:outline-none focus:ring-1 focus:ring-[#d9ab53]"
             placeholder="https://..."

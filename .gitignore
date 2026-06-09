@@ -1,3 +1,6 @@
+# Scraper tooling (local only)
+ba/
+
 # Dependencies
 node_modules/
 .pnpm-store/

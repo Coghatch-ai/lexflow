@@ -18,6 +18,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx scripts/migrate.ts",
     "db:seed": "tsx scripts/seed.ts",
+    "db:seed-csv": "tsx scripts/seed-from-csv.ts",
     "db:create-user": "tsx scripts/create-user.ts",
     "db:make-admin": "tsx scripts/make-admin.ts",
     "smoke": "tsx scripts/smoke.ts"
@@ -52,6 +53,7 @@
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
+    "csv-parse": "^6.2.1",
     "drizzle-kit": "^0.31.4",
     "eslint": "^9.39.2",
     "eslint-plugin-react-hooks": "^7.0.1",

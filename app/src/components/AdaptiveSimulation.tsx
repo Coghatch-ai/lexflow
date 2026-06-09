@@ -19,8 +19,8 @@ interface Question {
   discipline: string;
   exam_board: string;
   explanation: string;
-  legislation_title: string;
-  legislation_link: string;
+  legislation_title: string | null;
+  legislation_link: string | null;
 }
 
 interface AdaptiveState {

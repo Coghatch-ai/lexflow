@@ -17,7 +17,7 @@ interface ReviewQuestion {
   discipline: string;
   exam_board: string;
   difficulty: string;
-  legislation_title: string;
+  legislation_title: string | null;
   interval: number;
   repetitions: number;
   nextReviewAt: string;

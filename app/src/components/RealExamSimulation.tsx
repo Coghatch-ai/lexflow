@@ -16,7 +16,7 @@ interface Question {
   discipline: string;
   exam_board: string;
   explanation: string;
-  legislation_title: string;
+  legislation_title: string | null;
 }
 
 const EXAM_DURATION = 5 * 60 * 60;
