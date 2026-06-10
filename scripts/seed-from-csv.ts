@@ -33,13 +33,39 @@ interface CsvRow {
   gabarito_comentado: string;
 }
 
+const LETTER_COLUMN: Record<string, keyof CsvRow> = {
+  A: "option_a",
+  B: "option_b",
+  C: "option_c",
+  D: "option_d",
+  E: "option_e",
+};
+
+// The scraper records the answer as a letter (A–E), but the whole app grades by
+// comparing the *selected option text* to correctAnswer (QuestionCard emits the
+// option text, not a letter). Convert the letter to its option text here so the
+// catalog honors that contract. Throws (rather than silently mis-seeding) if the
+// letter can't be resolved — a loud failure beats a question that always grades
+// wrong.
+function resolveCorrectAnswer(r: CsvRow): string {
+  const letter = r.correct_answer.trim().toUpperCase();
+  const column = LETTER_COLUMN[letter];
+  const text = column !== undefined ? r[column].trim() : "";
+  if (text.length === 0) {
+    throw new Error(
+      `Q${r.question_id}: cannot resolve correct_answer "${r.correct_answer}" to an option text`,
+    );
+  }
+  return text;
+}
+
 function toInsertRow(r: CsvRow) {
   const options = [r.option_a, r.option_b, r.option_c, r.option_d, r.option_e].filter(Boolean);
   return {
     id: r.question_id,
     questionText: r.enunciation,
     options,
-    correctAnswer: r.correct_answer,
+    correctAnswer: resolveCorrectAnswer(r),
     legalBasis: r.legal_basis.length > 0 ? r.legal_basis : null,
     explanation: r.gabarito_comentado,
     legislationLink: null,

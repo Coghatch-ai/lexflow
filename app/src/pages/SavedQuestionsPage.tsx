@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useState, type ReactElement } from 'react';
 import { Bookmark, BookmarkX, ChevronDown, ChevronUp } from 'lucide-react';
 import { useLov } from '../shared/hooks/use-lov';
 import { trpc } from '../shared/lib/trpc';
 
-export default function SavedQuestionsPage() {
+export default function SavedQuestionsPage(): ReactElement {
   const disciplineLov = useLov('DISCIPLINE');
   const examBoardLov = useLov('EXAM_BOARD');
   const utils = trpc.useUtils();
@@ -24,7 +24,7 @@ export default function SavedQuestionsPage() {
 
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  const notesMap = new Map();
+  const notesMap = new Map<string, string>();
   notesQuery.data?.forEach((n) => {
     if (n.noteText.trim().length > 0) notesMap.set(n.questionId, n.noteText);
   });
@@ -84,7 +84,7 @@ export default function SavedQuestionsPage() {
                     ))}
                   </div>
                 )}
-                {note && (
+                {note !== undefined && (
                   <div className="mt-3 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
                     <p className="text-xs font-semibold text-amber-700 mb-0.5">Anotação</p>
                     <p className="text-sm text-amber-900">{note}</p>
@@ -93,14 +93,14 @@ export default function SavedQuestionsPage() {
               </div>
               <div className="flex items-center gap-1 shrink-0 ml-2">
                 <button
-                  onClick={() => setExpandedId(isExpanded ? null : q.id)}
+                  onClick={() => { setExpandedId(isExpanded ? null : q.id); }}
                   className="p-1.5 text-gray-400 hover:text-[#16161a] transition rounded-md hover:bg-gray-100"
                   title={isExpanded ? 'Recolher' : 'Expandir'}
                 >
                   {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                 </button>
                 <button
-                  onClick={() => bookmarksMutation.mutate({ questionId: q.id })}
+                  onClick={() => { bookmarksMutation.mutate({ questionId: q.id }); }}
                   disabled={bookmarksMutation.isPending}
                   className="p-1.5 text-gray-400 hover:text-red-500 transition rounded-md hover:bg-red-50"
                   title="Remover dos salvos"

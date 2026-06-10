@@ -1,4 +1,5 @@
-import { type ReactElement, useState } from "react";
+import type { ReactElement } from "react";
+import { Router, Switch, Route, Redirect } from "wouter";
 import { SignedIn, SignedOut, SignInPage } from "@/auth";
 import Layout from "./components/Layout";
 import HomePage from "./pages/HomePage";
@@ -10,60 +11,32 @@ import { AdminQuestionsPage, AdminAlgorithmPage, AdminCalendarPage } from "./pag
 import SavedQuestionsPage from "./pages/SavedQuestionsPage";
 import StudyPlanPage from "./pages/StudyPlanPage";
 
-type Page =
-  | "home"
-  | "testing"
-  | "analytics"
-  | "goals"
-  | "study-plans"
-  | "profile"
-  | "admin-questions"
-  | "admin-algorithm"
-  | "admin-calendar"
-  | "saved";
-
-function renderPage(page: Page): ReactElement {
-  switch (page) {
-    case "testing":
-      return <TestingPage />;
-    case "analytics":
-      return <AnalyticsPage />;
-    case "goals":
-      return <GoalsPage />;
-    case "study-plans":
-      return <StudyPlanPage />;
-    case "profile":
-      return <ProfilePage />;
-    case "admin-questions":
-      return <AdminQuestionsPage />;
-    case "admin-algorithm":
-      return <AdminAlgorithmPage />;
-    case "admin-calendar":
-      return <AdminCalendarPage />;
-    case "saved":
-      return <SavedQuestionsPage />;
-    case "home":
-      return <HomePage />;
-  }
-}
-
 export default function App(): ReactElement {
-  const [currentPage, setCurrentPage] = useState<Page>("home");
-
   return (
     <>
       <SignedOut>
         <SignInPage />
       </SignedOut>
       <SignedIn>
-        <Layout
-          currentPage={currentPage}
-          onPageChange={(page) => {
-            setCurrentPage(page as Page);
-          }}
-        >
-          {renderPage(currentPage)}
-        </Layout>
+        <Router>
+          <Layout>
+            <Switch>
+              <Route path="/" component={HomePage} />
+              <Route path="/testing" component={TestingPage} />
+              <Route path="/analytics" component={AnalyticsPage} />
+              <Route path="/goals" component={GoalsPage} />
+              <Route path="/study-plans" component={StudyPlanPage} />
+              <Route path="/profile" component={ProfilePage} />
+              <Route path="/saved" component={SavedQuestionsPage} />
+              <Route path="/admin/questions" component={AdminQuestionsPage} />
+              <Route path="/admin/algorithm" component={AdminAlgorithmPage} />
+              <Route path="/admin/calendar" component={AdminCalendarPage} />
+              <Route>
+                <Redirect to="/" />
+              </Route>
+            </Switch>
+          </Layout>
+        </Router>
       </SignedIn>
     </>
   );

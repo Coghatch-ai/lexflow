@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactElement } from 'react';
 import { Target, Plus, Trash2, CreditCard as Edit2 } from 'lucide-react';
 import { useLov } from '../shared/hooks/use-lov';
 import { trpc } from '../shared/lib/trpc';
@@ -12,7 +12,7 @@ interface GoalWithProgress {
   progress: number;
 }
 
-export default function GoalsPage() {
+export default function GoalsPage(): ReactElement {
   const utils = trpc.useUtils();
   const goalsQuery = trpc.goals.list.useQuery();
   const byDiscipline = trpc.stats.byDiscipline.useQuery();
@@ -47,8 +47,8 @@ export default function GoalsPage() {
   });
 
   const handleAddGoal = () => {
-    if (!selectedDiscipline) return;
-    if (editingId) {
+    if (selectedDiscipline === '') return;
+    if (editingId !== null) {
       updateGoal.mutate({ id: editingId, targetAccuracy });
       setEditingId(null);
     } else {
@@ -80,7 +80,7 @@ export default function GoalsPage() {
       {/* Add Goal Button */}
       {!showForm && (
         <button
-          onClick={() => setShowForm(true)}
+          onClick={() => { setShowForm(true); }}
           className="w-full bg-white border-2 border-dashed border-[#16161a] rounded-xl p-6 hover:bg-gray-50 transition flex items-center justify-center gap-2 text-[#16161a] font-semibold"
         >
           <Plus className="w-5 h-5" />
@@ -92,7 +92,7 @@ export default function GoalsPage() {
       {showForm && (
         <div className="bg-white rounded-xl p-6 shadow border-2 border-[#16161a]">
           <h3 className="text-lg font-bold text-[#16161a] mb-4">
-            {editingId ? 'Editar Meta' : 'Nova Meta'}
+            {editingId !== null ? 'Editar Meta' : 'Nova Meta'}
           </h3>
           <div className="space-y-4">
             <div>
@@ -101,12 +101,12 @@ export default function GoalsPage() {
               </label>
               <select
                 value={selectedDiscipline}
-                onChange={(e) => setSelectedDiscipline(e.target.value)}
-                disabled={!!editingId}
+                onChange={(e) => { setSelectedDiscipline(e.target.value); }}
+                disabled={editingId !== null}
                 className="w-full px-4 py-2 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-[#16161a]"
               >
                 <option value="">Selecione uma disciplina</option>
-                {(editingId ? disciplineLov.options : availableDisciplines).map((o) => (
+                {(editingId !== null ? disciplineLov.options : availableDisciplines).map((o) => (
                   <option key={o.code} value={o.code}>
                     {o.value}
                   </option>
@@ -123,7 +123,7 @@ export default function GoalsPage() {
                 min="0"
                 max="100"
                 value={targetAccuracy}
-                onChange={(e) => setTargetAccuracy(Number(e.target.value))}
+                onChange={(e) => { setTargetAccuracy(Number(e.target.value)); }}
                 className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
               />
               <div className="flex justify-between text-xs text-gray-500 mt-1">
@@ -138,7 +138,7 @@ export default function GoalsPage() {
                 onClick={handleAddGoal}
                 className="flex-1 bg-gradient-to-r from-[#26262c] to-[#26262c] text-white py-2 rounded-lg font-semibold hover:shadow-lg transition"
               >
-                {editingId ? 'Atualizar' : 'Criar Meta'}
+                {editingId !== null ? 'Atualizar' : 'Criar Meta'}
               </button>
               <button
                 onClick={() => {
@@ -191,7 +191,7 @@ export default function GoalsPage() {
                   <Edit2 className="w-5 h-5" />
                 </button>
                 <button
-                  onClick={() => handleDeleteGoal(goal.id)}
+                  onClick={() => { handleDeleteGoal(goal.id); }}
                   className="p-2 hover:bg-red-100 rounded-lg transition text-red-600"
                 >
                   <Trash2 className="w-5 h-5" />

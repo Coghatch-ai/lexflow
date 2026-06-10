@@ -1,10 +1,227 @@
-import { useState } from 'react';
+import { useState, type ReactElement } from 'react';
 import { ClipboardList, Plus, Trash2, TrendingUp, SlidersHorizontal, CheckSquare, Square } from 'lucide-react';
 import { useLov } from '../shared/hooks/use-lov';
-import { trpc } from '../shared/lib/trpc';
+import { trpc, type TrpcOutput } from '../shared/lib/trpc';
 import { type DeadlineDays } from '@shared/domain/study-plan';
 
-export default function StudyPlanPage() {
+type PlanData = TrpcOutput['studyPlans']['list'][number];
+
+interface PlanCardProps {
+  plan: PlanData;
+  disciplineLov: ReturnType<typeof useLov>;
+  examBoardLov: ReturnType<typeof useLov>;
+  phaseLov: ReturnType<typeof useLov>;
+  onDelete: (id: string) => void;
+}
+
+function PlanCard({ plan, disciplineLov, examBoardLov, phaseLov, onDelete }: PlanCardProps): ReactElement {
+  const disciplines = plan.config.disciplines;
+  const disciplineLabel =
+    disciplines.length > 0
+      ? disciplines.map((d) => disciplineLov.labelOf(d)).join(', ')
+      : 'Todas';
+  const examBoardLabel = plan.config.examBoard !== null
+    ? examBoardLov.labelOf(plan.config.examBoard)
+    : 'Todas';
+  const phaseLabel = plan.config.phase !== null ? phaseLov.labelOf(plan.config.phase) : 'Todas';
+  const yearLabel = plan.config.year !== null ? String(plan.config.year) : 'Todos';
+  const isComplete = plan.answeredToday >= plan.questionsPerDay;
+  const formattedTarget = new Date(plan.targetDate).toLocaleDateString('pt-BR');
+
+  return (
+    <div className="bg-white rounded-xl p-6 shadow hover:shadow-lg transition">
+      <div className="flex items-start justify-between mb-4">
+        <div className="flex items-start gap-3 flex-1">
+          <div className="bg-[#16161a]/10 p-3 rounded-lg shrink-0">
+            {plan.mode === 'performance'
+              ? <TrendingUp className="w-5 h-5 text-[#16161a]" />
+              : <SlidersHorizontal className="w-5 h-5 text-[#16161a]" />
+            }
+          </div>
+          <div className="flex-1 min-w-0">
+            <h3 className="font-bold text-lg text-[#16161a]">
+              {plan.mode === 'performance' ? 'Plano de Desempenho' : 'Plano Personalizado'}
+            </h3>
+            <p className="text-sm text-gray-600 truncate">{disciplineLabel}</p>
+            <p className="text-xs text-gray-400 mt-0.5">
+              Banca: {examBoardLabel} · Fase: {phaseLabel} · Ano: {yearLabel}
+            </p>
+          </div>
+        </div>
+        <button
+          onClick={() => { onDelete(plan.id); }}
+          className="p-2 hover:bg-red-100 rounded-lg transition text-red-600 shrink-0"
+        >
+          <Trash2 className="w-5 h-5" />
+        </button>
+      </div>
+
+      <div className="flex flex-wrap gap-4 mb-4 text-sm text-gray-600">
+        <span>
+          <span className="font-semibold text-[#16161a]">{plan.questionsPerDay}</span> questões/dia
+        </span>
+        <span>
+          <span className="font-semibold text-[#16161a]">{plan.daysRemaining}</span> dias restantes
+        </span>
+        <span>Prazo: {formattedTarget}</span>
+      </div>
+
+      <div className="flex items-center gap-3 mb-4 p-3 bg-gray-50 rounded-lg">
+        <ClipboardList className="w-4 h-4 text-gray-500 shrink-0" />
+        <span className="text-sm text-gray-600">Hoje:</span>
+        <span className={`text-sm font-semibold ${isComplete ? 'text-green-600' : 'text-[#16161a]'}`}>
+          {plan.answeredToday} / {plan.questionsPerDay} questões
+        </span>
+        {isComplete && (
+          <span className="ml-auto text-xs font-medium text-green-700 bg-green-100 px-2 py-0.5 rounded-full">
+            Meta do dia atingida!
+          </span>
+        )}
+      </div>
+
+      <div className="space-y-1.5">
+        <div className="flex justify-between text-sm">
+          <span className="text-gray-600">Progresso geral</span>
+          <span className="font-semibold text-[#16161a]">{plan.progressPct}%</span>
+        </div>
+        <div className="w-full bg-gray-200 rounded-full h-3">
+          <div
+            className={`h-3 rounded-full transition-all ${
+              plan.progressPct >= 100 ? 'bg-green-500' : 'bg-[#16161a]'
+            }`}
+            style={{ width: `${Math.min(100, plan.progressPct)}%` }}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface CustomModeFormProps {
+  disciplineLov: ReturnType<typeof useLov>;
+  examBoardLov: ReturnType<typeof useLov>;
+  phaseLov: ReturnType<typeof useLov>;
+  yearsData: number[] | undefined;
+  selectedDisciplines: string[];
+  onToggleDiscipline: (code: string) => void;
+  examBoard: string;
+  onExamBoardChange: (v: string) => void;
+  phase: string;
+  onPhaseChange: (v: string) => void;
+  year: string;
+  onYearChange: (v: string) => void;
+  deadlineDays: DeadlineDays;
+  onDeadlineChange: (v: DeadlineDays) => void;
+  deadlineLov: ReturnType<typeof useLov>;
+  isPending: boolean;
+  onCreate: () => void;
+  onBack: () => void;
+}
+
+function CustomModeForm({
+  disciplineLov, examBoardLov, phaseLov, yearsData,
+  selectedDisciplines, onToggleDiscipline,
+  examBoard, onExamBoardChange,
+  phase, onPhaseChange,
+  year, onYearChange,
+  deadlineDays, onDeadlineChange, deadlineLov,
+  isPending, onCreate, onBack,
+}: CustomModeFormProps): ReactElement {
+  return (
+    <div className="space-y-5">
+      <div>
+        <h3 className="text-lg font-bold text-[#16161a] mb-1">Plano Personalizado</h3>
+        <p className="text-sm text-gray-500">Filtre as questões do seu plano</p>
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-2">
+          Disciplinas <span className="text-gray-400 font-normal">(opcional — vazio = todas)</span>
+        </label>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-48 overflow-y-auto border border-gray-200 rounded-lg p-3">
+          {disciplineLov.options.map((o) => {
+            const checked = selectedDisciplines.includes(o.code);
+            return (
+              <button
+                key={o.code}
+                type="button"
+                onClick={() => { onToggleDiscipline(o.code); }}
+                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-left transition ${
+                  checked ? 'bg-[#16161a] text-white' : 'text-gray-700 hover:bg-gray-100'
+                }`}
+              >
+                {checked ? <CheckSquare className="w-4 h-4 shrink-0" /> : <Square className="w-4 h-4 shrink-0" />}
+                {o.value}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Banca</label>
+          <select
+            value={examBoard}
+            onChange={(e) => { onExamBoardChange(e.target.value); }}
+            className="w-full px-3 py-2 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-[#16161a] text-sm"
+          >
+            <option value="">Todas</option>
+            {examBoardLov.options.map((o) => (
+              <option key={o.code} value={o.code}>{o.value}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Fase</label>
+          <select
+            value={phase}
+            onChange={(e) => { onPhaseChange(e.target.value); }}
+            className="w-full px-3 py-2 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-[#16161a] text-sm"
+          >
+            <option value="">Todas</option>
+            {phaseLov.options.map((o) => (
+              <option key={o.code} value={o.code}>{o.value}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Ano</label>
+          <select
+            value={year}
+            onChange={(e) => { onYearChange(e.target.value); }}
+            className="w-full px-3 py-2 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-[#16161a] text-sm"
+          >
+            <option value="">Todos</option>
+            {(yearsData ?? []).map((y) => (
+              <option key={y} value={String(y)}>{y}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <DeadlinePicker value={deadlineDays} onChange={onDeadlineChange} lov={deadlineLov} />
+
+      <div className="flex gap-3">
+        <button
+          onClick={onCreate}
+          disabled={isPending}
+          className="flex-1 bg-[#16161a] text-white py-2 rounded-lg font-semibold hover:bg-[#26262c] transition disabled:opacity-50"
+        >
+          {isPending ? 'Criando...' : 'Criar Plano'}
+        </button>
+        <button
+          onClick={onBack}
+          className="flex-1 bg-gray-200 text-gray-700 py-2 rounded-lg font-semibold hover:bg-gray-300 transition"
+        >
+          Voltar
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export default function StudyPlanPage(): ReactElement {
   const utils = trpc.useUtils();
   const plansQuery = trpc.studyPlans.list.useQuery();
   const yearsQuery = trpc.studyPlans.availableYears.useQuery();
@@ -75,7 +292,6 @@ export default function StudyPlanPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="bg-gradient-to-r from-[#16161a] to-[#26262c] rounded-xl p-6 text-white">
         <h2 className="text-2xl font-bold mb-2">Planos de Estudo</h2>
         <p className="text-white/80">
@@ -83,10 +299,9 @@ export default function StudyPlanPage() {
         </p>
       </div>
 
-      {/* Create button */}
       {!showForm && (
         <button
-          onClick={() => setShowForm(true)}
+          onClick={() => { setShowForm(true); }}
           className="w-full bg-white border-2 border-dashed border-[#16161a] rounded-xl p-6 hover:bg-gray-50 transition flex items-center justify-center gap-2 text-[#16161a] font-semibold"
         >
           <Plus className="w-5 h-5" />
@@ -94,19 +309,15 @@ export default function StudyPlanPage() {
         </button>
       )}
 
-      {/* Creation form */}
       {showForm && (
         <div className="bg-white rounded-xl p-6 shadow border-2 border-[#16161a]">
-          {/* Step 1: Mode picker */}
           {selectedMode === null && (
             <div>
               <h3 className="text-lg font-bold text-[#16161a] mb-2">Tipo de Plano</h3>
-              <p className="text-sm text-gray-500 mb-5">
-                Escolha como o plano será gerado
-              </p>
+              <p className="text-sm text-gray-500 mb-5">Escolha como o plano será gerado</p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <button
-                  onClick={() => setSelectedMode('performance')}
+                  onClick={() => { setSelectedMode('performance'); }}
                   className="flex flex-col items-start gap-2 p-5 rounded-xl border-2 border-gray-200 hover:border-[#16161a] hover:bg-gray-50 transition text-left"
                 >
                   <div className="bg-[#16161a]/10 p-2.5 rounded-lg">
@@ -120,7 +331,7 @@ export default function StudyPlanPage() {
                   </div>
                 </button>
                 <button
-                  onClick={() => setSelectedMode('custom')}
+                  onClick={() => { setSelectedMode('custom'); }}
                   className="flex flex-col items-start gap-2 p-5 rounded-xl border-2 border-gray-200 hover:border-[#16161a] hover:bg-gray-50 transition text-left"
                 >
                   <div className="bg-[#16161a]/10 p-2.5 rounded-lg">
@@ -143,14 +354,12 @@ export default function StudyPlanPage() {
             </div>
           )}
 
-          {/* Step 2a: Performance mode */}
           {selectedMode === 'performance' && (
             <div className="space-y-5">
               <div>
                 <h3 className="text-lg font-bold text-[#16161a] mb-1">Plano por Desempenho</h3>
                 <p className="text-sm text-gray-500">Disciplinas com menor acurácia serão priorizadas</p>
               </div>
-
               <div className="bg-gray-50 rounded-lg p-4">
                 <p className="text-sm font-medium text-gray-700 mb-3">Disciplinas identificadas:</p>
                 {recommendationQuery.isLoading && (
@@ -161,7 +370,7 @@ export default function StudyPlanPage() {
                     Erro ao carregar recomendação. Verifique se você já respondeu questões.
                   </p>
                 )}
-                {recommendationQuery.data && recommendationQuery.data.disciplines.length === 0 && (
+                {recommendationQuery.data?.disciplines.length === 0 && (
                   <p className="text-sm text-amber-600">
                     Responda pelo menos 5 questões em cada disciplina para gerar uma recomendação.
                   </p>
@@ -179,9 +388,7 @@ export default function StudyPlanPage() {
                   </div>
                 )}
               </div>
-
               <DeadlinePicker value={deadlineDays} onChange={setDeadlineDays} lov={deadlineLov} />
-
               <div className="flex gap-3">
                 <button
                   onClick={handleCreate}
@@ -195,7 +402,7 @@ export default function StudyPlanPage() {
                   {createPlan.isPending ? 'Criando...' : 'Criar Plano'}
                 </button>
                 <button
-                  onClick={() => setSelectedMode(null)}
+                  onClick={() => { setSelectedMode(null); }}
                   className="flex-1 bg-gray-200 text-gray-700 py-2 rounded-lg font-semibold hover:bg-gray-300 transition"
                 >
                   Voltar
@@ -204,200 +411,42 @@ export default function StudyPlanPage() {
             </div>
           )}
 
-          {/* Step 2b: Custom mode */}
           {selectedMode === 'custom' && (
-            <div className="space-y-5">
-              <div>
-                <h3 className="text-lg font-bold text-[#16161a] mb-1">Plano Personalizado</h3>
-                <p className="text-sm text-gray-500">Filtre as questões do seu plano</p>
-              </div>
-
-              {/* Disciplines multi-select */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Disciplinas <span className="text-gray-400 font-normal">(opcional — vazio = todas)</span>
-                </label>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-48 overflow-y-auto border border-gray-200 rounded-lg p-3">
-                  {disciplineLov.options.map((o) => {
-                    const checked = selectedDisciplines.includes(o.code);
-                    return (
-                      <button
-                        key={o.code}
-                        type="button"
-                        onClick={() => toggleDiscipline(o.code)}
-                        className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-left transition ${
-                          checked
-                            ? 'bg-[#16161a] text-white'
-                            : 'text-gray-700 hover:bg-gray-100'
-                        }`}
-                      >
-                        {checked
-                          ? <CheckSquare className="w-4 h-4 shrink-0" />
-                          : <Square className="w-4 h-4 shrink-0" />
-                        }
-                        {o.value}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                {/* Exam Board */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Banca</label>
-                  <select
-                    value={examBoard}
-                    onChange={(e) => setExamBoard(e.target.value)}
-                    className="w-full px-3 py-2 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-[#16161a] text-sm"
-                  >
-                    <option value="">Todas</option>
-                    {examBoardLov.options.map((o) => (
-                      <option key={o.code} value={o.code}>{o.value}</option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Phase */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Fase</label>
-                  <select
-                    value={phase}
-                    onChange={(e) => setPhase(e.target.value)}
-                    className="w-full px-3 py-2 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-[#16161a] text-sm"
-                  >
-                    <option value="">Todas</option>
-                    {phaseLov.options.map((o) => (
-                      <option key={o.code} value={o.code}>{o.value}</option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Year */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Ano</label>
-                  <select
-                    value={year}
-                    onChange={(e) => setYear(e.target.value)}
-                    className="w-full px-3 py-2 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-[#16161a] text-sm"
-                  >
-                    <option value="">Todos</option>
-                    {(yearsQuery.data ?? []).map((y) => (
-                      <option key={y} value={String(y)}>{y}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <DeadlinePicker value={deadlineDays} onChange={setDeadlineDays} lov={deadlineLov} />
-
-              <div className="flex gap-3">
-                <button
-                  onClick={handleCreate}
-                  disabled={createPlan.isPending}
-                  className="flex-1 bg-[#16161a] text-white py-2 rounded-lg font-semibold hover:bg-[#26262c] transition disabled:opacity-50"
-                >
-                  {createPlan.isPending ? 'Criando...' : 'Criar Plano'}
-                </button>
-                <button
-                  onClick={() => setSelectedMode(null)}
-                  className="flex-1 bg-gray-200 text-gray-700 py-2 rounded-lg font-semibold hover:bg-gray-300 transition"
-                >
-                  Voltar
-                </button>
-              </div>
-            </div>
+            <CustomModeForm
+              disciplineLov={disciplineLov}
+              examBoardLov={examBoardLov}
+              phaseLov={phaseLov}
+              yearsData={yearsQuery.data}
+              selectedDisciplines={selectedDisciplines}
+              onToggleDiscipline={toggleDiscipline}
+              examBoard={examBoard}
+              onExamBoardChange={setExamBoard}
+              phase={phase}
+              onPhaseChange={setPhase}
+              year={year}
+              onYearChange={setYear}
+              deadlineDays={deadlineDays}
+              onDeadlineChange={setDeadlineDays}
+              deadlineLov={deadlineLov}
+              isPending={createPlan.isPending}
+              onCreate={handleCreate}
+              onBack={() => { setSelectedMode(null); }}
+            />
           )}
         </div>
       )}
 
-      {/* Plans list */}
       <div className="grid gap-4">
-        {plans.map((plan) => {
-          const disciplines = plan.config.disciplines;
-          const disciplineLabel =
-            disciplines.length > 0
-              ? disciplines.map((d) => disciplineLov.labelOf(d)).join(', ')
-              : 'Todas';
-          const examBoardLabel = plan.config.examBoard
-            ? examBoardLov.labelOf(plan.config.examBoard)
-            : 'Todas';
-          const phaseLabel = plan.config.phase ? phaseLov.labelOf(plan.config.phase) : 'Todas';
-          const yearLabel = plan.config.year ? String(plan.config.year) : 'Todos';
-          const isComplete = plan.answeredToday >= plan.questionsPerDay;
-          const formattedTarget = new Date(plan.targetDate).toLocaleDateString('pt-BR');
-
-          return (
-            <div key={plan.id} className="bg-white rounded-xl p-6 shadow hover:shadow-lg transition">
-              <div className="flex items-start justify-between mb-4">
-                <div className="flex items-start gap-3 flex-1">
-                  <div className="bg-[#16161a]/10 p-3 rounded-lg shrink-0">
-                    {plan.mode === 'performance'
-                      ? <TrendingUp className="w-5 h-5 text-[#16161a]" />
-                      : <SlidersHorizontal className="w-5 h-5 text-[#16161a]" />
-                    }
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <h3 className="font-bold text-lg text-[#16161a]">
-                      {plan.mode === 'performance' ? 'Plano de Desempenho' : 'Plano Personalizado'}
-                    </h3>
-                    <p className="text-sm text-gray-600 truncate">{disciplineLabel}</p>
-                    <p className="text-xs text-gray-400 mt-0.5">
-                      Banca: {examBoardLabel} · Fase: {phaseLabel} · Ano: {yearLabel}
-                    </p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => deletePlan.mutate({ id: plan.id })}
-                  className="p-2 hover:bg-red-100 rounded-lg transition text-red-600 shrink-0"
-                >
-                  <Trash2 className="w-5 h-5" />
-                </button>
-              </div>
-
-              {/* Stats row */}
-              <div className="flex flex-wrap gap-4 mb-4 text-sm text-gray-600">
-                <span>
-                  <span className="font-semibold text-[#16161a]">{plan.questionsPerDay}</span> questões/dia
-                </span>
-                <span>
-                  <span className="font-semibold text-[#16161a]">{plan.daysRemaining}</span> dias restantes
-                </span>
-                <span>Prazo: {formattedTarget}</span>
-              </div>
-
-              {/* Daily progress */}
-              <div className="flex items-center gap-3 mb-4 p-3 bg-gray-50 rounded-lg">
-                <ClipboardList className="w-4 h-4 text-gray-500 shrink-0" />
-                <span className="text-sm text-gray-600">Hoje:</span>
-                <span className={`text-sm font-semibold ${isComplete ? 'text-green-600' : 'text-[#16161a]'}`}>
-                  {plan.answeredToday} / {plan.questionsPerDay} questões
-                </span>
-                {isComplete && (
-                  <span className="ml-auto text-xs font-medium text-green-700 bg-green-100 px-2 py-0.5 rounded-full">
-                    Meta do dia atingida!
-                  </span>
-                )}
-              </div>
-
-              {/* Overall progress bar */}
-              <div className="space-y-1.5">
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-600">Progresso geral</span>
-                  <span className="font-semibold text-[#16161a]">{plan.progressPct}%</span>
-                </div>
-                <div className="w-full bg-gray-200 rounded-full h-3">
-                  <div
-                    className={`h-3 rounded-full transition-all ${
-                      plan.progressPct >= 100 ? 'bg-green-500' : 'bg-[#16161a]'
-                    }`}
-                    style={{ width: `${Math.min(100, plan.progressPct)}%` }}
-                  />
-                </div>
-              </div>
-            </div>
-          );
-        })}
+        {plans.map((plan) => (
+          <PlanCard
+            key={plan.id}
+            plan={plan}
+            disciplineLov={disciplineLov}
+            examBoardLov={examBoardLov}
+            phaseLov={phaseLov}
+            onDelete={(id) => { deletePlan.mutate({ id }); }}
+          />
+        ))}
       </div>
 
       {plans.length === 0 && !showForm && (
@@ -421,13 +470,13 @@ function DeadlinePicker({
   value: DeadlineDays;
   onChange: (v: DeadlineDays) => void;
   lov: { options: Array<{ code: string; value: string }> };
-}) {
+}): ReactElement {
   return (
     <div>
       <label className="block text-sm font-medium text-gray-700 mb-2">Prazo</label>
       <select
         value={value}
-        onChange={(e) => onChange(Number(e.target.value) as DeadlineDays)}
+        onChange={(e) => { onChange(Number(e.target.value) as DeadlineDays); }}
         className="w-full px-4 py-2 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-[#16161a]"
       >
         {lov.options.map((o) => (

@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react';
 import { useSession } from '../auth';
 import OabExamCalendar from '../components/OabExamCalendar';
 import { Target, AlertCircle, ArrowUpRight } from 'lucide-react';
@@ -17,7 +18,7 @@ const STEPS = [
   { n: '03', title: 'Acompanhar progresso', body: 'Veja seus gráficos e estatísticas em "Analytics".' },
 ];
 
-export default function HomePage() {
+export default function HomePage(): ReactElement {
   const { user } = useSession();
 
   const summary = trpc.stats.summary.useQuery();
@@ -37,7 +38,7 @@ export default function HomePage() {
       : undefined,
   };
 
-  const firstName = user?.name?.split(' ')[0] ?? '';
+  const firstName = user?.name.split(' ')[0] ?? '';
 
   const ledger: Array<{ label: string; value: string; sub: string; flag?: boolean }> = [
     {
@@ -74,7 +75,7 @@ export default function HomePage() {
         />
         <p className="eyebrow !text-seal-bright">Painel</p>
         <h1 className="mt-3 font-display text-[var(--fs-display)] font-bold leading-tight text-surface">
-          Bem-vindo de volta{firstName ? `, ${firstName}` : ''}.
+          Bem-vindo de volta{firstName.length > 0 ? `, ${firstName}` : ''}.
         </h1>
         <p className="mt-2 max-w-xl text-sm leading-relaxed text-ink-mute">
           Você está no caminho certo. Mantenha o ritmo e aproveite cada ferramenta do preparatório.
@@ -88,7 +89,7 @@ export default function HomePage() {
             <div key={s.label} className="bg-surface px-6 py-5">
               <div className="flex items-center justify-between gap-2">
                 <p className="eyebrow">{s.label}</p>
-                {s.flag && <span className="badge-success">Ótimo</span>}
+                {s.flag === true && <span className="badge-success">Ótimo</span>}
               </div>
               <p className="mt-3 font-display text-4xl font-bold tabular-nums leading-none text-ink">
                 {s.value}

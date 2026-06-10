@@ -4,13 +4,9 @@ import reactHooks from "eslint-plugin-react-hooks";
 import reactRefresh from "eslint-plugin-react-refresh";
 import globals from "globals";
 
-// Strict, type-aware config applied to all NEW code (api/, drizzle/, shared/,
-// scripts/, and the authored frontend wiring under app/src/auth, app/src/shared,
-// app/src/providers, plus main.tsx / App.tsx).
-//
-// The inherited bolt POC UI (app/src/pages/**, app/src/components/**, mockData)
-// is ignored below — it runs on mock data and is hardened when migrated onto
-// tRPC. See CLAUDE.md "POC deviations".
+// Strict, type-aware config applied to all code: api/, drizzle/, shared/,
+// scripts/, and the full frontend (app/src/**). All pages and components
+// are wired to real tRPC and pass strict lint.
 const sharedRules = {
   "no-console": ["error", { allow: ["warn", "error"] }],
   "no-debugger": "error",
@@ -81,10 +77,6 @@ export default [
       "node_modules/",
       ".aws-sam/",
       "drizzle/meta/",
-      // Vendored bolt POC UI — runs on mock data, hardened when migrated to tRPC.
-      "app/src/pages/**",
-      "app/src/components/**",
-      "app/src/lib/mockData.ts",
       // Root tooling config (not part of the typed lint program).
       "*.config.js",
       "*.config.mjs",

@@ -21,6 +21,7 @@
     "db:seed-csv": "tsx scripts/seed-from-csv.ts",
     "db:create-user": "tsx scripts/create-user.ts",
     "db:make-admin": "tsx scripts/make-admin.ts",
+    "db:verify": "tsx scripts/verify-export.ts",
     "smoke": "tsx scripts/smoke.ts"
   },
   "dependencies": {
@@ -41,6 +42,7 @@
     "recharts": "^2.13.3",
     "superjson": "^1.13.3",
     "svix": "^1.42.0",
+    "wouter": "^3.10.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {

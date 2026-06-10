@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react';
 import {
   AlertTriangle,
   Clock,
@@ -41,7 +42,55 @@ interface ErrorByTime {
   errorRate: number;
 }
 
-export default function ErrorPatternAnalysis() {
+interface RecurringEntry {
+  questionId: string;
+  discipline: string;
+  timesAnswered: number;
+  timesWrong: number;
+  lastAttempt: string;
+}
+
+function RecurringErrorsTable({ errors }: { errors: RecurringEntry[] }): ReactElement | null {
+  if (errors.length === 0) return null;
+  return (
+    <div className="bg-white rounded-xl p-6 shadow">
+      <h4 className="font-bold text-[#16161a] mb-4 flex items-center gap-2">
+        <TrendingDown className="w-5 h-5 text-red-600" />
+        Erros Recorrentes (questoes que voce errou 2+ vezes)
+      </h4>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b-2 border-gray-200">
+              <th className="text-left py-3 px-4 font-semibold text-[#16161a]">Disciplina</th>
+              <th className="text-center py-3 px-4 font-semibold text-[#16161a]">Vezes respondida</th>
+              <th className="text-center py-3 px-4 font-semibold text-[#16161a]">Vezes errada</th>
+              <th className="text-center py-3 px-4 font-semibold text-[#16161a]">Ultima tentativa</th>
+            </tr>
+          </thead>
+          <tbody>
+            {errors.map((err) => (
+              <tr key={err.questionId} className="border-b border-gray-100 hover:bg-red-50">
+                <td className="py-3 px-4 font-medium">{err.discipline}</td>
+                <td className="text-center py-3 px-4">{err.timesAnswered}</td>
+                <td className="text-center py-3 px-4">
+                  <span className="bg-red-100 text-red-700 px-2 py-1 rounded-full font-bold">
+                    {err.timesWrong}
+                  </span>
+                </td>
+                <td className="text-center py-3 px-4 text-gray-600">
+                  {new Date(err.lastAttempt).toLocaleDateString('pt-BR')}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+export default function ErrorPatternAnalysis(): ReactElement {
   const summary = trpc.stats.summary.useQuery();
   const byDiscipline = trpc.stats.byDiscipline.useQuery();
   const byExamBoard = trpc.stats.byExamBoard.useQuery();
@@ -84,7 +133,7 @@ export default function ErrorPatternAnalysis() {
     { category: 'Lento (>90s)', errors: slow.errors, total: slow.total, errorRate: rate(slow) },
   ];
 
-  const recurringErrors = (recurring.data ?? []).map((r) => ({
+  const recurringErrors: RecurringEntry[] = (recurring.data ?? []).map((r) => ({
     questionId: r.questionId,
     discipline: disciplineLov.labelOf(r.discipline),
     timesAnswered: r.timesAnswered,
@@ -114,6 +163,7 @@ export default function ErrorPatternAnalysis() {
 
   const COLORS = ['#16161a', '#26262c', '#16161a', '#26262c', '#b8893b', '#d9ab53'];
   const overallErrorRate = Math.round((totalErrors / totalAnswered) * 100);
+  const lastTimeRate = errorByTime[errorByTime.length - 1].errorRate;
 
   return (
     <div className="space-y-6">
@@ -127,7 +177,6 @@ export default function ErrorPatternAnalysis() {
             <p className="text-sm text-gray-600">Identifique onde e porque voce erra</p>
           </div>
         </div>
-
         <div className="grid md:grid-cols-3 gap-4">
           <div className="bg-red-50 rounded-lg p-4 text-center">
             <p className="text-3xl font-bold text-red-600">{totalErrors}</p>
@@ -189,7 +238,11 @@ export default function ErrorPatternAnalysis() {
                   cx="50%"
                   cy="50%"
                   labelLine={true}
-                  label={(entry) => `${entry.examBoard}: ${entry.errorRate}%`}
+                  label={(entry: { name?: string }) => {
+                    const item = errorByBoard.find((b) => b.examBoard === (entry.name ?? ''));
+                    return item !== undefined ? `${item.examBoard}: ${item.errorRate}%` : '';
+                  }}
+                  nameKey="examBoard"
                   outerRadius={80}
                   dataKey="errorRate"
                 >
@@ -235,11 +288,10 @@ export default function ErrorPatternAnalysis() {
                 </div>
               ))}
             </div>
-
-            {errorByTime.length > 0 && errorByTime[0].errorRate > 0 && (
+            {errorByTime[0].errorRate > 0 && (
               <div className="mt-4 p-3 bg-[#16161a]/5 rounded-lg">
                 <p className="text-sm text-gray-700">
-                  {errorByTime[0].errorRate > errorByTime[errorByTime.length - 1]?.errorRate
+                  {errorByTime[0].errorRate > lastTimeRate
                     ? 'Voce erra mais quando responde rapido. Tente dedicar mais tempo a cada questao.'
                     : 'Voce erra mais quando demora muito. Isso pode indicar duvida - revise esses topicos.'}
                 </p>
@@ -249,42 +301,7 @@ export default function ErrorPatternAnalysis() {
         )}
       </div>
 
-      {recurringErrors.length > 0 && (
-        <div className="bg-white rounded-xl p-6 shadow">
-          <h4 className="font-bold text-[#16161a] mb-4 flex items-center gap-2">
-            <TrendingDown className="w-5 h-5 text-red-600" />
-            Erros Recorrentes (questoes que voce errou 2+ vezes)
-          </h4>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b-2 border-gray-200">
-                  <th className="text-left py-3 px-4 font-semibold text-[#16161a]">Disciplina</th>
-                  <th className="text-center py-3 px-4 font-semibold text-[#16161a]">Vezes respondida</th>
-                  <th className="text-center py-3 px-4 font-semibold text-[#16161a]">Vezes errada</th>
-                  <th className="text-center py-3 px-4 font-semibold text-[#16161a]">Ultima tentativa</th>
-                </tr>
-              </thead>
-              <tbody>
-                {recurringErrors.map((err) => (
-                  <tr key={err.questionId} className="border-b border-gray-100 hover:bg-red-50">
-                    <td className="py-3 px-4 font-medium">{err.discipline}</td>
-                    <td className="text-center py-3 px-4">{err.timesAnswered}</td>
-                    <td className="text-center py-3 px-4">
-                      <span className="bg-red-100 text-red-700 px-2 py-1 rounded-full font-bold">
-                        {err.timesWrong}
-                      </span>
-                    </td>
-                    <td className="text-center py-3 px-4 text-gray-600">
-                      {new Date(err.lastAttempt).toLocaleDateString('pt-BR')}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
+      <RecurringErrorsTable errors={recurringErrors} />
 
       <div className="bg-white rounded-xl p-6 shadow">
         <h4 className="font-bold text-[#16161a] mb-4">Insights e Recomendacoes</h4>
@@ -305,7 +322,7 @@ export default function ErrorPatternAnalysis() {
               </p>
             </div>
           )}
-          {errorByTime.length > 0 && errorByTime[0].errorRate > 50 && (
+          {errorByTime[0].errorRate > 50 && (
             <div className="flex items-start gap-3 p-3 bg-blue-50 rounded-lg">
               <Clock className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
               <p className="text-sm text-gray-700">

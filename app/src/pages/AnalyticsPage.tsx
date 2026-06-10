@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react';
 import ErrorPatternAnalysis from '../components/ErrorPatternAnalysis';
 import {
   LineChart,
@@ -35,7 +36,7 @@ interface ExamBoardData {
   total: number;
 }
 
-export default function AnalyticsPage() {
+export default function AnalyticsPage(): ReactElement {
   const byDiscipline = trpc.stats.byDiscipline.useQuery();
   const byExamBoard = trpc.stats.byExamBoard.useQuery();
   const recent = trpc.sessions.listRecent.useQuery();

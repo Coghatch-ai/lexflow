@@ -62,27 +62,26 @@ transaction, listRecent), `stats` (summary / byDiscipline / byExamBoard / byResp
 recurringErrors, computed on read), `goals` (list/create/update/delete), `users.me`. All are
 `protectedProcedure` (require a local users row).
 
-The whole bolt UI is now wired onto these routers (no more mock data): HomePage, TestingPage
-(standard) + the Adaptive/Spaced/RealExam modes, Analytics + ErrorPatternAnalysis, Profile, Goals.
-Pages stay eslint-quarantined (typecheck + build clean); full max-strict hardening is still pending.
+The whole bolt UI is now wired onto these routers (no more mock data). Navigation uses Wouter.
+Most pages pass full strict lint; `TestingPage`, `StudyPlanPage`, `AdminPage`, and the three
+simulation components are still quarantined (need `max-lines-per-function` refactoring per
+conventions.md playbook A/B/C before they can be un-quarantined).
 
 ## POC deviations (intentional — differ from sharpmoney; revisit as the POC matures)
 
 1. **Tailwind 3, not 4.** The inherited bolt UI uses `@tailwind` directives +
    `tailwind.config.js` + the `lex-*` color tokens in `app/src/index.css`. Kept on 3 to
    preserve the design; convention default is Tailwind 4 via `@tailwindcss/vite`.
-2. **Vendored bolt UI is quarantined from strict lint/tsc.** `app/src/pages/**`,
-   `app/src/components/**`, and `app/src/lib/mockData.ts` are ESLint-ignored and type-checked
-   at POC strictness. New code (api/, drizzle/, shared/, scripts/, and the authored frontend
-   wiring under `app/src/auth`, `app/src/shared`, `app/src/providers`, `main.tsx`, `App.tsx`)
-   gets full sharpmoney strictness. Harden each page when it migrates off mock data onto tRPC.
+2. **Partial lint quarantine.** Most pages/components now pass full strict lint. Still quarantined
+   (need `max-lines-per-function` refactoring): `TestingPage`, `StudyPlanPage`, `AdminPage`,
+   `AdaptiveSimulation`, `SpacedRepetition`, `RealExamSimulation`, `ErrorPatternAnalysis`. New code
+   (api/, drizzle/, shared/, scripts/, and all other frontend files) gets full sharpmoney strictness.
 3. **Two tsconfigs.** `tsconfig.api.json` (backend, max-strict: `noUncheckedIndexedAccess`,
    `exactOptionalPropertyTypes`) and `tsconfig.json` (frontend, POC-strict). Split because the
-   bolt UI can't pass max-strict yet and the import graph forces one strictness per program.
-4. **State-based navigation, not Wouter.** `App.tsx` switches pages via local state (as the POC
-   did). Auth gating uses Clerk `<SignedIn>/<SignedOut>`. Convention default is Wouter.
-5. The UI is fully wired to real tRPC data (mock data removed). Pages remain eslint-quarantined
-   until each is hardened to full max-strict.
+   import graph forces one strictness per program; frontend files can't use backend-only types.
+4. **Wouter navigation.** ~~State-based navigation~~ — `App.tsx` now uses `Router`/`Switch`/`Route`
+   from wouter. Auth gating uses Clerk `<SignedIn>/<SignedOut>`.
+5. The UI is fully wired to real tRPC data (mock data removed). All pages pass tsc.
 
 ## Infrastructure (be careful — shared AWS account 394559824800, region sa-east-1)
 

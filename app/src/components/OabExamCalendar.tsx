@@ -1,7 +1,8 @@
+import type { ReactElement } from 'react';
 import { Calendar } from 'lucide-react';
 import { trpc } from '../shared/lib/trpc';
 
-export default function OabExamCalendar() {
+export default function OabExamCalendar(): ReactElement | null {
   const { data, isLoading } = trpc.calendars.listActive.useQuery();
 
   if (isLoading) return null;
@@ -30,7 +31,7 @@ export default function OabExamCalendar() {
             </ul>
           )}
 
-          {cal.note && (
+          {cal.note !== null && (
             <p className="mt-3 text-xs text-surface/50 italic">{cal.note}</p>
           )}
         </div>

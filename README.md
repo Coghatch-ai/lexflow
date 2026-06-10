@@ -17,4 +17,14 @@ pnpm dev               # API dev server (tRPC) on :3001
 pnpm dev:app           # Vite frontend
 ```
 
-The UI currently renders on mock data; real tRPC data wiring is in progress.
+The UI is fully wired to real tRPC data. All 8 pages (home, testing, analytics, goals, study
+plans, profile, saved questions, admin) call live backend routers — no mock data remains.
+
+**Live:** frontend at `https://my.probius.app`, API at `https://api.probius.app`.
+
+New users must be created manually until Clerk webhook is configured:
+
+```bash
+pnpm db:create-user <clerk-user-id> [email] [name]
+pnpm db:make-admin <clerk-user-id>   # for admin access
+```

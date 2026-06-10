@@ -1,9 +1,10 @@
+import type { ReactElement } from 'react';
 import { useSession } from '../auth';
 import { User, TrendingUp, BookOpen, Award, Clock } from 'lucide-react';
 import { trpc } from '../shared/lib/trpc';
 import { useLov } from '../shared/hooks/use-lov';
 
-export default function ProfilePage() {
+export default function ProfilePage(): ReactElement {
   const { user } = useSession();
 
   const summary = trpc.stats.summary.useQuery();
