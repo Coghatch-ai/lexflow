@@ -1,11 +1,13 @@
-import { useState, useEffect, type ReactElement } from 'react';
+import { useState, useEffect, useRef, type ReactElement } from 'react';
 import { useSession } from '../auth';
-import { Clock, CheckCircle, XCircle, ChevronRight, BookOpen } from 'lucide-react';
+import { Clock, CheckCircle, XCircle, ChevronRight, BookOpen, ArrowRightToLine } from 'lucide-react';
 import { useLov } from '../shared/hooks/use-lov';
 import AdaptiveSimulation from '../components/AdaptiveSimulation';
 import SpacedRepetition from '../components/SpacedRepetition';
 import RealExamSimulation from '../components/RealExamSimulation';
 import { trpc } from '../shared/lib/trpc';
+import { shuffle } from '../shared/lib/shuffle';
+import { moveToEnd } from '../shared/lib/exam-queue';
 import { accuracyPct } from '@shared/domain/scoring';
 import { useNotesAndBookmarks, type NotesAndBookmarks } from '../shared/hooks/use-notes-bookmarks';
 import QuestionCard from '@/shared/components/QuestionCard';
@@ -180,14 +182,16 @@ interface InProgressProps {
   onBack: () => void;
   onSelect: (answer: string) => void;
   onNext: () => void;
+  canPostpone: boolean;
+  onPostpone: () => void;
 }
 
 function InProgress({
   currentQuestion, currentIndex, totalAnswered, totalQuestions, timer, selectedAnswer,
-  notesAndBookmarks, disciplineLov, examBoardLov, onBack, onSelect, onNext,
+  notesAndBookmarks, disciplineLov, examBoardLov, onBack, onSelect, onNext, canPostpone, onPostpone,
 }: InProgressProps): ReactElement {
   const { localNotes, bookmarkedIds, handleNoteChange, handleToggleBookmark } = notesAndBookmarks;
-  const progress = ((currentIndex + totalAnswered) / (totalQuestions > 0 ? totalQuestions : 1)) * 100;
+  const progress = (totalAnswered / (totalQuestions > 0 ? totalQuestions : 1)) * 100;
 
   return (
     <div className="space-y-6">
@@ -229,14 +233,25 @@ function InProgress({
           onToggleBookmark={() => { handleToggleBookmark(currentQuestion.id); }}
         />
 
-        <button
-          onClick={onNext}
-          disabled={selectedAnswer.length === 0}
-          className="w-full bg-gradient-to-r from-[#26262c] to-[#26262c] text-white py-3 rounded-lg font-semibold hover:shadow-lg transition disabled:opacity-50 flex items-center justify-center gap-2"
-        >
-          {currentIndex + 1 === totalQuestions ? 'Finalizar' : 'Proxima'}
-          <ChevronRight className="w-5 h-5" />
-        </button>
+        <div className="flex gap-3">
+          <button
+            onClick={onPostpone}
+            disabled={!canPostpone}
+            title={canPostpone ? 'Mover esta questão para o fim do simulado' : 'Última questão pendente — responda para finalizar'}
+            className="flex-1 bg-gray-200 text-gray-700 py-3 rounded-lg font-semibold hover:bg-gray-300 transition disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            <ArrowRightToLine className="w-5 h-5" />
+            Responder depois
+          </button>
+          <button
+            onClick={onNext}
+            disabled={selectedAnswer.length === 0}
+            className="flex-1 bg-gradient-to-r from-[#26262c] to-[#26262c] text-white py-3 rounded-lg font-semibold hover:shadow-lg transition disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            {currentIndex + 1 === totalQuestions ? 'Finalizar' : 'Proxima'}
+            <ChevronRight className="w-5 h-5" />
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -356,6 +371,10 @@ export default function TestingPage(): ReactElement {
   const [examBoard, setExamBoard] = useState('');
   const [difficulty, setDifficulty] = useState('');
 
+  // Time already spent on questions postponed via "Responder depois",
+  // keyed by question id, re-added when the question is finally answered.
+  const carriedTimeRef = useRef<Map<string, number>>(new Map());
+
   useEffect(() => {
     if (status === 'in-progress' && currentIndex < questions.length) {
       const interval = setInterval(() => {
@@ -386,7 +405,7 @@ export default function TestingPage(): ReactElement {
       const mapped: TestQuestion[] = rows.map((r) => ({
         id: r.id,
         questionText: r.questionText,
-        options: r.options,
+        options: shuffle(r.options),
         correctAnswer: r.correctAnswer,
         difficulty: r.difficulty,
         discipline: r.discipline,
@@ -401,6 +420,7 @@ export default function TestingPage(): ReactElement {
       setSelectedAnswer('');
       setTimeSpent(0);
       setTimer(0);
+      carriedTimeRef.current = new Map();
     } finally {
       setLoading(false);
     }
@@ -411,9 +431,10 @@ export default function TestingPage(): ReactElement {
   const handleNext = () => {
     if (!user || currentIndex >= questions.length) return;
     const correct = selectedAnswer === currentQuestion.correctAnswer;
+    const totalTimeSpent = timeSpent + (carriedTimeRef.current.get(currentQuestion.id) ?? 0);
     const updated: Answer[] = [
       ...answers,
-      { questionId: currentQuestion.id, userAnswer: selectedAnswer, correct, timeSpent },
+      { questionId: currentQuestion.id, userAnswer: selectedAnswer, correct, timeSpent: totalTimeSpent },
     ];
     setAnswers(updated);
 
@@ -429,6 +450,20 @@ export default function TestingPage(): ReactElement {
       setSelectedAnswer('');
       setTimeSpent(0);
     }
+  };
+
+  // Moves the current question to the end of the queue without recording an
+  // answer; currentIndex stays put so the next question slides into place.
+  // Disabled on the last pending question — every question must be answered.
+  const handlePostpone = () => {
+    if (currentIndex >= questions.length - 1) return;
+    carriedTimeRef.current.set(
+      currentQuestion.id,
+      (carriedTimeRef.current.get(currentQuestion.id) ?? 0) + timeSpent,
+    );
+    setQuestions((prev) => moveToEnd(prev, currentIndex));
+    setSelectedAnswer('');
+    setTimeSpent(0);
   };
 
   if (status === 'not-started') {
@@ -465,6 +500,8 @@ export default function TestingPage(): ReactElement {
         onBack={() => { setMode(null); setStatus('not-started'); }}
         onSelect={setSelectedAnswer}
         onNext={handleNext}
+        canPostpone={currentIndex < questions.length - 1}
+        onPostpone={handlePostpone}
       />
     );
   }

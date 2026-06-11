@@ -57,11 +57,13 @@ export default function QuestionCard({
           >
             <div className="flex items-start gap-3">
               <div
-                className={`w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 mt-0.5 ${
-                  selectedAnswer === option ? "border-[#16161a] bg-[#16161a]" : "border-gray-300"
+                className={`w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 mt-0.5 text-xs font-semibold ${
+                  selectedAnswer === option
+                    ? "border-[#16161a] bg-[#16161a] text-white"
+                    : "border-gray-300 text-gray-500"
                 }`}
               >
-                {selectedAnswer === option && <div className="w-2 h-2 bg-white rounded-full" />}
+                {String.fromCharCode(65 + idx)}
               </div>
               <span className="text-gray-800">{option}</span>
             </div>

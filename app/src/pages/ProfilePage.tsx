@@ -1,8 +1,52 @@
 import type { ReactElement } from 'react';
+import { Link } from 'wouter';
 import { useSession } from '../auth';
-import { User, TrendingUp, BookOpen, Award, Clock } from 'lucide-react';
+import { User, TrendingUp, BookOpen, Award, Clock, Bookmark, StickyNote, ChevronRight } from 'lucide-react';
 import { trpc } from '../shared/lib/trpc';
 import { useLov } from '../shared/hooks/use-lov';
+
+function ProfileQuickLinks(): ReactElement {
+  const bookmarksQuery = trpc.bookmarks.list.useQuery();
+  const notesQuery = trpc.notes.list.useQuery();
+  const savedCount = (bookmarksQuery.data ?? []).length;
+  const notesCount = (notesQuery.data ?? []).filter((n) => n.noteText.trim().length > 0).length;
+
+  const links = [
+    {
+      href: '/saved',
+      icon: <Bookmark className="w-5 h-5 text-[#16161a]" />,
+      title: 'Questões Salvas',
+      countLine: savedCount === 1 ? '1 questão salva' : `${savedCount} questões salvas`,
+    },
+    {
+      href: '/saved?tab=notes',
+      icon: <StickyNote className="w-5 h-5 text-[#16161a]" />,
+      title: 'Minhas Anotações',
+      countLine: notesCount === 1 ? '1 anotação' : `${notesCount} anotações`,
+    },
+  ];
+
+  return (
+    <div className="grid md:grid-cols-2 gap-4">
+      {links.map((link) => (
+        <Link
+          key={link.href}
+          href={link.href}
+          className="bg-white rounded-xl p-6 shadow hover:shadow-lg transition flex items-center justify-between"
+        >
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              {link.icon}
+              <p className="font-bold text-[#16161a]">{link.title}</p>
+            </div>
+            <p className="text-sm text-gray-500">{link.countLine}</p>
+          </div>
+          <ChevronRight className="w-5 h-5 text-gray-400" />
+        </Link>
+      ))}
+    </div>
+  );
+}
 
 export default function ProfilePage(): ReactElement {
   const { user } = useSession();
@@ -96,6 +140,9 @@ export default function ProfilePage(): ReactElement {
           </p>
         </div>
       </div>
+
+      {/* Saved questions + notes quick links */}
+      <ProfileQuickLinks />
 
       {/* Top and Weak Disciplines */}
       <div className="grid md:grid-cols-2 gap-6">

@@ -29,7 +29,7 @@ const navItems = [
   { path: '/analytics', label: 'Analytics', icon: <BarChart3 className="w-[18px] h-[18px]" /> },
   { path: '/goals', label: 'Metas', icon: <Target className="w-[18px] h-[18px]" /> },
   { path: '/study-plans', label: 'Planos de Estudo', icon: <ClipboardList className="w-[18px] h-[18px]" /> },
-  { path: '/saved', label: 'Questões Salvas', icon: <Bookmark className="w-[18px] h-[18px]" /> },
+  { path: '/saved', label: 'Salvas e Anotações', icon: <Bookmark className="w-[18px] h-[18px]" /> },
   { path: '/profile', label: 'Perfil', icon: <User className="w-[18px] h-[18px]" /> },
 ];
 

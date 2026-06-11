@@ -1,7 +1,11 @@
 import { useState, useEffect, useCallback, type ReactElement } from 'react';
-import { Clock, AlertCircle, Flag, CheckCircle, XCircle } from 'lucide-react';
+import { Clock, AlertCircle, Flag, CheckCircle, XCircle, ArrowRightToLine } from 'lucide-react';
 import { useLov } from '../shared/hooks/use-lov';
 import { trpc } from '../shared/lib/trpc';
+import { shuffle } from '../shared/lib/shuffle';
+import { findNextUnanswered } from '../shared/lib/exam-queue';
+import ExamQuestionNav from './ExamQuestionNav';
+import ExamFinishDialog from './ExamFinishDialog';
 import { accuracyPct } from '@shared/domain/scoring';
 import { useNotesAndBookmarks, type NotesAndBookmarks } from '../shared/hooks/use-notes-bookmarks';
 import QuestionCard from '@/shared/components/QuestionCard';
@@ -57,7 +61,9 @@ function ExamSetup({ loading, onStart }: ExamSetupProps): ReactElement {
           <li>- 5 horas de duracao</li>
           <li>- Sem feedback durante o simulado</li>
           <li>- Pode sinalizar questoes para revisar depois</li>
+          <li>- Pode adiar questoes para responder depois</li>
           <li>- Navegue livremente entre questoes</li>
+          <li>- E preciso responder todas as questoes para encerrar manualmente</li>
           <li>- Timer regressivo como na prova real</li>
         </ul>
       </div>
@@ -92,28 +98,32 @@ interface ExamPlayingProps {
   currentIndex: number;
   answers: Map<number, string>;
   flagged: Set<number>;
+  postponed: Set<number>;
   timeLeft: number;
   showConfirmSubmit: boolean;
   notesAndBookmarks: NotesAndBookmarks;
   disciplineLov: Lov;
   examBoardLov: Lov;
+  canPostpone: boolean;
   onSelectAnswer: (option: string) => void;
   onSetIndex: (idx: number) => void;
   onToggleFlag: () => void;
+  onPostpone: () => void;
+  onGoToUnanswered: () => void;
   onShowConfirmSubmit: () => void;
   onHideConfirmSubmit: () => void;
   onSubmit: () => void;
 }
 
 function ExamPlaying({
-  questions, currentIndex, answers, flagged, timeLeft, showConfirmSubmit,
-  notesAndBookmarks, disciplineLov, examBoardLov,
-  onSelectAnswer, onSetIndex, onToggleFlag, onShowConfirmSubmit, onHideConfirmSubmit, onSubmit,
+  questions, currentIndex, answers, flagged, postponed, timeLeft, showConfirmSubmit,
+  notesAndBookmarks, disciplineLov, examBoardLov, canPostpone,
+  onSelectAnswer, onSetIndex, onToggleFlag, onPostpone, onGoToUnanswered,
+  onShowConfirmSubmit, onHideConfirmSubmit, onSubmit,
 }: ExamPlayingProps): ReactElement {
   const { localNotes, bookmarkedIds, handleNoteChange, handleToggleBookmark } = notesAndBookmarks;
   const currentQuestion = questions[currentIndex];
   const answeredCount = answers.size;
-  const unansweredCount = questions.length - answeredCount;
   const flaggedCount = flagged.size;
   const timePercentage = (timeLeft / EXAM_DURATION) * 100;
   const isUrgent = timeLeft < 1800;
@@ -145,7 +155,14 @@ function ExamPlaying({
 
       <div className="bg-white rounded-xl p-4 shadow">
         <div className="flex items-center justify-between mb-3">
-          <span className="font-bold text-[#16161a]">Questao {currentIndex + 1}</span>
+          <span className="font-bold text-[#16161a] flex items-center gap-2">
+            Questao {currentIndex + 1}
+            {postponed.has(currentIndex) && (
+              <span className="text-xs font-semibold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
+                Adiada
+              </span>
+            )}
+          </span>
           <div className="flex gap-2">
             <button
               onClick={onToggleFlag}
@@ -153,6 +170,15 @@ function ExamPlaying({
               title="Sinalizar para revisao"
             >
               <Flag className="w-4 h-4" />
+            </button>
+            <button
+              onClick={onPostpone}
+              disabled={!canPostpone}
+              className="px-3 py-2 bg-amber-100 text-amber-700 rounded-lg text-sm font-semibold hover:bg-amber-200 transition disabled:opacity-50 flex items-center gap-1.5"
+              title={canPostpone ? 'Adiar e ir para a proxima nao respondida' : 'Disponivel apenas em questoes ainda nao respondidas'}
+            >
+              <ArrowRightToLine className="w-4 h-4" />
+              Responder depois
             </button>
             <button
               onClick={onShowConfirmSubmit}
@@ -195,59 +221,23 @@ function ExamPlaying({
         </div>
       </div>
 
-      <div className="bg-white rounded-xl p-4 shadow">
-        <h4 className="text-sm font-semibold text-gray-700 mb-3">Navegacao Rapida</h4>
-        <div className="grid grid-cols-10 gap-1">
-          {questions.map((_, idx) => (
-            <button
-              key={idx}
-              onClick={() => { onSetIndex(idx); }}
-              className={`w-full aspect-square rounded text-xs font-medium transition ${
-                idx === currentIndex || flagged.has(idx)
-                  ? 'bg-[#16161a] text-white'
-                  : answers.has(idx)
-                    ? 'bg-[#26262c] text-white'
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-              }`}
-            >
-              {idx + 1}
-            </button>
-          ))}
-        </div>
-        <div className="flex items-center gap-4 mt-3 text-xs text-gray-500">
-          <div className="flex items-center gap-1"><div className="w-3 h-3 rounded bg-[#26262c]" /><span>Respondida</span></div>
-          <div className="flex items-center gap-1"><div className="w-3 h-3 rounded bg-[#16161a]" /><span>Sinalizada</span></div>
-          <div className="flex items-center gap-1"><div className="w-3 h-3 rounded bg-gray-100" /><span>Nao respondida</span></div>
-        </div>
-      </div>
+      <ExamQuestionNav
+        total={questions.length}
+        currentIndex={currentIndex}
+        answered={new Set(answers.keys())}
+        flagged={flagged}
+        postponed={postponed}
+        onSelect={onSetIndex}
+      />
 
-      {showConfirmSubmit && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl p-6 max-w-md w-full shadow-2xl">
-            <h3 className="text-xl font-bold text-[#16161a] mb-4">Encerrar Simulado?</h3>
-            <p className="text-gray-600 mb-2">
-              Voce respondeu <span className="font-bold">{answeredCount}</span> de {questions.length} questoes.
-            </p>
-            {unansweredCount > 0 && (
-              <p className="text-red-600 text-sm mb-4">{unansweredCount} questao(oes) sem resposta!</p>
-            )}
-            <div className="flex gap-3">
-              <button
-                onClick={onHideConfirmSubmit}
-                className="flex-1 bg-gray-200 text-gray-700 py-2 rounded-lg font-semibold hover:bg-gray-300 transition"
-              >
-                Continuar
-              </button>
-              <button
-                onClick={() => { onHideConfirmSubmit(); onSubmit(); }}
-                className="flex-1 bg-[#16161a] text-white py-2 rounded-lg font-semibold hover:bg-[#26262c] transition"
-              >
-                Encerrar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ExamFinishDialog
+        open={showConfirmSubmit}
+        answeredCount={answeredCount}
+        total={questions.length}
+        onClose={onHideConfirmSubmit}
+        onConfirm={() => { onHideConfirmSubmit(); onSubmit(); }}
+        onGoToUnanswered={onGoToUnanswered}
+      />
     </div>
   );
 }
@@ -353,6 +343,7 @@ export default function RealExamSimulation(): ReactElement {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [answers, setAnswers] = useState<Map<number, string>>(new Map());
   const [flagged, setFlagged] = useState<Set<number>>(new Set());
+  const [postponed, setPostponed] = useState<Set<number>>(new Set());
   const [timeLeft, setTimeLeft] = useState(EXAM_DURATION);
   const [loading, setLoading] = useState(false);
   const [showConfirmSubmit, setShowConfirmSubmit] = useState(false);
@@ -394,7 +385,7 @@ export default function RealExamSimulation(): ReactElement {
       const mapped: ExamQuestion[] = rows.map((r) => ({
         id: r.id,
         questionText: r.questionText,
-        options: r.options,
+        options: shuffle(r.options),
         correctAnswer: r.correctAnswer,
         difficulty: r.difficulty,
         discipline: r.discipline,
@@ -405,6 +396,7 @@ export default function RealExamSimulation(): ReactElement {
       setQuestions(mapped);
       setAnswers(new Map());
       setFlagged(new Set());
+      setPostponed(new Set());
       setCurrentIndex(0);
       setTimeLeft(EXAM_DURATION);
       setStatus('playing');
@@ -431,6 +423,26 @@ export default function RealExamSimulation(): ReactElement {
     const newAnswers = new Map(answers);
     newAnswers.set(currentIndex, option);
     setAnswers(newAnswers);
+    // Answering clears the postpone mark — the set only holds unanswered indexes.
+    setPostponed((prev) => {
+      if (!prev.has(currentIndex)) return prev;
+      const next = new Set(prev);
+      next.delete(currentIndex);
+      return next;
+    });
+  };
+
+  const postponeCurrent = () => {
+    const next = findNextUnanswered(questions.length, currentIndex, answers);
+    if (next === null) return;
+    setPostponed((prev) => new Set(prev).add(currentIndex));
+    setCurrentIndex(next);
+  };
+
+  const goToFirstUnanswered = () => {
+    setShowConfirmSubmit(false);
+    const first = questions.findIndex((_, idx) => !answers.has(idx));
+    if (first >= 0) setCurrentIndex(first);
   };
 
   const toggleFlag = () => {
@@ -454,14 +466,18 @@ export default function RealExamSimulation(): ReactElement {
         currentIndex={currentIndex}
         answers={answers}
         flagged={flagged}
+        postponed={postponed}
         timeLeft={timeLeft}
         showConfirmSubmit={showConfirmSubmit}
         notesAndBookmarks={notesAndBookmarks}
         disciplineLov={disciplineLov}
         examBoardLov={examBoardLov}
+        canPostpone={!answers.has(currentIndex) && findNextUnanswered(questions.length, currentIndex, answers) !== null}
         onSelectAnswer={selectAnswer}
         onSetIndex={setCurrentIndex}
         onToggleFlag={toggleFlag}
+        onPostpone={postponeCurrent}
+        onGoToUnanswered={goToFirstUnanswered}
         onShowConfirmSubmit={() => { setShowConfirmSubmit(true); }}
         onHideConfirmSubmit={() => { setShowConfirmSubmit(false); }}
         onSubmit={handleSubmit}
@@ -481,6 +497,7 @@ export default function RealExamSimulation(): ReactElement {
           setQuestions([]);
           setAnswers(new Map());
           setFlagged(new Set());
+          setPostponed(new Set());
         }}
       />
     );

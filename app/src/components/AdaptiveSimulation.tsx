@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, type ReactElement } from 'react';
 import { useSession } from '../auth';
 import { useLov } from '../shared/hooks/use-lov';
 import { trpc } from '../shared/lib/trpc';
+import { shuffle } from '../shared/lib/shuffle';
 import { nextDifficulty } from '@shared/domain/adaptive';
 import { useNotesAndBookmarks } from '../shared/hooks/use-notes-bookmarks';
 import {
@@ -89,7 +90,7 @@ export default function AdaptiveSimulation(): ReactElement {
       const mapped: AdaptiveQuestion[] = rows.map((r) => ({
         id: r.id,
         questionText: r.questionText,
-        options: r.options,
+        options: shuffle(r.options),
         correctAnswer: r.correctAnswer,
         difficulty: r.difficulty as Difficulty,
         discipline: r.discipline,

@@ -3,6 +3,7 @@ import { useSession } from '../auth';
 import { RotateCcw, ChevronRight, CheckCircle, XCircle, Calendar } from 'lucide-react';
 import { useLov } from '../shared/hooks/use-lov';
 import { trpc } from '../shared/lib/trpc';
+import { shuffle } from '../shared/lib/shuffle';
 import { accuracyPct } from '@shared/domain/scoring';
 import { useNotesAndBookmarks } from '../shared/hooks/use-notes-bookmarks';
 import QuestionCard from '@/shared/components/QuestionCard';
@@ -101,8 +102,12 @@ export default function SpacedRepetition(): ReactElement {
     { questionId: string; userAnswer: string; correct: boolean; timeSpent: number }[]
   >([]);
 
+  // Map the review queue into session state only while in 'loading' status and
+  // never against an in-flight fetch: background refetches (window focus after
+  // staleTime, invalidate on record) must not replace — and reshuffle — the
+  // questions mid-session.
   useEffect(() => {
-    if (!user || reviewQuery.isLoading) return;
+    if (!user || status !== 'loading' || reviewQuery.isFetching) return;
     const data = reviewQuery.data ?? [];
     if (data.length === 0) {
       setStatus('empty');
@@ -111,7 +116,7 @@ export default function SpacedRepetition(): ReactElement {
     const items: ReviewItem[] = data.slice(0, 5).map((q) => ({
       id: q.id,
       questionText: q.questionText,
-      options: q.options,
+      options: shuffle(q.options),
       correctAnswer: q.correctAnswer,
       explanation: q.explanation,
       discipline: q.discipline,
@@ -125,7 +130,7 @@ export default function SpacedRepetition(): ReactElement {
     }));
     setReviewQuestions(items);
     setStatus('playing');
-  }, [user, reviewQuery.isLoading, reviewQuery.data]);
+  }, [user, status, reviewQuery.isFetching, reviewQuery.data]);
 
   const currentQuestion = reviewQuestions[currentIndex];
   const dueCount = dueCountQuery.data?.count ?? 0;
