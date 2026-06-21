@@ -17,6 +17,7 @@ import {
   CalendarDays,
   Bookmark,
   ClipboardList,
+  Bug,
 } from 'lucide-react';
 
 interface LayoutProps {
@@ -37,6 +38,7 @@ const adminNavItems = [
   { path: '/admin/questions', label: 'Questões', icon: <FileText className="w-[18px] h-[18px]" /> },
   { path: '/admin/algorithm', label: 'Algoritmo', icon: <SlidersHorizontal className="w-[18px] h-[18px]" /> },
   { path: '/admin/calendar', label: 'Calendário', icon: <CalendarDays className="w-[18px] h-[18px]" /> },
+  { path: '/admin/issues', label: 'Criar Issue', icon: <Bug className="w-[18px] h-[18px]" /> },
 ];
 
 function isActive(itemPath: string, currentPath: string): boolean {
