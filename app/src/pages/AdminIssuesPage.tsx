@@ -1,12 +1,17 @@
-import { useState, type ReactElement, type FormEvent } from 'react';
-import { Check, ExternalLink, Bug } from 'lucide-react';
+import { useState, useEffect, useCallback, type ReactElement, type FormEvent } from 'react';
+import { Check, ExternalLink, Bug, RefreshCw } from 'lucide-react';
 import { useGetToken } from '../auth';
 import {
   ISSUE_KINDS,
   githubIssueInputSchema,
   type GithubIssueInput,
 } from '@shared/domain/github-issue';
-import { createIssue, type CreateIssueResult } from '../shared/lib/issue-service';
+import {
+  createIssue,
+  listOpenIssues,
+  type CreateIssueResult,
+  type IssueListItem,
+} from '../shared/lib/issue-service';
 import { AdminGate } from './admin-gate';
 
 const BLANK: GithubIssueInput = { title: '', body: '', kind: 'bug' };
@@ -126,6 +131,120 @@ function IssueForm(): ReactElement {
   );
 }
 
+function formatDate(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString('pt-BR');
+}
+
+function OpenIssuesList(): ReactElement {
+  const getToken = useGetToken();
+  const [issues, setIssues] = useState<IssueListItem[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const token = await getToken();
+      setIssues(await listOpenIssues(token));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erro desconhecido');
+    } finally {
+      setLoading(false);
+    }
+  }, [getToken]);
+
+  useEffect(() => { void load(); }, [load]);
+
+  return (
+    <div className="space-y-4 max-w-2xl">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-ink-mute">Issues abertas no repositório.</p>
+        <button
+          onClick={() => { void load(); }}
+          disabled={loading}
+          className="flex items-center gap-1.5 text-sm text-ink-mute hover:text-ink disabled:opacity-60"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+          Atualizar
+        </button>
+      </div>
+
+      {error !== null && (
+        <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{error}</div>
+      )}
+
+      {loading && issues === null ? (
+        <p className="text-sm text-ink-mute py-8 text-center">Carregando...</p>
+      ) : (issues?.length ?? 0) === 0 ? (
+        <p className="text-sm text-ink-mute py-8 text-center">Nenhuma issue aberta.</p>
+      ) : (
+        <ul className="divide-y divide-line rounded-xl border border-line overflow-hidden">
+          {(issues ?? []).map((it) => (
+            <li key={it.number} className="p-3 hover:bg-paper-sink transition-colors">
+              <div className="flex items-start gap-3">
+                <span className="text-xs font-mono text-ink-mute mt-0.5 shrink-0">#{it.number}</span>
+                <div className="min-w-0 flex-1">
+                  <a
+                    href={it.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm font-medium text-ink hover:text-[#d9ab53] inline-flex items-center gap-1"
+                  >
+                    {it.title}
+                    <ExternalLink className="w-3 h-3 shrink-0" />
+                  </a>
+                  <div className="mt-1 flex flex-wrap items-center gap-2">
+                    {it.labels.map((l) => (
+                      <span key={l} className="px-1.5 py-0.5 rounded-full bg-paper-sink text-[0.65rem] text-ink-mute">
+                        {l}
+                      </span>
+                    ))}
+                    <span className="text-[0.65rem] text-ink-mute">{formatDate(it.createdAt)}</span>
+                  </div>
+                </div>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+type IssuesTab = 'create' | 'list';
+
+function IssuesPanel(): ReactElement {
+  const [tab, setTab] = useState<IssuesTab>('create');
+  const tabs: Array<{ id: IssuesTab; label: string }> = [
+    { id: 'create', label: 'Criar' },
+    { id: 'list', label: 'Abertas' },
+  ];
+
+  return (
+    <div className="space-y-6">
+      <div className="border-b border-line">
+        <div className="flex gap-1">
+          {tabs.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => { setTab(t.id); }}
+              className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+                tab === t.id ? 'border-[#d9ab53] text-ink' : 'border-transparent text-ink-mute hover:text-ink'
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {tab === 'create' ? <IssueForm /> : <OpenIssuesList />}
+    </div>
+  );
+}
+
 export function AdminIssuesPage(): ReactElement {
-  return <AdminGate><IssueForm /></AdminGate>;
+  return <AdminGate><IssuesPanel /></AdminGate>;
 }

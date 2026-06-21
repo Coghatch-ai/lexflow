@@ -54,3 +54,37 @@ export async function createIssue(
 
   return (await res.json()) as CreateIssueResult;
 }
+
+export interface IssueListItem {
+  number: number;
+  title: string;
+  url: string;
+  createdAt: string;
+  labels: string[];
+}
+
+export async function listOpenIssues(token: string | null): Promise<IssueListItem[]> {
+  if (serviceUrl.length === 0) {
+    throw new Error("VITE_ISSUE_SERVICE_URL não configurado");
+  }
+  if (token === null || token.length === 0) {
+    throw new Error("Sessão expirada — faça login novamente");
+  }
+
+  const res = await fetch(serviceUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ project: PROJECT, action: "list" }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(text.length > 0 ? text : `Falha ao carregar issues (${String(res.status)})`);
+  }
+
+  const data = (await res.json()) as { issues: IssueListItem[] };
+  return data.issues;
+}
