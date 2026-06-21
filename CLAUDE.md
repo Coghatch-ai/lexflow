@@ -24,7 +24,7 @@ text is Brazilian Portuguese (pt-BR). URLs/slugs are English kebab-case.
   `CLERK_JWT_KEY` (PEM public key). **POC: no webhook** — local `users` rows are created
   manually with `pnpm db:create-user <clerk-user-id>` (the `webhook-routes.ts` path exists but
   is inert until a Clerk webhook + `clerk-webhook-secret` SSM param are configured).
-- **Package manager:** pnpm 10. **Node:** 22 (local + CI).
+- **Package manager:** pnpm 10. **Node:** 24 (Lambda runtime + CI).
 
 ## Data model — single-user B2C (NOT multi-tenant)
 
