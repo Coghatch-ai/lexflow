@@ -96,6 +96,7 @@ export function QuestionForm({
   }
 
   const disciplineLov = useLov('DISCIPLINE');
+  const difficultyLov = useLov('DIFFICULTY');
   const isPending = createMutation.isPending || updateMutation.isPending;
 
   return (
@@ -189,9 +190,9 @@ export function QuestionForm({
             onChange={(e) => { setField('difficulty', e.target.value as 'easy' | 'medium' | 'hard'); }}
             className="w-full text-sm border border-line rounded-lg px-2 py-2 bg-surface text-ink focus:outline-none focus:ring-1 focus:ring-[#d9ab53]"
           >
-            <option value="easy">Fácil</option>
-            <option value="medium">Médio</option>
-            <option value="hard">Difícil</option>
+            {difficultyLov.options.map((o) => (
+              <option key={o.code} value={o.code}>{o.value}</option>
+            ))}
           </select>
         </div>
         <div>

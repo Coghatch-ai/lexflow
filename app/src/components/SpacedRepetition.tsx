@@ -34,15 +34,15 @@ function SpacedEmptyState({ dueCount }: { dueCount: number }): ReactElement {
           <RotateCcw className="w-6 h-6 text-white" />
         </div>
         <div>
-          <h3 className="text-xl font-bold text-[#16161a]">Revisao Espacada</h3>
-          <p className="text-sm text-gray-600">Revise no momento certo para maximizar retencao</p>
+          <h3 className="text-xl font-bold text-[#16161a]">Revisão Espaçada</h3>
+          <p className="text-sm text-gray-600">Revise no momento certo para maximizar retenção</p>
         </div>
       </div>
 
       <div className="grid md:grid-cols-2 gap-4 mb-6">
         <div className="bg-[#16161a]/5 rounded-lg p-4 text-center">
           <p className="text-2xl font-bold text-[#16161a]">{dueCount}</p>
-          <p className="text-sm text-gray-600">Revisoes Pendentes</p>
+          <p className="text-sm text-gray-600">Revisões Pendentes</p>
         </div>
         <div className="bg-green-50 rounded-lg p-4 text-center">
           <p className="text-2xl font-bold text-green-600">0</p>
@@ -52,20 +52,20 @@ function SpacedEmptyState({ dueCount }: { dueCount: number }): ReactElement {
 
       <div className="text-center py-8">
         <Calendar className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-        <p className="text-gray-600 mb-2">Nenhuma revisao pendente!</p>
+        <p className="text-gray-600 mb-2">Nenhuma revisão pendente!</p>
         <p className="text-sm text-gray-500">
-          Responda simulados primeiro para que o sistema identifique questoes para revisar.
+          Responda simulados primeiro para que o sistema identifique questões para revisar.
         </p>
       </div>
 
       <div className="bg-[#16161a]/5 rounded-lg p-4">
         <h4 className="font-semibold text-[#16161a] mb-2">Como funciona?</h4>
         <ul className="space-y-1 text-sm text-gray-700">
-          <li>- Questoes respondidas incorretamente entram na fila de revisao</li>
+          <li>- Questões respondidas incorretamente entram na fila de revisão</li>
           <li>- O algoritmo SM-2 ajusta o intervalo conforme seu desempenho</li>
           <li>- Acerto: intervalo aumenta (1 dia → 6 dias → progressivo)</li>
-          <li>- Erro: intervalo volta ao inicio</li>
-          <li>- Quanto mais voce acerta, mais tempo ate a proxima revisao</li>
+          <li>- Erro: intervalo volta ao início</li>
+          <li>- Quanto mais você acerta, mais tempo até a próxima revisão</li>
         </ul>
       </div>
     </div>
@@ -207,7 +207,7 @@ export default function SpacedRepetition(): ReactElement {
           <div className="flex items-center gap-3">
             <RotateCcw className="w-5 h-5 text-[#16161a]" />
             <span className="text-sm font-medium text-gray-700">
-              Revisao {currentIndex + 1} de {reviewQuestions.length}
+              Revisão {currentIndex + 1} de {reviewQuestions.length}
             </span>
           </div>
           <div className="flex items-center gap-2 text-sm text-gray-600">
@@ -272,7 +272,7 @@ export default function SpacedRepetition(): ReactElement {
           <div className="bg-white rounded-lg p-4 flex items-center gap-3">
             <Calendar className="w-5 h-5 text-[#16161a]" />
             <div>
-              <p className="text-sm text-gray-600">Proxima revisao agendada em</p>
+              <p className="text-sm text-gray-600">Próxima revisão agendada em</p>
               <p className="font-bold text-[#16161a]">
                 {nextIntervalDays} dia{nextIntervalDays > 1 ? 's' : ''}
               </p>
@@ -284,7 +284,7 @@ export default function SpacedRepetition(): ReactElement {
           onClick={handleNext}
           className="w-full bg-gradient-to-r from-[#26262c] to-[#26262c] text-white py-3 rounded-lg font-semibold hover:shadow-lg transition flex items-center justify-center gap-2"
         >
-          {currentIndex + 1 >= reviewQuestions.length ? 'Concluir Revisao' : 'Proxima Revisao'}
+          {currentIndex + 1 >= reviewQuestions.length ? 'Concluir Revisão' : 'Próxima Revisão'}
           <ChevronRight className="w-5 h-5" />
         </button>
       </div>
@@ -294,8 +294,8 @@ export default function SpacedRepetition(): ReactElement {
   return (
     <div className="space-y-6">
       <div className="bg-gradient-to-r from-[#16161a] to-[#16161a] rounded-xl p-6 text-white">
-        <h3 className="text-2xl font-bold mb-2">Revisao Concluida!</h3>
-        <p className="text-white/80">Continue revisando regularmente para maximizar retencao</p>
+        <h3 className="text-2xl font-bold mb-2">Revisão Concluída!</h3>
+        <p className="text-white/80">Continue revisando regularmente para maximizar retenção</p>
       </div>
 
       <div className="grid md:grid-cols-2 gap-4">
@@ -307,7 +307,7 @@ export default function SpacedRepetition(): ReactElement {
           <div className="text-4xl font-bold text-[#16161a] mb-2">
             {accuracyPct(sessionCorrect, sessionTotal)}%
           </div>
-          <p className="text-gray-600">Acuracia na Sessao</p>
+          <p className="text-gray-600">Acurácia na Sessão</p>
         </div>
       </div>
 
@@ -322,7 +322,7 @@ export default function SpacedRepetition(): ReactElement {
         }}
         className="w-full bg-gradient-to-r from-[#26262c] to-[#26262c] text-white py-3 rounded-lg font-semibold hover:shadow-lg transition"
       >
-        Recarregar Revisoes
+        Recarregar Revisões
       </button>
     </div>
   );

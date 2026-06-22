@@ -50,20 +50,20 @@ function ExamSetup({ loading, onStart }: ExamSetupProps): ReactElement {
         </div>
         <div>
           <h3 className="text-xl font-bold text-[#16161a]">Simulado Estilo Prova Real</h3>
-          <p className="text-sm text-gray-600">Simule as condicoes reais do exame</p>
+          <p className="text-sm text-gray-600">Simule as condições reais do exame</p>
         </div>
       </div>
 
       <div className="bg-[#16161a]/5 rounded-lg p-4 mb-6 space-y-2">
-        <h4 className="font-semibold text-[#16161a]">Configuracao do Simulado:</h4>
+        <h4 className="font-semibold text-[#16161a]">Configuração do Simulado:</h4>
         <ul className="space-y-1 text-sm text-gray-700">
-          <li>- {QUESTIONS_PER_EXAM} questoes (como a prova real)</li>
-          <li>- 5 horas de duracao</li>
+          <li>- {QUESTIONS_PER_EXAM} questões (como a prova real)</li>
+          <li>- 5 horas de duração</li>
           <li>- Sem feedback durante o simulado</li>
-          <li>- Pode sinalizar questoes para revisar depois</li>
-          <li>- Pode adiar questoes para responder depois</li>
-          <li>- Navegue livremente entre questoes</li>
-          <li>- E preciso responder todas as questoes para encerrar manualmente</li>
+          <li>- Pode sinalizar questões para revisar depois</li>
+          <li>- Pode adiar questões para responder depois</li>
+          <li>- Navegue livremente entre questões</li>
+          <li>- É preciso responder todas as questões para encerrar manualmente</li>
           <li>- Timer regressivo como na prova real</li>
         </ul>
       </div>
@@ -72,10 +72,10 @@ function ExamSetup({ loading, onStart }: ExamSetupProps): ReactElement {
         <div className="flex items-start gap-3">
           <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
           <div>
-            <p className="font-semibold text-red-700">Atencao!</p>
+            <p className="font-semibold text-red-700">Atenção!</p>
             <p className="text-sm text-red-600">
-              Este simulado simula condicoes reais de prova. Nao havera feedback
-              durante o exame. Certifique-se de ter tempo disponivel.
+              Este simulado simula condições reais de prova. Não haverá feedback
+              durante o exame. Certifique-se de ter tempo disponível.
             </p>
           </div>
         </div>
@@ -156,7 +156,7 @@ function ExamPlaying({
       <div className="bg-white rounded-xl p-4 shadow">
         <div className="flex items-center justify-between mb-3">
           <span className="font-bold text-[#16161a] flex items-center gap-2">
-            Questao {currentIndex + 1}
+            Questão {currentIndex + 1}
             {postponed.has(currentIndex) && (
               <span className="text-xs font-semibold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
                 Adiada
@@ -167,7 +167,7 @@ function ExamPlaying({
             <button
               onClick={onToggleFlag}
               className={`p-2 rounded-lg transition ${flagged.has(currentIndex) ? 'bg-[#16161a] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-              title="Sinalizar para revisao"
+              title="Sinalizar para revisão"
             >
               <Flag className="w-4 h-4" />
             </button>
@@ -175,7 +175,7 @@ function ExamPlaying({
               onClick={onPostpone}
               disabled={!canPostpone}
               className="px-3 py-2 bg-amber-100 text-amber-700 rounded-lg text-sm font-semibold hover:bg-amber-200 transition disabled:opacity-50 flex items-center gap-1.5"
-              title={canPostpone ? 'Adiar e ir para a proxima nao respondida' : 'Disponivel apenas em questoes ainda nao respondidas'}
+              title={canPostpone ? 'Adiar e ir para a próxima não respondida' : 'Disponível apenas em questões ainda não respondidas'}
             >
               <ArrowRightToLine className="w-4 h-4" />
               Responder depois
@@ -216,7 +216,7 @@ function ExamPlaying({
             disabled={currentIndex === questions.length - 1}
             className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300 transition disabled:opacity-50"
           >
-            Proxima
+            Próxima
           </button>
         </div>
       </div>
@@ -268,7 +268,7 @@ function ExamReview({ questions, answers, timeLeft, disciplineLov, onReset }: Ex
       <div className="grid md:grid-cols-4 gap-4">
         <div className="bg-white rounded-xl p-6 shadow text-center">
           <div className="text-4xl font-bold text-[#16161a] mb-2">{accuracy}%</div>
-          <p className="text-gray-600">Acuracia</p>
+          <p className="text-gray-600">Acurácia</p>
         </div>
         <div className="bg-white rounded-xl p-6 shadow text-center">
           <div className="text-4xl font-bold text-green-600 mb-2 flex items-center justify-center gap-2">
@@ -289,7 +289,7 @@ function ExamReview({ questions, answers, timeLeft, disciplineLov, onReset }: Ex
       </div>
 
       <div className="bg-white rounded-xl p-6 shadow">
-        <h4 className="text-lg font-bold text-[#16161a] mb-4">Revisao por Questao</h4>
+        <h4 className="text-lg font-bold text-[#16161a] mb-4">Revisão por Questão</h4>
         <div className="space-y-2 max-h-[500px] overflow-y-auto">
           {questions.map((q, idx) => {
             const userAnswer = answers.get(idx);
@@ -304,11 +304,11 @@ function ExamReview({ questions, answers, timeLeft, disciplineLov, onReset }: Ex
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
                     <p className="font-medium text-gray-800 text-sm">
-                      Questao {idx + 1} - {disciplineLov.labelOf(q.discipline)}
+                      Questão {idx + 1} - {disciplineLov.labelOf(q.discipline)}
                     </p>
                     {!isCorrect && (
                       <div className="mt-1 text-xs">
-                        <p className="text-red-600">Sua resposta: {userAnswer ?? 'Nao respondida'}</p>
+                        <p className="text-red-600">Sua resposta: {userAnswer ?? 'Não respondida'}</p>
                         <p className="text-green-600">Correta: {q.correctAnswer}</p>
                       </div>
                     )}

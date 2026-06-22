@@ -73,7 +73,7 @@ export default function GoalsPage(): ReactElement {
       <div className="bg-gradient-to-r from-[#16161a] to-[#26262c] rounded-xl p-6 text-white">
         <h2 className="text-2xl font-bold mb-2">Suas Metas de Estudo</h2>
         <p className="text-white/80">
-          Estabeleca objetivos para cada disciplina e acompanhe seu progresso
+          Estabeleça objetivos para cada disciplina e acompanhe seu progresso
         </p>
       </div>
 
@@ -116,7 +116,7 @@ export default function GoalsPage(): ReactElement {
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Acuracia Alvo: {targetAccuracy}%
+                Acurácia Alvo: {targetAccuracy}%
               </label>
               <input
                 type="range"
@@ -224,7 +224,7 @@ export default function GoalsPage(): ReactElement {
             {/* Status message */}
             {goal.progress >= 100 && (
               <div className="mt-3 p-2 bg-green-50 rounded-lg text-sm text-green-700 font-medium">
-                Meta atingida! Parabens!
+                Meta atingida! Parabéns!
               </div>
             )}
           </div>
@@ -236,8 +236,8 @@ export default function GoalsPage(): ReactElement {
           <Target className="w-16 h-16 text-gray-300 mx-auto mb-4" />
           <p className="text-gray-600 text-lg mb-4">Nenhuma meta definida ainda</p>
           <p className="text-gray-500 text-sm max-w-lg mx-auto mb-6">
-            Crie metas para cada disciplina e acompanhe seu progresso rumo a
-            aprovacao!
+            Crie metas para cada disciplina e acompanhe seu progresso rumo à
+            aprovação!
           </p>
         </div>
       )}

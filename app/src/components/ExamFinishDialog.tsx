@@ -27,12 +27,12 @@ export default function ExamFinishDialog({
     return (
       <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
         <div className="bg-white rounded-xl p-6 max-w-md w-full shadow-2xl">
-          <h3 className="text-xl font-bold text-[#16161a] mb-4">Ainda ha questoes sem resposta</h3>
+          <h3 className="text-xl font-bold text-[#16161a] mb-4">Ainda há questões sem resposta</h3>
           <p className="text-gray-600 mb-2">
-            Voce respondeu <span className="font-bold">{answeredCount}</span> de {total} questoes.
+            Você respondeu <span className="font-bold">{answeredCount}</span> de {total} questões.
           </p>
           <p className="text-red-600 text-sm mb-4">
-            E preciso responder todas as questoes para encerrar. O simulado e enviado
+            É preciso responder todas as questões para encerrar. O simulado é enviado
             automaticamente quando o tempo acabar.
           </p>
           <div className="flex gap-3">
@@ -46,7 +46,7 @@ export default function ExamFinishDialog({
               onClick={onGoToUnanswered}
               className="flex-1 bg-[#16161a] text-white py-2 rounded-lg font-semibold hover:bg-[#26262c] transition"
             >
-              Ir para nao respondida
+              Ir para não respondida
             </button>
           </div>
         </div>
@@ -59,7 +59,7 @@ export default function ExamFinishDialog({
       <div className="bg-white rounded-xl p-6 max-w-md w-full shadow-2xl">
         <h3 className="text-xl font-bold text-[#16161a] mb-4">Encerrar Simulado?</h3>
         <p className="text-gray-600 mb-4">
-          Voce respondeu todas as <span className="font-bold">{total}</span> questoes.
+          Você respondeu todas as <span className="font-bold">{total}</span> questões.
         </p>
         <div className="flex gap-3">
           <button
