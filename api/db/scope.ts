@@ -19,6 +19,7 @@ const TABLE_SCOPE: Record<string, ScopeType> = {
   oab_discursive_questions: { type: "global" },
   oab_discursive_imports: { type: "global" },
   list_of_values: { type: "global" },
+  app_config: { type: "global" },
   spaced_repetition_config: { type: "global" },
   exam_calendars: { type: "global" },
   exam_calendar_events: { type: "global" },
@@ -26,6 +27,8 @@ const TABLE_SCOPE: Record<string, ScopeType> = {
   // Per-user owned tables
   user_answers: { type: "user" },
   study_sessions: { type: "user" },
+  discursive_sessions: { type: "user" },
+  user_discursive_answers: { type: "user" },
   user_performance_stats: { type: "user" },
   discipline_performance: { type: "user" },
   exam_board_performance: { type: "user" },

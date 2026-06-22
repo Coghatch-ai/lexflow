@@ -25,6 +25,7 @@
     "db:create-user": "tsx scripts/create-user.ts",
     "db:make-admin": "tsx scripts/make-admin.ts",
     "db:verify": "tsx scripts/verify-export.ts",
+    "db:query": "tsx scripts/db-query.ts",
     "smoke": "tsx scripts/smoke.ts"
   },
   "dependencies": {

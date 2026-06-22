@@ -107,3 +107,4 @@ conventions.md playbook A/B/C before they can be un-quarantined).
 - Commit `.env` or secrets (SSM for backend, GitHub Environment secrets for frontend).
 - Deploy manually or run `db:push`.
 - Use `console.log` (only `warn`/`error`), `any`, or non-null `!`.
+- Create a git branch without user approval.

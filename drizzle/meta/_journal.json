@@ -64,6 +64,20 @@
       "when": 1782136467969,
       "tag": "0008_abandoned_viper",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1782139800740,
+      "tag": "0009_faithful_doctor_strange",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1782147966372,
+      "tag": "0010_classy_dreadnoughts",
+      "breakpoints": true
     }
   ]
 }

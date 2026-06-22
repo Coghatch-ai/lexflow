@@ -1,0 +1,10 @@
+{
+  "active": true,
+  "goal": "for every bug that we have on gh, one by one, call triage, senior and dev",
+  "intervalMs": 300000,
+  "startedAt": "2026-06-22T19:21:31.125Z",
+  "lastCheckAt": "2026-06-22T20:31:31.173Z",
+  "checks": 1,
+  "status": "running",
+  "report": null
+}
