@@ -20,6 +20,12 @@
 //   - Arabic "33º…42º Exame de Ordem" are ancient CESPE-era exams (cespe.unb.br,
 //     different format) — they resolve a prova link but are NOT the peça + 4
 //     discursivas structure this pipeline expects; treat as out of scope.
+//
+// When the portal lists an exam twice (e.g. XXXIII has Aug + Dec editions), all
+// matching sections are collected. The `edition` field (e.g. "2021-08", "2021-12")
+// is parsed from the resolved prova href via /\/arquivos\/(\d{4})\/(\d{2})\//.
+// If multiple sections match and no edition selector is given, fetchExamPdfs throws
+// listing the available editions — it never silently picks the first.
 
 import { chromium, type Locator, type Page } from "playwright";
 
@@ -40,6 +46,7 @@ const AREA_KEYWORDS: Record<string, string> = {
 
 export interface ExamPdfs {
   examTitle: string;
+  edition: string | null;
   provaUrl: string;
   padraoUrl: string | null;
   provaB64: string;
@@ -123,20 +130,81 @@ async function resolveInSection(
   return { prova: pool[0]?.href ?? null, padrao: grouped.padrao ?? pool[1]?.href ?? null };
 }
 
-interface Match {
+export interface Match {
   title: string;
   prova: string | null;
   padrao: string | null;
+  edition: string | null;
+}
+
+// Parse the edition string ("YYYY-MM") from a resolved prova href.
+// Returns null when the href is null, opaque (UUID), or on a host that does not
+// use the /arquivos/YYYY/MM/ path prefix.
+export function parseEdition(href: string | null): string | null {
+  if (href === null) return null;
+  const m = href.match(/\/arquivos\/(\d{4})\/(\d{2})\//);
+  if (m === null) return null;
+  return `${m[1]}-${m[2]}`;
+}
+
+// Select a single Match from a non-empty array, optionally filtered by edition.
+//
+// Rules:
+//   0 matches  → caller already throws via the no-match path; this fn is never
+//                called with an empty array.
+//   1 match    → return it (edition selector is ignored — any value is fine).
+//   >1 matches where any edition is null → throw listing "(edition unknown)";
+//                the selector cannot reliably disambiguate so fail loud.
+//   >1 matches + no selector → throw listing available editions (FAIL LOUD).
+//   selector given → filter to edition === selector; throw if 0 results or still >1.
+export function selectEdition(matches: Match[], edition: string | null): Match {
+  if (matches.length === 1) {
+    const single = matches[0];
+    // matches is non-empty so index 0 is always defined
+    return single as Match;
+  }
+
+  const editionLabels = matches.map((m) => m.edition ?? "(edition unknown)");
+
+  // If any match has a null edition the set is unresolvable — throw regardless
+  // of whether a selector was given, so we never silently pick the wrong one.
+  const hasNullEdition = matches.some((m) => m.edition === null);
+  if (hasNullEdition) {
+    throw new Error(
+      `Exam matched ${matches.length.toString()} sections but edition cannot be determined for all of them: ${editionLabels.join(", ")}. Cannot disambiguate.`,
+    );
+  }
+
+  if (edition === null) {
+    throw new Error(
+      `Exam matched ${matches.length.toString()} sections. Specify --edition with one of: ${editionLabels.join(", ")}`,
+    );
+  }
+
+  const filtered = matches.filter((m) => m.edition === edition);
+  if (filtered.length === 0) {
+    throw new Error(
+      `No section found for edition "${edition}". Available editions: ${editionLabels.join(", ")}`,
+    );
+  }
+  if (filtered.length > 1) {
+    throw new Error(
+      `Edition "${edition}" still matched ${filtered.length.toString()} sections — cannot disambiguate.`,
+    );
+  }
+  const result = filtered[0];
+  return result as Match;
 }
 
 async function matchSection(
   page: Page,
   examRe: RegExp,
   areaKw: string,
-): Promise<{ match: Match | null; seen2a: string[] }> {
+): Promise<{ matches: Match[]; seen2a: string[] }> {
   const sections = page.locator("section.oabrj-section-subitem");
   const count = await sections.count();
   const seen2a: string[] = [];
+  const matches: Match[] = [];
   for (let i = 0; i < count; i++) {
     const sec = sections.nth(i);
     const title = (
@@ -146,9 +214,14 @@ async function matchSection(
     if (is2a) seen2a.push(title);
     if (!is2a || !examRe.test(title)) continue;
     const resolved = await resolveInSection(sec, areaKw, norm(title).includes(areaKw), page.url());
-    return { match: { title, prova: resolved.prova, padrao: resolved.padrao }, seen2a };
+    matches.push({
+      title,
+      prova: resolved.prova,
+      padrao: resolved.padrao,
+      edition: parseEdition(resolved.prova),
+    });
   }
-  return { match: null, seen2a };
+  return { matches, seen2a };
 }
 
 // Download via the browser's network context (shares UA/cookies — avoids 403).
@@ -162,6 +235,7 @@ export async function fetchExamPdfs(opts: {
   exam: string;
   area: string;
   headed: boolean;
+  edition?: string;
 }): Promise<ExamPdfs> {
   const areaKw = AREA_KEYWORDS[opts.area];
   if (areaKw === undefined) {
@@ -179,13 +253,17 @@ export async function fetchExamPdfs(opts: {
     await page.goto(URL_BANCO, { waitUntil: "domcontentloaded", timeout: 60000 });
     await page.waitForSelector("section.oabrj-section-subitem", { timeout: 30000 });
 
-    const { match, seen2a } = await matchSection(page, examRe, areaKw);
-    if (match === null) {
-      const available = [...new Set(seen2a)]; // the page lists some exams twice (e.g. XXXIII)
+    const { matches, seen2a } = await matchSection(page, examRe, areaKw);
+    if (matches.length === 0) {
+      const available = [...new Set(seen2a)];
       throw new Error(
         `No 2ª-fase section matched exam "${opts.exam}". 2ª-fase exams on the page:\n - ${available.join("\n - ")}`,
       );
     }
+
+    const editionSelector = opts.edition ?? null;
+    const match = selectEdition(matches, editionSelector);
+
     if (match.prova === null) {
       throw new Error(`Matched "${match.title}" but found no caderno PDF for area ${opts.area}.`);
     }
@@ -193,6 +271,7 @@ export async function fetchExamPdfs(opts: {
     const padraoB64 = match.padrao !== null ? await downloadB64(page, match.padrao) : null;
     return {
       examTitle: match.title,
+      edition: match.edition,
       provaUrl: match.prova,
       padraoUrl: match.padrao,
       provaB64,

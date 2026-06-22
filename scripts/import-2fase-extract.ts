@@ -10,6 +10,14 @@
 //   pnpm import:2fase:extract --exam XL --area CIVIL_LAW --year 2024
 //   pnpm import:2fase:extract --exam XL --area CIVIL_LAW --year 2024 --headed   # debug in a visible Chrome
 //
+// When the portal lists the same exam twice (e.g. XXXIII has Aug + Dec editions),
+// you must pass --edition to select one, e.g.:
+//   pnpm import:2fase:extract --exam XXXIII --area CIVIL_LAW --year 2021 --edition 2021-08
+//   pnpm import:2fase:extract --exam XXXIII --area CIVIL_LAW --year 2021 --edition 2021-12
+// Omitting --edition when multiple sections exist throws, listing the available editions.
+// The resolved edition is encoded in the draft filename (e.g. xxxiii-civil_law-2021-12.draft.json)
+// so Aug and Dec imports do not overwrite each other.
+//
 // Auth: extraction runs through the @anthropic-ai/claude-agent-sdk `query()`,
 // which drives the Claude Code runtime and reuses YOUR Claude Code login — no API
 // key, no separate credential. Claude Code reads the PDFs natively (Read tool).
@@ -138,14 +146,23 @@ async function main(): Promise<void> {
   if (Number.isNaN(year)) throw new Error(`Invalid --year: ${yearStr}`);
   const board = args["board"] ?? "FGV";
   const headed = args["headed"] === "true";
+  const editionArg = args["edition"];
+  // Validate --edition format: must be YYYY-MM or absent. parseArgs sets a flag
+  // to "true" when no value follows (e.g. `--edition` with no argument).
+  if (editionArg !== undefined && !/^\d{4}-\d{2}$/.test(editionArg)) {
+    throw new Error(`Invalid --edition "${editionArg}". Expected format: YYYY-MM (e.g. 2021-12).`);
+  }
 
   console.warn(`[extract] resolving PDFs for exam "${exam}" / ${area} on banco-provas…`);
-  const { examTitle, provaUrl, padraoUrl, provaB64, padraoB64 } = await fetchExamPdfs({
+  const { examTitle, edition, provaUrl, padraoUrl, provaB64, padraoB64 } = await fetchExamPdfs({
     exam,
     area,
     headed,
+    ...(editionArg !== undefined ? { edition: editionArg } : {}),
   });
-  console.warn(`[extract] matched section: "${examTitle}"`);
+  console.warn(
+    `[extract] matched section: "${examTitle}"${edition !== null ? ` (edition ${edition})` : ""}`,
+  );
   console.warn(
     `[extract] downloaded prova${padraoB64 !== null ? " + padrão" : " (no padrão found)"}`,
   );
@@ -167,7 +184,8 @@ async function main(): Promise<void> {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
-  const outPath = path.join(outDir, `${examSlug}-${area.toLowerCase()}.draft.json`);
+  const editionSuffix = edition !== null ? `-${edition}` : "";
+  const outPath = path.join(outDir, `${examSlug}-${area.toLowerCase()}${editionSuffix}.draft.json`);
   fs.writeFileSync(outPath, `${JSON.stringify(draft, null, 2)}\n`, "utf-8");
 
   console.warn(`[extract] ✓ wrote ${draft.items.length} items → ${outPath}`);
