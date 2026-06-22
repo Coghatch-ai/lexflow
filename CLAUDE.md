@@ -108,8 +108,13 @@ mention like `fix ... (#6)` only _links_ the issue — it does NOT close it (thi
 #6/#7/#17/#18 stayed open despite their fixes landing). Put one keyword per issue on its
 own line in the PR body / squash-merge message. Confirm with
 `gh pr view <n> --json closingIssuesReferences` (empty array = nothing will auto-close).
-Note: closing fires on **merge**, not on deploy — if an issue must stay open until the
-change is live in prod, omit the keyword and close it manually after deploy.
+Note: a closing keyword fires on **merge**, not on deploy. Because prod is deploy-gated,
+do NOT rely on it for deploy-gated work — instead label the issue `fixed-pending-deploy`
+when the fix merges. The `close-deployed-issues.yml` workflow runs after a successful
+`Deploy API`/`Deploy App` on `main` and auto-closes every open `fixed-pending-deploy`
+issue (dropping the `needs-deploy`/`fixed-pending-deploy` labels, posting a pt-BR comment).
+So: keyword = closes on merge (use for non-gated docs/chore); `fixed-pending-deploy` label
+= closes on deploy (use for anything that must be live first).
 
 ## NEVER
 

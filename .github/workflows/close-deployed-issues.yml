@@ -1,0 +1,47 @@
+name: Close Deployed Issues
+
+# Auto-close issues once their fix is LIVE in prod (not merely merged).
+# A fix is merged -> labelled `fixed-pending-deploy`; this runs after a
+# successful "Deploy API"/"Deploy App" on main and closes every such issue.
+# Pairs with the GitHub auto-close keyword convention in CLAUDE.md, but fires
+# on deploy instead of merge, matching the deploy-gated workflow.
+
+on:
+  workflow_run:
+    workflows: ["Deploy API", "Deploy App"]
+    types: [completed]
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  close:
+    # Only on a green deploy of main.
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      REPO: ${{ github.repository }}
+      WF: ${{ github.event.workflow_run.name }}
+      SHA: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - name: Close issues labelled fixed-pending-deploy
+        run: |
+          set -euo pipefail
+          nums=$(gh issue list --repo "$REPO" --state open \
+            --label fixed-pending-deploy --json number --jq '.[].number')
+          if [ -z "$nums" ]; then
+            echo "No open issues labelled fixed-pending-deploy — nothing to close."
+            exit 0
+          fi
+          for n in $nums; do
+            echo "Closing #$n (deployed via $WF @ ${SHA:0:7})"
+            # Drop the deploy-gate labels (ignore if one isn't present).
+            gh issue edit "$n" --repo "$REPO" \
+              --remove-label fixed-pending-deploy --remove-label needs-deploy || true
+            gh issue close "$n" --repo "$REPO" \
+              -c "✅ Deploy em produção concluído ($WF, commit ${SHA:0:7}). Fechando automaticamente."
+          done
