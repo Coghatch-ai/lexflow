@@ -11,6 +11,15 @@
 // Agnostic matching: find the section whose title matches the exam token AND is
 // 2ª fase; within it, the caderno (prova) is the first non-gabarito PDF and the
 // padrão is the first gabarito/padrão PDF, scoped to the chosen area.
+//
+// Format variants observed on the page (all handled here):
+//   - Roman "Exame Unificado/de Ordem - 2ª Fase" (I…XL): ONE section, 7 links per
+//     <strong> group ("Cadernos de prova" + "Gabarito"), one <a> per area; hosts
+//     vary (s.oab.org.br, cloudfront, www.oabrj.org.br/arquivos/files). Fully supported.
+//   - A few (XX, XIX) have NO <strong> groups (7 links, prova-only → no padrão).
+//   - Arabic "33º…42º Exame de Ordem" are ancient CESPE-era exams (cespe.unb.br,
+//     different format) — they resolve a prova link but are NOT the peça + 4
+//     discursivas structure this pipeline expects; treat as out of scope.
 
 import { chromium, type Locator, type Page } from "playwright";
 
@@ -172,8 +181,9 @@ export async function fetchExamPdfs(opts: {
 
     const { match, seen2a } = await matchSection(page, examRe, areaKw);
     if (match === null) {
+      const available = [...new Set(seen2a)]; // the page lists some exams twice (e.g. XXXIII)
       throw new Error(
-        `No 2ª-fase section matched exam "${opts.exam}". 2ª-fase exams on the page:\n - ${seen2a.slice(0, 25).join("\n - ")}`,
+        `No 2ª-fase section matched exam "${opts.exam}". 2ª-fase exams on the page:\n - ${available.join("\n - ")}`,
       );
     }
     if (match.prova === null) {

@@ -62,16 +62,25 @@ pnpm import:2fase:save scripts/out/<exam>-<area>.draft.json
 
 (70 questions, 14 tracker rows; all 5/5 with model answers. Append new exams here as you import them.)
 
+## What's on the page (47 "2ª-fase" sections, confirmed)
+
+- **Roman "Exame Unificado / Exame de Ordem - 2ª Fase" (≈ X … XL)** — the in-scope format.
+  One section per exam, `<strong>` groups "Cadernos de prova" + "Gabarito", one `<a>` per area;
+  hosts vary (s.oab.org.br, cloudfront, www.oabrj.org.br/arquivos/files). **Importable as-is.**
+  - Available (not yet imported): XXXVII, XXXVI, XXXV, XXXIV, XXXIII, XXXII, XXXI, XXX, … down to ~XV.
+  - **XXXVIII is absent** from the portal (the page jumps XXXIX → XXXVII).
+- **XX, XIX** — no `<strong>` groups (7 links): prova resolves but **no padrão** (model answers empty).
+- **Arabic "33º … 42º Exame de Ordem - 2ª Fase"** — ancient CESPE-era exams (2008–2010),
+  external `cespe.unb.br` hosts, different structure. **Out of scope** — not the peça + 4
+  discursivas format; don't import.
+
 ## Known caveats / open
 
-- **Old exams** use a different PDF host pattern (`oabrj.org.br/arquivos/files/...`). The
-  resolver's link filter already matches `arquivos/` + `.pdf`, so the host alone shouldn't break
-  it — the likely break is section _structure_ (per-area titles / different `<strong>` labels).
-  **Not yet handled** — flag it, don't force a fix.
 - `maxTurns: 40` — long padrão PDFs need several Read turns. If you hit "Reached maximum number
   of turns", raise it in `import-2fase-extract.ts`.
-- A draft with empty `modelAnswer` → the resolver didn't find the gabarito group ("downloaded
-  prova (no padrão found)").
+- A draft with empty `modelAnswer` → the resolver didn't find a gabarito group ("downloaded
+  prova (no padrão found)") — expected for the no-`<strong>` exams (XX/XIX).
+- The page lists some exams twice (e.g. XXXIII); the "no match" error dedupes the list.
 - GitHub: posting to the private repo needs the `arthur-coghatch` account
   (`gh auth switch --user arthur-coghatch`). The 2ª-fase tracking issue is **#5**.
 
