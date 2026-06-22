@@ -1,0 +1,35 @@
+{
+  "skillOverrides": {
+    "claude-api": "on",
+    "code-review": "off",
+    "deep-research": "off",
+    "fewer-permission-prompts": "off",
+    "init": "off",
+    "keybindings-help": "off",
+    "loop": "off",
+    "review": "off",
+    "run": "off",
+    "schedule": "off",
+    "security-review": "off",
+    "simplify": "off",
+    "update-config": "off",
+    "verify": "off",
+    "caveman": "on",
+    "grill-me": "off",
+    "handoff": "off",
+    "write-a-skill": "off"
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-branch-create.mjs\""
+          }
+        ]
+      }
+    ]
+  }
+}
