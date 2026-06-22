@@ -37,3 +37,9 @@ pnpm-debug.log*
 coverage/
 *.lcov
 .vitest-cache/
+
+# Generated knowledge graph (regenerate with `graphify update .`)
+graphify-out/
+
+# OAB 2ª-fase import drafts (review artifacts; data lives in the DB)
+scripts/out/

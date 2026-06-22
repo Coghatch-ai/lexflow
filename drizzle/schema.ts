@@ -20,6 +20,7 @@ import {
   jsonb,
   numeric,
   pgTable,
+  real,
   text,
   timestamp,
   unique,
@@ -77,6 +78,62 @@ export const oabQuestions = pgTable(
     index("idx_oab_exam_board").on(t.examBoard),
     index("idx_oab_difficulty").on(t.difficulty),
     index("idx_oab_year").on(t.year),
+  ],
+);
+
+// OAB 2ª-fase (prático-profissional / discursive) questions — public, not
+// user-scoped. Each exam area's prova = one peça prático-profissional
+// (order_index 0) + four questões discursivas (order_index 1–4). Kept in a
+// separate table from oab_questions because these have no options and aren't
+// graded by text-match — the whole MC pipeline (4-option UI, grading,
+// simulations) assumes oab_questions, so discursive data lives apart.
+export const oabDiscursiveQuestions = pgTable(
+  "oab_discursive_questions",
+  {
+    id: text("id").primaryKey(),
+    examLabel: text("exam_label").notNull(), // e.g. "XL Exame Unificado"
+    examBoard: text("exam_board").notNull(), // 'FGV'
+    year: integer("year").notNull(),
+    phase: text("phase").notNull().default("2nd"), // always '2nd' for now
+    area: text("area").notNull(), // DISCIPLINE LOV code (CIVIL_LAW, …) — candidate's chosen area
+    questionType: text("question_type").notNull(), // QUESTION_TYPE LOV: 'PECA_PRATICA' | 'DISCURSIVE'
+    orderIndex: integer("order_index").notNull(), // 0 = peça, 1–4 = discursivas
+    statement: text("statement").notNull(), // situação-problema / enunciation
+    modelAnswer: text("model_answer"), // padrão de resposta (official) — nullable
+    maxPoints: real("max_points").notNull(), // 5.0 (peça) / 1.25 (discursiva)
+    maxLines: integer("max_lines"), // e.g. 30 — nullable
+    legalBasis: text("legal_basis"), // dispositivos do espelho — nullable
+    topic: text("topic"), // short pt-BR topic label — nullable
+    ...systemFields,
+  },
+  (t) => [
+    index("idx_oab_disc_area").on(t.area),
+    index("idx_oab_disc_exam").on(t.examLabel),
+    index("idx_oab_disc_year").on(t.year),
+  ],
+);
+
+// Tracks which 2ª-fase exam/area batches have been extracted into
+// oab_discursive_questions — the admin "what do we already have" view. One row
+// per (exam, area), upserted by the import save step. Global, not user-scoped.
+export const oabDiscursiveImports = pgTable(
+  "oab_discursive_imports",
+  {
+    id: text("id").primaryKey(), // imp-<examSlug>-<areaSlug>
+    examLabel: text("exam_label").notNull(),
+    examBoard: text("exam_board").notNull(),
+    year: integer("year").notNull(),
+    phase: text("phase").notNull().default("2nd"),
+    area: text("area").notNull(), // DISCIPLINE LOV code
+    itemCount: integer("item_count").notNull().default(0), // questions saved (peça + discursivas)
+    modelAnswerCount: integer("model_answer_count").notNull().default(0), // how many have a padrão
+    provaUrl: text("prova_url"), // source caderno PDF
+    padraoUrl: text("padrao_url"), // source gabarito/padrão PDF
+    ...systemFields, // lastUpdAt doubles as "last imported at"
+  },
+  (t) => [
+    index("idx_oab_disc_imp_area").on(t.area),
+    index("idx_oab_disc_imp_exam").on(t.examLabel),
   ],
 );
 
