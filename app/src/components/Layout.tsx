@@ -12,6 +12,7 @@ import {
   Menu,
   X,
   Scale,
+  PenLine,
   FileText,
   SlidersHorizontal,
   CalendarDays,
@@ -25,9 +26,10 @@ interface LayoutProps {
 }
 
 const navItems = [
-  { path: '/', label: 'Inicio', icon: <Home className="w-[18px] h-[18px]" /> },
+  { path: '/', label: 'Início', icon: <Home className="w-[18px] h-[18px]" /> },
   { path: '/testing', label: 'Simulados', icon: <BookOpen className="w-[18px] h-[18px]" /> },
-  { path: '/analytics', label: 'Analytics', icon: <BarChart3 className="w-[18px] h-[18px]" /> },
+  { path: '/discursive', label: '2ª Fase', icon: <PenLine className="w-[18px] h-[18px]" /> },
+  { path: '/analytics', label: 'Análise', icon: <BarChart3 className="w-[18px] h-[18px]" /> },
   { path: '/goals', label: 'Metas', icon: <Target className="w-[18px] h-[18px]" /> },
   { path: '/study-plans', label: 'Planos de Estudo', icon: <ClipboardList className="w-[18px] h-[18px]" /> },
   { path: '/saved', label: 'Salvas e Anotações', icon: <Bookmark className="w-[18px] h-[18px]" /> },

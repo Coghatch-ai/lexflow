@@ -88,3 +88,26 @@ export async function listOpenIssues(token: string | null): Promise<IssueListIte
   const data = (await res.json()) as { issues: IssueListItem[] };
   return data.issues;
 }
+
+export async function closeIssue(number: number, token: string | null): Promise<void> {
+  if (serviceUrl.length === 0) {
+    throw new Error("VITE_ISSUE_SERVICE_URL não configurado");
+  }
+  if (token === null || token.length === 0) {
+    throw new Error("Sessão expirada — faça login novamente");
+  }
+
+  const res = await fetch(serviceUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ project: PROJECT, action: "close", number }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(text.length > 0 ? text : `Falha ao fechar issue (${String(res.status)})`);
+  }
+}

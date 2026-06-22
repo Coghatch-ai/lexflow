@@ -5,7 +5,9 @@
 // JWT in the Authorization header and protectedProcedure calls succeed (assuming
 // the users row exists).
 
-import "dotenv/config";
+import { config as loadEnv } from "dotenv";
+loadEnv(); // root .env — DB + Clerk
+loadEnv({ path: "api/.env" }); // local AI grading key (gitignored)
 import express from "express";
 import { createServer } from "http";
 import net from "net";

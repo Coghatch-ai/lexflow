@@ -55,23 +55,17 @@ pnpm import:2fase:save scripts/out/<exam>-<area>.draft.json
   `prova_url`, `padrao_url`, `last_upd_at`. The "what's already extracted" tracker.
 - `QUESTION_TYPE` LOV: `PECA_PRATICA`, `DISCURSIVE`.
 
-## Imported so far
+## What's importable (page format rules)
 
-- XL Exame Unificado - 2ª Fase — 7/7 areas.
-- XXXIX Exame Unificado - 2ª Fase — 7/7 areas.
-- XXXVII Exame Unificado - 2ª Fase — 7/7 areas.
+The "what's imported so far" state lives in the DB tracker, not here — see **Verify** below.
+What's durable is which page sections this pipeline can handle:
 
-(105 questions, 21 tracker rows; all 5/5 with model answers. Append new exams here as you import them.)
-
-## What's on the page (47 "2ª-fase" sections, confirmed)
-
-- **Roman "Exame Unificado / Exame de Ordem - 2ª Fase" (≈ X … XL)** — the in-scope format.
+- **Roman "Exame Unificado / Exame de Ordem - 2ª Fase"** — the in-scope format.
   One section per exam, `<strong>` groups "Cadernos de prova" + "Gabarito", one `<a>` per area;
   hosts vary (s.oab.org.br, cloudfront, www.oabrj.org.br/arquivos/files). **Importable as-is.**
-  - Available (not yet imported): XXXVII, XXXVI, XXXV, XXXIV, XXXIII, XXXII, XXXI, XXX, … down to ~XV.
-  - **XXXVIII is absent** from the portal (the page jumps XXXIX → XXXVII).
-- **XX, XIX** — no `<strong>` groups (7 links): prova resolves but **no padrão** (model answers empty).
-- **Arabic "33º … 42º Exame de Ordem - 2ª Fase"** — ancient CESPE-era exams (2008–2010),
+- **Sections with no `<strong>` groups (7 bare links)** — prova resolves but **no padrão**
+  (model answers come back empty).
+- **Arabic "Nº Exame de Ordem - 2ª Fase"** — ancient CESPE-era exams (2008–2010),
   external `cespe.unb.br` hosts, different structure. **Out of scope** — not the peça + 4
   discursivas format; don't import.
 
@@ -82,6 +76,7 @@ pnpm import:2fase:save scripts/out/<exam>-<area>.draft.json
 - A draft with empty `modelAnswer` → the resolver didn't find a gabarito group ("downloaded
   prova (no padrão found)") — expected for the no-`<strong>` exams (XX/XIX).
 - The page lists some exams twice (e.g. XXXIII); the "no match" error dedupes the list.
+- **HTTP 502 on older exams (≤ XXXI, edition 2020-12)** — the banco-provas page returns `http://` hrefs for these archives; Azion CDN serves them only via HTTPS. `downloadB64` needs to upgrade `http://s.oab.org.br` → `https://` before downloading. Until fixed, XXXI and earlier are blocked. See issue #5 comment 2026-06-22.
 - GitHub: posting to the private repo needs the `arthur-coghatch` account
   (`gh auth switch --user arthur-coghatch`). The 2ª-fase tracking issue is **#5**.
 

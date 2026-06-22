@@ -137,6 +137,16 @@ export const oabDiscursiveImports = pgTable(
   ],
 );
 
+// Small global key/value store for editable app config that we want to tune
+// without a deploy. Today it holds the discursive AI grading prompt (key
+// "grade-discursive-prompt") so it can be iterated during the POC; a missing key
+// falls back to the code default in shared/domain/ai-eval.ts.
+export const appConfig = pgTable("app_config", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+  ...systemFields,
+});
+
 // ── Per-user activity ─────────────────────────────────────────────────────────
 
 export const userAnswers = pgTable(
@@ -178,6 +188,65 @@ export const studySessions = pgTable(
     ...systemFields,
   },
   (t) => [index("idx_study_sessions_user").on(t.userId)],
+);
+
+// OAB 2ª-fase (discursive) study. Mirrors studySessions ↔ userAnswers but for
+// essays: there are no options and no text-match grading, so the student
+// self-scores against the official padrão (and may later request an AI score).
+// A "prova" run (1 peça + 4 discursivas) groups its answers under one
+// discursiveSession; single-question practice leaves sessionId null.
+export const discursiveSessions = pgTable(
+  "discursive_sessions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    examLabel: text("exam_label").notNull(), // snapshot of the answered prova
+    area: text("area").notNull(), // DISCIPLINE LOV code
+    year: integer("year").notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    endedAt: timestamp("ended_at", { withTimezone: true, mode: "string" }),
+    totalSelfScore: real("total_self_score"), // sum of per-item self-scores (nullable until graded)
+    maxTotalPoints: real("max_total_points").notNull().default(10), // 5.0 peça + 4×1.25
+    ...systemFields,
+  },
+  (t) => [index("idx_discursive_sessions_user").on(t.userId)],
+);
+
+// One student answer to a discursive question. Scores use `real` to match
+// oab_discursive_questions.max_points (avoids the numeric→parseFloat dance the
+// SM-2 columns need). AI columns are nullable and stay empty until the student
+// requests an "Avaliar com IA" grade (computed off-Lambda via the central
+// service, then persisted through discursive.saveAiGrade).
+export const userDiscursiveAnswers = pgTable(
+  "user_discursive_answers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    questionId: text("question_id")
+      .notNull()
+      .references(() => oabDiscursiveQuestions.id),
+    sessionId: uuid("session_id").references(() => discursiveSessions.id, {
+      onDelete: "cascade",
+    }), // null = single-question practice
+    answerText: text("answer_text").notNull(),
+    selfScore: real("self_score"), // 0..maxPoints, nullable until self-graded
+    timeSpent: integer("time_spent").notNull(), // seconds
+    aiScore: real("ai_score"), // 0..maxPoints, nullable until AI-graded
+    aiFeedback: text("ai_feedback"),
+    aiGradedAt: timestamp("ai_graded_at", { withTimezone: true, mode: "string" }),
+    ...systemFields,
+  },
+  (t) => [
+    index("idx_user_disc_answers_user").on(t.userId),
+    index("idx_user_disc_answers_question").on(t.questionId),
+    index("idx_user_disc_answers_session").on(t.sessionId),
+  ],
 );
 
 // ── Per-user aggregates ───────────────────────────────────────────────────────

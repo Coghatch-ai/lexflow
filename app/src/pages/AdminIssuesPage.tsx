@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, type ReactElement, type FormEvent } from 'react';
-import { Check, ExternalLink, Bug, RefreshCw } from 'lucide-react';
+import { Check, Bug, RefreshCw, X } from 'lucide-react';
 import { useGetToken } from '../auth';
 import {
   ISSUE_KINDS,
@@ -9,6 +9,7 @@ import {
 import {
   createIssue,
   listOpenIssues,
+  closeIssue,
   type CreateIssueResult,
   type IssueListItem,
 } from '../shared/lib/issue-service';
@@ -59,14 +60,6 @@ function IssueForm(): ReactElement {
         <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-800 flex items-center gap-2">
           <Check className="w-4 h-4 shrink-0" />
           <span>Issue #{created.number} criada.</span>
-          <a
-            href={created.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="ml-auto inline-flex items-center gap-1 font-medium underline-offset-2 hover:underline"
-          >
-            Abrir <ExternalLink className="w-3.5 h-3.5" />
-          </a>
         </div>
       )}
 
@@ -141,6 +134,7 @@ function OpenIssuesList(): ReactElement {
   const [issues, setIssues] = useState<IssueListItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [closingNumber, setClosingNumber] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -152,6 +146,21 @@ function OpenIssuesList(): ReactElement {
       setError(err instanceof Error ? err.message : 'Erro desconhecido');
     } finally {
       setLoading(false);
+    }
+  }, [getToken]);
+
+  const handleClose = useCallback(async (number: number) => {
+    if (!window.confirm(`Fechar issue #${String(number)}?`)) return;
+    setClosingNumber(number);
+    setError(null);
+    try {
+      const token = await getToken();
+      await closeIssue(number, token);
+      setIssues((prev) => prev?.filter((it) => it.number !== number) ?? null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erro desconhecido');
+    } finally {
+      setClosingNumber(null);
     }
   }, [getToken]);
 
@@ -186,15 +195,7 @@ function OpenIssuesList(): ReactElement {
               <div className="flex items-start gap-3">
                 <span className="text-xs font-mono text-ink-mute mt-0.5 shrink-0">#{it.number}</span>
                 <div className="min-w-0 flex-1">
-                  <a
-                    href={it.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-sm font-medium text-ink hover:text-[#d9ab53] inline-flex items-center gap-1"
-                  >
-                    {it.title}
-                    <ExternalLink className="w-3 h-3 shrink-0" />
-                  </a>
+                  <span className="text-sm font-medium text-ink">{it.title}</span>
                   <div className="mt-1 flex flex-wrap items-center gap-2">
                     {it.labels.map((l) => (
                       <span key={l} className="px-1.5 py-0.5 rounded-full bg-paper-sink text-[0.65rem] text-ink-mute">
@@ -204,6 +205,14 @@ function OpenIssuesList(): ReactElement {
                     <span className="text-[0.65rem] text-ink-mute">{formatDate(it.createdAt)}</span>
                   </div>
                 </div>
+                <button
+                  onClick={() => { void handleClose(it.number); }}
+                  disabled={closingNumber !== null}
+                  className="shrink-0 flex items-center gap-1 px-2 py-1 text-xs font-medium text-ink-mute hover:text-red-600 disabled:opacity-50 transition-colors"
+                >
+                  <X className={`w-3.5 h-3.5 ${closingNumber === it.number ? 'animate-spin' : ''}`} />
+                  {closingNumber === it.number ? 'Fechando...' : 'Fechar'}
+                </button>
               </div>
             </li>
           ))}
