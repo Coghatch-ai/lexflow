@@ -54,4 +54,21 @@ describe("sm2Update", () => {
     for (let i = 0; i < 20; i++) state = sm2Update(state, false, DEFAULT_SM2_CONFIG);
     expect(state.easeFactor).toBeGreaterThanOrEqual(DEFAULT_SM2_CONFIG.minEaseFactor);
   });
+
+  it("wrong answer → nextReviewAt is due immediately (<= now)", () => {
+    const before = Date.now();
+    const next = sm2Update(DEFAULT_SM2_STATE, false, DEFAULT_SM2_CONFIG);
+    const after = Date.now();
+    expect(next.nextReviewAt.getTime()).toBeGreaterThanOrEqual(before);
+    expect(next.nextReviewAt.getTime()).toBeLessThanOrEqual(after);
+  });
+
+  it("correct answer → nextReviewAt is in the future and midnight-floored", () => {
+    const next = sm2Update(DEFAULT_SM2_STATE, true, DEFAULT_SM2_CONFIG);
+    expect(next.nextReviewAt.getTime()).toBeGreaterThan(Date.now());
+    expect(next.nextReviewAt.getHours()).toBe(0);
+    expect(next.nextReviewAt.getMinutes()).toBe(0);
+    expect(next.nextReviewAt.getSeconds()).toBe(0);
+    expect(next.nextReviewAt.getMilliseconds()).toBe(0);
+  });
 });

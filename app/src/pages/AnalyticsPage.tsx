@@ -70,17 +70,17 @@ export default function AnalyticsPage(): ReactElement {
     <div className="space-y-6">
       <div className="bg-white rounded-xl p-6 shadow">
         <h2 className="text-2xl font-bold text-[#16161a] mb-2">
-          Analise Detalhada de Desempenho
+          Análise Detalhada de Desempenho
         </h2>
         <p className="text-gray-600">
-          Visualize seus padroes de estudo e identifique areas para melhoria
+          Visualize seus padrões de estudo e identifique áreas para melhoria
         </p>
       </div>
 
       {sessionData.length > 0 && (
         <div className="bg-white rounded-xl p-6 shadow">
           <h3 className="text-lg font-bold text-[#16161a] mb-4">
-            Tendencia de Acuracia (Ultimos Simulados)
+            Tendência de Acurácia (Últimos Simulados)
           </h3>
           <ResponsiveContainer width="100%" height={300}>
             <LineChart data={sessionData}>
@@ -119,7 +119,7 @@ export default function AnalyticsPage(): ReactElement {
         {disciplineData.length > 0 && (
           <div className="bg-white rounded-xl p-6 shadow">
             <h3 className="text-lg font-bold text-[#16161a] mb-4">
-              Acuracia por Disciplina
+              Acurácia por Disciplina
             </h3>
             <ResponsiveContainer width="100%" height={300}>
               <BarChart data={disciplineData}>
@@ -194,7 +194,7 @@ export default function AnalyticsPage(): ReactElement {
                   Disciplina
                 </th>
                 <th className="text-center py-3 px-4 font-semibold text-[#16161a]">
-                  Acuracia
+                  Acurácia
                 </th>
                 <th className="text-center py-3 px-4 font-semibold text-[#16161a]">
                   Acertos

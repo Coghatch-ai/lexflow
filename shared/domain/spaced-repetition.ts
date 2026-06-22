@@ -63,6 +63,8 @@ export function sm2Update(
 ): Sm2State & { nextReviewAt: Date } {
   let { interval, repetitions, easeFactor } = state;
 
+  let nextReviewAt: Date;
+
   if (correct) {
     repetitions += 1;
     if (repetitions === 1) {
@@ -73,15 +75,18 @@ export function sm2Update(
       interval = Math.round(interval * easeFactor);
     }
     easeFactor = Math.max(config.minEaseFactor, easeFactor + config.easeFactorCorrectBonus);
+    // Correct answer: schedule for midnight on the future review day (next day or later).
+    const d = new Date();
+    d.setDate(d.getDate() + interval);
+    d.setHours(0, 0, 0, 0);
+    nextReviewAt = d;
   } else {
     repetitions = 0;
     interval = config.initialInterval;
     easeFactor = Math.max(config.minEaseFactor, easeFactor - config.easeFactorWrongPenalty);
+    // Wrong answer: due immediately so it surfaces in the review queue right away.
+    nextReviewAt = new Date();
   }
-
-  const nextReviewAt = new Date();
-  nextReviewAt.setDate(nextReviewAt.getDate() + interval);
-  nextReviewAt.setHours(0, 0, 0, 0);
 
   return { interval, repetitions, easeFactor, nextReviewAt };
 }

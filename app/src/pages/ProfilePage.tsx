@@ -99,7 +99,7 @@ export default function ProfilePage(): ReactElement {
       <div className="grid md:grid-cols-4 gap-4">
         <div className="bg-white rounded-xl p-6 shadow hover:shadow-lg transition">
           <div className="flex items-center justify-between mb-4">
-            <p className="text-gray-600 text-sm font-medium">Acuracia Geral</p>
+            <p className="text-gray-600 text-sm font-medium">Acurácia Geral</p>
             <TrendingUp className="w-5 h-5 text-[#16161a]" />
           </div>
           <p className="text-3xl font-bold text-[#16161a]">{stats.accuracy}%</p>
@@ -107,7 +107,7 @@ export default function ProfilePage(): ReactElement {
 
         <div className="bg-white rounded-xl p-6 shadow hover:shadow-lg transition">
           <div className="flex items-center justify-between mb-4">
-            <p className="text-gray-600 text-sm font-medium">Questoes</p>
+            <p className="text-gray-600 text-sm font-medium">Questões</p>
             <BookOpen className="w-5 h-5 text-[#16161a]" />
           </div>
           <p className="text-3xl font-bold text-[#16161a]">
@@ -131,7 +131,7 @@ export default function ProfilePage(): ReactElement {
         <div className="bg-white rounded-xl p-6 shadow hover:shadow-lg transition">
           <div className="flex items-center justify-between mb-4">
             <p className="text-gray-600 text-sm font-medium">
-              Tempo Medio
+              Tempo Médio
             </p>
             <Clock className="w-5 h-5 text-[#16161a]" />
           </div>
@@ -184,7 +184,7 @@ export default function ProfilePage(): ReactElement {
         <div className="bg-white rounded-xl p-6 shadow">
           <h3 className="text-lg font-bold text-[#16161a] mb-4 flex items-center gap-2">
             <TrendingUp className="w-5 h-5 text-orange-600 transform -scale-y-100" />
-            Areas de Melhoria
+            Áreas de Melhoria
           </h3>
           <div className="space-y-3">
             {weakDisciplines.map((d, idx) => (
@@ -217,7 +217,7 @@ export default function ProfilePage(): ReactElement {
 
       {/* Account Info */}
       <div className="bg-white rounded-xl p-6 shadow">
-        <h3 className="text-lg font-bold text-[#16161a] mb-4">Informacoes da Conta</h3>
+        <h3 className="text-lg font-bold text-[#16161a] mb-4">Informações da Conta</h3>
         <div className="space-y-3">
           <div className="flex justify-between items-center py-2 border-b border-gray-200">
             <span className="text-gray-600">Email</span>
@@ -230,7 +230,7 @@ export default function ProfilePage(): ReactElement {
           <div className="flex justify-between items-center py-2">
             <span className="text-gray-600">Tipo de Conta</span>
             <span className="font-medium text-[#16161a] bg-[#16161a]/10 px-3 py-1 rounded-full text-sm">
-              Usuario
+              Usuário
             </span>
           </div>
         </div>

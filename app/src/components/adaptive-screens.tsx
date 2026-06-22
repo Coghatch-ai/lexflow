@@ -86,7 +86,7 @@ export function AdaptiveSetup({
 
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">
-            Numero de questoes: {totalQuestions}
+            Número de questões: {totalQuestions}
           </label>
           <input
             type="range" min="5" max="30" value={totalQuestions}
@@ -102,7 +102,7 @@ export function AdaptiveSetup({
       <div className="bg-[#16161a]/5 rounded-lg p-4 mb-6">
         <h4 className="font-semibold text-[#16161a] mb-2">Como funciona?</h4>
         <ul className="space-y-1 text-sm text-gray-700">
-          <li>- Comeca no nivel medio</li>
+          <li>- Começa no nível médio</li>
           <li>- 2 acertos seguidos: sobe a dificuldade</li>
           <li>- 2 erros seguidos: diminui a dificuldade</li>
           <li>- Ajuste automatico em tempo real</li>
@@ -158,7 +158,7 @@ export function AdaptivePlaying({
 
       <div className="space-y-1">
         <div className="flex justify-between text-sm text-gray-600">
-          <span>Questao {adaptive.totalAnswered + 1} de {totalQuestions}</span>
+          <span>Questão {adaptive.totalAnswered + 1} de {totalQuestions}</span>
           <span>{adaptive.totalCorrect}/{adaptive.totalAnswered} acertos</span>
         </div>
         <div className="w-full bg-gray-200 rounded-full h-2">
@@ -234,7 +234,7 @@ export function AdaptiveFeedback({
         )}
 
         <div className="bg-white rounded-lg p-4">
-          <p className="text-sm font-medium text-gray-700 mb-1">Explicacao:</p>
+          <p className="text-sm font-medium text-gray-700 mb-1">Explicação:</p>
           <p className="text-gray-800">{currentQuestion.explanation}</p>
           <p className="text-sm text-[#16161a] mt-2 font-medium">{currentQuestion.legislationTitle}</p>
         </div>
@@ -257,7 +257,7 @@ export function AdaptiveFeedback({
         onClick={onNext}
         className="w-full bg-gradient-to-r from-[#26262c] to-[#26262c] text-white py-3 rounded-lg font-semibold hover:shadow-lg transition flex items-center justify-center gap-2"
       >
-        {adaptive.totalAnswered >= totalQuestions ? 'Ver Resultado' : 'Proxima Questao'}
+        {adaptive.totalAnswered >= totalQuestions ? 'Ver Resultado' : 'Próxima Questão'}
         <ChevronRight className="w-5 h-5" />
       </button>
     </div>
@@ -286,7 +286,7 @@ export function AdaptiveFinished({ adaptive, timer, onReset }: AdaptiveFinishedP
       <div className="grid md:grid-cols-3 gap-4">
         <div className="bg-white rounded-xl p-6 shadow text-center">
           <div className="text-4xl font-bold text-[#16161a] mb-2">{accuracy}%</div>
-          <p className="text-gray-600">Acuracia Final</p>
+          <p className="text-gray-600">Acurácia Final</p>
         </div>
         <div className="bg-white rounded-xl p-6 shadow text-center">
           <div className="text-4xl font-bold text-green-600 mb-2">{adaptive.totalCorrect}</div>
@@ -299,9 +299,9 @@ export function AdaptiveFinished({ adaptive, timer, onReset }: AdaptiveFinishedP
       </div>
 
       <div className="bg-white rounded-xl p-6 shadow">
-        <h4 className="text-lg font-bold text-[#16161a] mb-4">Distribuicao de Dificuldade</h4>
+        <h4 className="text-lg font-bold text-[#16161a] mb-4">Distribuição de Dificuldade</h4>
         <div className="space-y-3">
-          {([['Facil', 'bg-green-500', counts.easy], ['Medio', 'bg-yellow-500', counts.medium], ['Dificil', 'bg-red-500', counts.hard]] as [string, string, number][]).map(([label, color, count]) => (
+          {([['Fácil', 'bg-green-500', counts.easy], ['Médio', 'bg-yellow-500', counts.medium], ['Difícil', 'bg-red-500', counts.hard]] as [string, string, number][]).map(([label, color, count]) => (
             <div key={label} className="flex items-center gap-3">
               <span className="w-16 text-sm font-medium text-gray-700">{label}</span>
               <div className="flex-1 bg-gray-200 rounded-full h-4">

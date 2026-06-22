@@ -54,8 +54,8 @@ function ModeSelection({ onSelect }: ModeSelectionProps): ReactElement {
           className="bg-white rounded-xl p-6 shadow hover:shadow-lg transition text-left border-2 border-transparent hover:border-[#16161a]"
         >
           <div className="bg-[#26262c] p-3 rounded-lg w-fit mb-4"><BookOpen className="w-6 h-6 text-white" /></div>
-          <h4 className="text-lg font-bold text-[#16161a] mb-2">Simulado Padrao</h4>
-          <p className="text-sm text-gray-600">10 questoes com filtros por disciplina, banca e dificuldade. Feedback imediato.</p>
+          <h4 className="text-lg font-bold text-[#16161a] mb-2">Simulado Padrão</h4>
+          <p className="text-sm text-gray-600">10 questões com filtros por disciplina, banca e dificuldade. Feedback imediato.</p>
         </button>
 
         <button
@@ -73,9 +73,9 @@ function ModeSelection({ onSelect }: ModeSelectionProps): ReactElement {
           className="bg-white rounded-xl p-6 shadow hover:shadow-lg transition text-left border-2 border-transparent hover:border-[#16161a]"
         >
           <div className="bg-[#26262c] p-3 rounded-lg w-fit mb-4"><span className="text-white text-xl font-bold">R</span></div>
-          <h4 className="text-lg font-bold text-[#16161a] mb-2">Revisao Espacada</h4>
-          <p className="text-sm text-gray-600">Revise questoes nos intervalos ideais para maximizar retencao a longo prazo.</p>
-          <span className="inline-block mt-2 text-xs font-bold text-[#26262c] bg-[#26262c]/10 px-2 py-1 rounded">RETENCAO</span>
+          <h4 className="text-lg font-bold text-[#16161a] mb-2">Revisão Espaçada</h4>
+          <p className="text-sm text-gray-600">Revise questões nos intervalos ideais para maximizar retenção a longo prazo.</p>
+          <span className="inline-block mt-2 text-xs font-bold text-[#26262c] bg-[#26262c]/10 px-2 py-1 rounded">RETENÇÃO</span>
         </button>
 
         <button
@@ -84,7 +84,7 @@ function ModeSelection({ onSelect }: ModeSelectionProps): ReactElement {
         >
           <div className="bg-red-600 p-3 rounded-lg w-fit mb-4"><span className="text-white text-xl font-bold">P</span></div>
           <h4 className="text-lg font-bold text-[#16161a] mb-2">Simulado Prova Real</h4>
-          <p className="text-sm text-gray-600">80 questoes, 5 horas, sem feedback. Simule as condicoes reais do exame.</p>
+          <p className="text-sm text-gray-600">80 questões, 5 horas, sem feedback. Simule as condições reais do exame.</p>
           <span className="inline-block mt-2 text-xs font-bold text-red-600 bg-red-50 px-2 py-1 rounded">INTENSO</span>
         </button>
       </div>
@@ -121,8 +121,8 @@ function NotStarted({
       </div>
 
       <div className="bg-gradient-to-r from-[#16161a] to-[#26262c] rounded-xl p-6 text-white">
-        <h3 className="text-xl font-bold mb-2">Simulado Padrao</h3>
-        <p className="text-white/80">Configure os filtros e comece a resolver questoes reais de provas anteriores.</p>
+        <h3 className="text-xl font-bold mb-2">Simulado Padrão</h3>
+        <p className="text-white/80">Configure os filtros e comece a resolver questões reais de provas anteriores.</p>
       </div>
 
       <div className="grid md:grid-cols-3 gap-4">
@@ -163,7 +163,7 @@ function NotStarted({
         className="w-full bg-gradient-to-r from-[#26262c] to-[#26262c] text-white py-3 rounded-lg font-semibold hover:shadow-lg transition disabled:opacity-50 flex items-center justify-center gap-2"
       >
         <BookOpen className="w-5 h-5" />
-        {loading ? 'Carregando...' : 'Comecar Simulado'}
+        {loading ? 'Carregando...' : 'Começar Simulado'}
       </button>
     </div>
   );
@@ -204,7 +204,7 @@ function InProgress({
       <div className="space-y-2">
         <div className="flex justify-between items-center">
           <span className="text-sm font-medium text-gray-700">
-            Questao {currentIndex + 1} de {totalQuestions}
+            Questão {currentIndex + 1} de {totalQuestions}
           </span>
           <div className="flex items-center gap-2 text-sm text-gray-600">
             <Clock className="w-4 h-4" />
@@ -248,7 +248,7 @@ function InProgress({
             disabled={selectedAnswer.length === 0}
             className="flex-1 bg-gradient-to-r from-[#26262c] to-[#26262c] text-white py-3 rounded-lg font-semibold hover:shadow-lg transition disabled:opacity-50 flex items-center justify-center gap-2"
           >
-            {currentIndex + 1 === totalQuestions ? 'Finalizar' : 'Proxima'}
+            {currentIndex + 1 === totalQuestions ? 'Finalizar' : 'Próxima'}
             <ChevronRight className="w-5 h-5" />
           </button>
         </div>
@@ -279,7 +279,7 @@ function Completed({ questions, answers, disciplineLov, onSwitchMode, onRestart 
       <div className="grid md:grid-cols-3 gap-4">
         <div className="bg-white rounded-xl p-6 shadow text-center">
           <div className="text-4xl font-bold text-[#16161a] mb-2">{accuracy}%</div>
-          <p className="text-gray-600">Acuracia</p>
+          <p className="text-gray-600">Acurácia</p>
         </div>
         <div className="bg-white rounded-xl p-6 shadow text-center">
           <div className="text-4xl font-bold text-green-600 mb-2 flex items-center justify-center gap-2">
@@ -296,7 +296,7 @@ function Completed({ questions, answers, disciplineLov, onSwitchMode, onRestart 
       </div>
 
       <div className="bg-white rounded-xl p-6 shadow">
-        <h4 className="text-lg font-bold text-[#16161a] mb-4">Resumo das Questoes</h4>
+        <h4 className="text-lg font-bold text-[#16161a] mb-4">Resumo das Questões</h4>
         <div className="space-y-2 max-h-96 overflow-y-auto">
           {questions.map((q, idx) => {
             const answer = answers[idx];
@@ -309,7 +309,7 @@ function Completed({ questions, answers, disciplineLov, onSwitchMode, onRestart 
               >
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
-                    <p className="font-medium text-gray-800">Questao {idx + 1}</p>
+                    <p className="font-medium text-gray-800">Questão {idx + 1}</p>
                     <p className="text-sm text-gray-600">{disciplineLov.labelOf(q.discipline)}</p>
                   </div>
                   {answer.correct ? (

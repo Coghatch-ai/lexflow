@@ -56,7 +56,7 @@ function RecurringErrorsTable({ errors }: { errors: RecurringEntry[] }): ReactEl
     <div className="bg-white rounded-xl p-6 shadow">
       <h4 className="font-bold text-[#16161a] mb-4 flex items-center gap-2">
         <TrendingDown className="w-5 h-5 text-red-600" />
-        Erros Recorrentes (questoes que voce errou 2+ vezes)
+        Erros Recorrentes (questões que você errou 2+ vezes)
       </h4>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
@@ -65,7 +65,7 @@ function RecurringErrorsTable({ errors }: { errors: RecurringEntry[] }): ReactEl
               <th className="text-left py-3 px-4 font-semibold text-[#16161a]">Disciplina</th>
               <th className="text-center py-3 px-4 font-semibold text-[#16161a]">Vezes respondida</th>
               <th className="text-center py-3 px-4 font-semibold text-[#16161a]">Vezes errada</th>
-              <th className="text-center py-3 px-4 font-semibold text-[#16161a]">Ultima tentativa</th>
+              <th className="text-center py-3 px-4 font-semibold text-[#16161a]">Última tentativa</th>
             </tr>
           </thead>
           <tbody>
@@ -128,8 +128,8 @@ export default function ErrorPatternAnalysis(): ReactElement {
   const slow = pickBucket('slow');
 
   const errorByTime: ErrorByTime[] = [
-    { category: 'Rapido (<30s)', errors: fast.errors, total: fast.total, errorRate: rate(fast) },
-    { category: 'Medio (30-90s)', errors: med.errors, total: med.total, errorRate: rate(med) },
+    { category: 'Rápido (<30s)', errors: fast.errors, total: fast.total, errorRate: rate(fast) },
+    { category: 'Médio (30-90s)', errors: med.errors, total: med.total, errorRate: rate(med) },
     { category: 'Lento (>90s)', errors: slow.errors, total: slow.total, errorRate: rate(slow) },
   ];
 
@@ -149,13 +149,13 @@ export default function ErrorPatternAnalysis(): ReactElement {
             <AlertTriangle className="w-6 h-6 text-red-600" />
           </div>
           <div>
-            <h3 className="text-xl font-bold text-[#16161a]">Analise de Padroes de Erro</h3>
-            <p className="text-sm text-gray-600">Identifique onde e porque voce erra</p>
+            <h3 className="text-xl font-bold text-[#16161a]">Análise de Padrões de Erro</h3>
+            <p className="text-sm text-gray-600">Identifique onde e por que você erra</p>
           </div>
         </div>
         <div className="text-center py-8">
           <AlertTriangle className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-          <p className="text-gray-600">Responda simulados para gerar dados de analise</p>
+          <p className="text-gray-600">Responda simulados para gerar dados de análise</p>
         </div>
       </div>
     );
@@ -173,8 +173,8 @@ export default function ErrorPatternAnalysis(): ReactElement {
             <AlertTriangle className="w-6 h-6 text-red-600" />
           </div>
           <div>
-            <h3 className="text-xl font-bold text-[#16161a]">Analise de Padroes de Erro</h3>
-            <p className="text-sm text-gray-600">Identifique onde e porque voce erra</p>
+            <h3 className="text-xl font-bold text-[#16161a]">Análise de Padrões de Erro</h3>
+            <p className="text-sm text-gray-600">Identifique onde e por que você erra</p>
           </div>
         </div>
         <div className="grid md:grid-cols-3 gap-4">
@@ -292,8 +292,8 @@ export default function ErrorPatternAnalysis(): ReactElement {
               <div className="mt-4 p-3 bg-[#16161a]/5 rounded-lg">
                 <p className="text-sm text-gray-700">
                   {errorByTime[0].errorRate > lastTimeRate
-                    ? 'Voce erra mais quando responde rapido. Tente dedicar mais tempo a cada questao.'
-                    : 'Voce erra mais quando demora muito. Isso pode indicar duvida - revise esses topicos.'}
+                    ? 'Você erra mais quando responde rápido. Tente dedicar mais tempo a cada questão.'
+                    : 'Você erra mais quando demora muito. Isso pode indicar dúvida - revise esses tópicos.'}
                 </p>
               </div>
             )}
@@ -304,7 +304,7 @@ export default function ErrorPatternAnalysis(): ReactElement {
       <RecurringErrorsTable errors={recurringErrors} />
 
       <div className="bg-white rounded-xl p-6 shadow">
-        <h4 className="font-bold text-[#16161a] mb-4">Insights e Recomendacoes</h4>
+        <h4 className="font-bold text-[#16161a] mb-4">Insights e Recomendações</h4>
         <div className="space-y-3">
           {errorByDiscipline.length > 0 && errorByDiscipline[0].errorRate > 50 && (
             <div className="flex items-start gap-3 p-3 bg-red-50 rounded-lg">
@@ -318,7 +318,7 @@ export default function ErrorPatternAnalysis(): ReactElement {
             <div className="flex items-start gap-3 p-3 bg-yellow-50 rounded-lg">
               <AlertTriangle className="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" />
               <p className="text-sm text-gray-700">
-                Voce tem {recurringErrors.length} questao(oes) com erros recorrentes. Use a Revisao Espacada para reforcar esses conteudos.
+                Você tem {recurringErrors.length} questão(ões) com erros recorrentes. Use a Revisão Espaçada para reforçar esses conteúdos.
               </p>
             </div>
           )}
@@ -326,7 +326,7 @@ export default function ErrorPatternAnalysis(): ReactElement {
             <div className="flex items-start gap-3 p-3 bg-blue-50 rounded-lg">
               <Clock className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
               <p className="text-sm text-gray-700">
-                Respostas rapidas (menos de 30s) tem {errorByTime[0].errorRate}% de erro. Considere ler as questoes com mais atencao.
+                Respostas rápidas (menos de 30s) têm {errorByTime[0].errorRate}% de erro. Considere ler as questões com mais atenção.
               </p>
             </div>
           )}
