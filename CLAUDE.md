@@ -100,6 +100,17 @@ conventions.md playbook A/B/C before they can be un-quarantined).
 - **Deploy via GitHub Actions only** (`deploy-api.yml`, `deploy-app.yml`). NEVER `sam deploy` from a laptop.
 - **Migrations:** `db:generate` → review SQL → `db:migrate`. NEVER apply SQL manually to RDS.
 
+## GitHub — issue auto-close
+
+GitHub only auto-closes an issue when a PR merged into the default branch (or a commit
+on it) carries a **closing keyword**: `Closes #N` / `Fixes #N` / `Resolves #N`. A bare
+mention like `fix ... (#6)` only _links_ the issue — it does NOT close it (this is why
+#6/#7/#17/#18 stayed open despite their fixes landing). Put one keyword per issue on its
+own line in the PR body / squash-merge message. Confirm with
+`gh pr view <n> --json closingIssuesReferences` (empty array = nothing will auto-close).
+Note: closing fires on **merge**, not on deploy — if an issue must stay open until the
+change is live in prod, omit the keyword and close it manually after deploy.
+
 ## NEVER
 
 - Bypass `createScopedDb` for user-owned tables, or add a table without a `TABLE_SCOPE` entry.
