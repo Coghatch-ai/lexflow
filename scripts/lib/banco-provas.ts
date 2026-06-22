@@ -224,10 +224,19 @@ async function matchSection(
   return { matches, seen2a };
 }
 
+// Older OAB banco-provas pages (XXXI and earlier, edition 2020-12) embed plain
+// http:// hrefs for the CDN host s.oab.org.br.  The Azion CDN rejects plain HTTP
+// with 502 but serves the identical path over HTTPS.  Upgrade conservatively —
+// only the two known OAB CDN hostnames; leave everything else untouched.
+export function toHttpsIfOabCdn(url: string): string {
+  return url.replace(/^http:\/\/(s\.oab\.org\.br|www\.oabrj\.org\.br)\b/i, "https://$1");
+}
+
 // Download via the browser's network context (shares UA/cookies — avoids 403).
 async function downloadB64(page: Page, url: string): Promise<string> {
-  const resp = await page.context().request.get(url);
-  if (!resp.ok()) throw new Error(`download ${url} -> HTTP ${resp.status()}`);
+  const safeUrl = toHttpsIfOabCdn(url);
+  const resp = await page.context().request.get(safeUrl);
+  if (!resp.ok()) throw new Error(`download ${safeUrl} -> HTTP ${resp.status()}`);
   return Buffer.from(await resp.body()).toString("base64");
 }
 

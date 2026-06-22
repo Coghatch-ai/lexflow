@@ -5,7 +5,47 @@
 //   selectEdition — Match[] + edition selector -> single Match or throw
 
 import { describe, expect, it } from "vitest";
-import { parseEdition, selectEdition, type Match } from "./banco-provas";
+import { parseEdition, selectEdition, toHttpsIfOabCdn, type Match } from "./banco-provas";
+
+// ---------------------------------------------------------------------------
+// toHttpsIfOabCdn
+// ---------------------------------------------------------------------------
+
+describe("toHttpsIfOabCdn", () => {
+  it("upgrades http:// s.oab.org.br to https://", () => {
+    expect(
+      toHttpsIfOabCdn(
+        "http://s.oab.org.br/arquivos/2020/12/79440c0b-f031-4dcd-8c50-9a59d5dc6990.pdf",
+      ),
+    ).toBe("https://s.oab.org.br/arquivos/2020/12/79440c0b-f031-4dcd-8c50-9a59d5dc6990.pdf");
+  });
+
+  it("upgrades http:// www.oabrj.org.br to https://", () => {
+    expect(toHttpsIfOabCdn("http://www.oabrj.org.br/arquivos/files/caderno-xxxi-civil.pdf")).toBe(
+      "https://www.oabrj.org.br/arquivos/files/caderno-xxxi-civil.pdf",
+    );
+  });
+
+  it("leaves an already-https s.oab.org.br URL untouched", () => {
+    const url = "https://s.oab.org.br/arquivos/2024/05/3ba70566-e372-443c-ad52-3f476ea59389.pdf";
+    expect(toHttpsIfOabCdn(url)).toBe(url);
+  });
+
+  it("leaves an already-https www.oabrj.org.br URL untouched", () => {
+    const url = "https://www.oabrj.org.br/banco-provas";
+    expect(toHttpsIfOabCdn(url)).toBe(url);
+  });
+
+  it("does NOT upgrade http:// on an unrelated host", () => {
+    const url = "http://example.com/caderno.pdf";
+    expect(toHttpsIfOabCdn(url)).toBe(url);
+  });
+
+  it("does NOT upgrade http:// on a cloudfront host", () => {
+    const url = "http://d1abc123.cloudfront.net/caderno.pdf";
+    expect(toHttpsIfOabCdn(url)).toBe(url);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // parseEdition
