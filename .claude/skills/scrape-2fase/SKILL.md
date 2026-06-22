@@ -59,8 +59,9 @@ pnpm import:2fase:save scripts/out/<exam>-<area>.draft.json
 
 - XL Exame Unificado - 2ª Fase — 7/7 areas.
 - XXXIX Exame Unificado - 2ª Fase — 7/7 areas.
+- XXXVII Exame Unificado - 2ª Fase — 7/7 areas.
 
-(70 questions, 14 tracker rows; all 5/5 with model answers. Append new exams here as you import them.)
+(105 questions, 21 tracker rows; all 5/5 with model answers. Append new exams here as you import them.)
 
 ## What's on the page (47 "2ª-fase" sections, confirmed)
 
