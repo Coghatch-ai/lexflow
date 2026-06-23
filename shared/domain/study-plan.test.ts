@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { questionsPerDayCalc, planProgressPct, weakestDisciplines } from "./study-plan";
+import {
+  questionsPerDayCalc,
+  planProgressPct,
+  scoreRatioPct,
+  weakestDisciplines,
+  MIN_ANSWERED_1ST,
+  MIN_ANSWERED_2ND,
+} from "./study-plan";
 
 describe("questionsPerDayCalc", () => {
   it("divides available questions over deadline days", () => {
@@ -51,5 +58,57 @@ describe("weakestDisciplines", () => {
 
   it("returns empty array when nothing qualifies", () => {
     expect(weakestDisciplines(stats, 50, 3)).toEqual([]);
+  });
+
+  it("works with discursive-style stats (area codes) using lower MIN_ANSWERED_2ND floor", () => {
+    const discursiveStats = [
+      { discipline: "CIVIL_LAW", totalAnswered: 5, accuracy: 60 },
+      { discipline: "CRIMINAL_LAW", totalAnswered: 3, accuracy: 45 },
+      { discipline: "LABOR_LAW", totalAnswered: 1, accuracy: 30 },
+    ];
+    // With MIN_ANSWERED_2ND=2, LABOR_LAW is excluded (only 1 answered); CRIMINAL_LAW qualifies
+    expect(weakestDisciplines(discursiveStats, MIN_ANSWERED_2ND, 3)).toEqual([
+      "CRIMINAL_LAW",
+      "CIVIL_LAW",
+    ]);
+  });
+
+  it("MIN_ANSWERED_1ST is 5 and MIN_ANSWERED_2ND is 2", () => {
+    expect(MIN_ANSWERED_1ST).toBe(5);
+    expect(MIN_ANSWERED_2ND).toBe(2);
+  });
+});
+
+describe("scoreRatioPct", () => {
+  it("computes percentage from score and maxPoints", () => {
+    expect(scoreRatioPct(3, 5)).toBe(60);
+  });
+
+  it("rounds to nearest integer", () => {
+    expect(scoreRatioPct(1, 3)).toBe(33);
+  });
+
+  it("returns null when score is null (ungraded — must not count as 0%)", () => {
+    expect(scoreRatioPct(null, 5)).toBeNull();
+  });
+
+  it("returns null when score is undefined", () => {
+    expect(scoreRatioPct(undefined, 5)).toBeNull();
+  });
+
+  it("returns null when maxPoints is null", () => {
+    expect(scoreRatioPct(3, null)).toBeNull();
+  });
+
+  it("returns null when maxPoints is zero (guards division by zero)", () => {
+    expect(scoreRatioPct(0, 0)).toBeNull();
+  });
+
+  it("returns 0 when score is 0 and maxPoints is non-zero", () => {
+    expect(scoreRatioPct(0, 5)).toBe(0);
+  });
+
+  it("returns 100 for a perfect score", () => {
+    expect(scoreRatioPct(5, 5)).toBe(100);
   });
 });

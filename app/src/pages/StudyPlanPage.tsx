@@ -237,10 +237,14 @@ export default function StudyPlanPage(): ReactElement {
   const [examBoard, setExamBoard] = useState<string>('');
   const [phase, setPhase] = useState<string>('');
   const [year, setYear] = useState<string>('');
+  // Separate phase state for performance mode — the custom-mode `phase` state
+  // is reused for the custom form; performance has its own selector.
+  const [perfPhase, setPerfPhase] = useState<string>('');
 
-  const recommendationQuery = trpc.studyPlans.generateRecommendation.useQuery(undefined, {
-    enabled: selectedMode === 'performance' && showForm,
-  });
+  const recommendationQuery = trpc.studyPlans.generateRecommendation.useQuery(
+    { phase: perfPhase !== '' ? perfPhase : null },
+    { enabled: selectedMode === 'performance' && showForm },
+  );
 
   const invalidate = () => {
     void utils.studyPlans.list.invalidate();
@@ -257,6 +261,7 @@ export default function StudyPlanPage(): ReactElement {
     setExamBoard('');
     setPhase('');
     setYear('');
+    setPerfPhase('');
   };
 
   const handleCreate = () => {
@@ -264,7 +269,7 @@ export default function StudyPlanPage(): ReactElement {
       createPlan.mutate({
         mode: 'performance',
         deadlineDays,
-        config: { disciplines: [], examBoard: null, phase: null, year: null },
+        config: { disciplines: [], examBoard: null, phase: perfPhase !== '' ? perfPhase : null, year: null },
       });
       resetForm();
     } else if (selectedMode === 'custom') {
@@ -360,6 +365,19 @@ export default function StudyPlanPage(): ReactElement {
                 <h3 className="text-lg font-bold text-[#16161a] mb-1">Plano por Desempenho</h3>
                 <p className="text-sm text-gray-500">Disciplinas com menor acurácia serão priorizadas</p>
               </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Fase</label>
+                <select
+                  value={perfPhase}
+                  onChange={(e) => { setPerfPhase(e.target.value); }}
+                  className="w-full px-3 py-2 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-[#16161a] text-sm"
+                >
+                  <option value="">Todas</option>
+                  {phaseLov.options.map((o) => (
+                    <option key={o.code} value={o.code}>{o.value}</option>
+                  ))}
+                </select>
+              </div>
               <div className="bg-gray-50 rounded-lg p-4">
                 <p className="text-sm font-medium text-gray-700 mb-3">Disciplinas identificadas:</p>
                 {recommendationQuery.isLoading && (
@@ -372,7 +390,9 @@ export default function StudyPlanPage(): ReactElement {
                 )}
                 {recommendationQuery.data?.disciplines.length === 0 && (
                   <p className="text-sm text-amber-600">
-                    Responda pelo menos 5 questões em cada disciplina para gerar uma recomendação.
+                    {perfPhase === '2nd'
+                      ? 'Responda pelo menos 2 questões discursivas em cada área para gerar uma recomendação.'
+                      : 'Responda pelo menos 5 questões em cada disciplina para gerar uma recomendação.'}
                   </p>
                 )}
                 {recommendationQuery.data && recommendationQuery.data.disciplines.length > 0 && (
