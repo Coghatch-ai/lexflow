@@ -67,6 +67,8 @@ const INSTRUCTIONS = [
   '- legalBasis: the key legal dispositivos cited in the espelho (e.g. "CC art. 186; CDC art. 6º"); "" if none.',
   '- topic: a short pt-BR topic label (e.g. "Responsabilidade civil"); "" if unclear.',
   "",
+  'Verification gate — before responding, confirm you extracted exactly 5 items (1 PECA_PRATICA at orderIndex 0 and 4 DISCURSIVE at orderIndex 1..4), each with a non-empty statement copied verbatim from the PDF. If the PDF does not contain this structure, is unreadable, or you would have to guess any statement, respond with exactly {"items":[]} and nothing else — never fabricate or summarize content to fill the shape.',
+  "",
   'Respond with ONLY a JSON object of the form {"items":[{questionType,orderIndex,statement,modelAnswer,maxPoints,maxLines,legalBasis,topic}, ...]} — no markdown fences, no commentary.',
 ].join("\n");
 
