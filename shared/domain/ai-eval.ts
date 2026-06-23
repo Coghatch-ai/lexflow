@@ -2,29 +2,15 @@
 //
 // AI evaluation for OAB questions: grading for discursive answers (2ª fase) and
 // explanation generation for objective questions (1ª fase). The actual model call
-// goes through the central mrhewbuc-issues relay (task=complete) — a thin LLM
-// proxy that returns raw text. ALL the domain logic lives here in the calling app:
-// the prompts, how the question data is laid out, and how the reply is parsed. The
-// relay never sees OAB specifics — see [[project-2fase-discursive]].
+// goes through the central mrhewbuc relay (project=lexflow, task=complete) — a
+// thin LLM proxy that owns the system prompt and user template server-side.
+// The client sends only the variable values; the relay handles prompt assembly.
+// Reply parsing stays here in the calling app. See relay v2 contract below.
 
 import { z } from "zod";
 import { clampScore } from "./discursive-attempt";
 
-// Config key for the editable grading prompt (app_config table). A missing row
-// falls back to DEFAULT_GRADE_SYSTEM_PROMPT below.
-export const GRADE_PROMPT_KEY = "grade-discursive-prompt";
-
-// Default grading instructions (system prompt). Editable at runtime via the
-// app_config row so it can be tuned during the POC without a deploy; this is the
-// seed/fallback and the version-controlled record of "good enough".
-export const DEFAULT_GRADE_SYSTEM_PROMPT = [
-  "Você é examinador da 2ª fase do Exame de Ordem (OAB).",
-  "Avalie a resposta do candidato comparando-a ao padrão de resposta oficial e à base legal informados.",
-  "Atribua uma nota de 0 até o valor máximo da questão e escreva um feedback objetivo em português (pt-BR),",
-  "apontando os acertos e o que faltou para a pontuação total.",
-  'Responda SOMENTE com um objeto JSON no formato {"score": number, "feedback": string} —',
-  "sem cercas de código e sem comentários.",
-].join(" ");
+// ── 2ª-fase discursive grading ────────────────────────────────────────────────
 
 export type GradeInput = {
   statement: string;
@@ -34,23 +20,23 @@ export type GradeInput = {
   maxPoints: number;
 };
 
-// Build the user message (the data half of the prompt) from one answer. The
-// instructions half is the system prompt (DEFAULT_GRADE_SYSTEM_PROMPT or the
-// app_config override).
-export function buildGradeUserMessage(input: GradeInput): string {
-  const parts = [
-    `Pontuação máxima: ${String(input.maxPoints)}`,
-    `\nEnunciado:\n${input.statement}`,
-    input.modelAnswer !== null && input.modelAnswer.length > 0
-      ? `\nPadrão de resposta:\n${input.modelAnswer}`
-      : "\nPadrão de resposta: (não disponível — avalie pela técnica jurídica)",
-    input.legalBasis !== null && input.legalBasis.length > 0
-      ? `\nBase legal:\n${input.legalBasis}`
-      : "",
-    `\nResposta do candidato:\n${input.studentAnswer}`,
-    `\nDê a nota de 0 a ${String(input.maxPoints)} e o feedback.`,
-  ];
-  return parts.join("");
+// Build the flat variable map for the relay's "oab-grade" prompt.
+// Null/empty optional fields are resolved to their fallback strings here —
+// the relay does flat substitution with no conditionals.
+export function buildGradeVariables(input: GradeInput): Record<string, string> {
+  return {
+    statement: input.statement,
+    studentAnswer: input.studentAnswer,
+    modelAnswer:
+      input.modelAnswer !== null && input.modelAnswer.length > 0
+        ? input.modelAnswer
+        : "(não disponível — avalie pela técnica jurídica)",
+    legalBasis:
+      input.legalBasis !== null && input.legalBasis.length > 0
+        ? input.legalBasis
+        : "(não informada)",
+    maxPoints: String(input.maxPoints),
+  };
 }
 
 // Parse the relay's raw text into a clamped {score, feedback}. Tolerant of stray
@@ -76,24 +62,6 @@ export function parseGradeResponse(
 
 // ── 1ª-fase objective explanation ─────────────────────────────────────────────
 
-// Config key for the editable explanation prompt (app_config table). Missing row
-// falls back to DEFAULT_EXPLAIN_SYSTEM_PROMPT below.
-export const EXPLAIN_PROMPT_KEY = "explain-objective-prompt";
-
-// Default explanation instructions (system prompt). Editable at runtime via the
-// app_config row so it can be tuned during the POC without a deploy.
-export const DEFAULT_EXPLAIN_SYSTEM_PROMPT = [
-  "Você é um professor especialista no Exame de Ordem da OAB.",
-  "Para a questão objetiva fornecida, explique em português (pt-BR):",
-  "1) Por que a alternativa correta está certa (whyCorrect);",
-  "2) Por que cada alternativa incorreta está errada — use a letra/código da alternativa como chave (whyWrong);",
-  "3) Uma dica de memorização do conteúdo envolvido (memoryTip);",
-  "4) Pegadinhas comuns que fazem candidatos errarem questões assim (commonTraps).",
-  "Responda SOMENTE com um objeto JSON no formato",
-  '{"whyCorrect":"...","whyWrong":{"A":"...","B":"..."},"memoryTip":"...","commonTraps":"..."}',
-  "— sem cercas de código e sem comentários.",
-].join(" ");
-
 // Shape of one AI-generated explanation (stored as jsonb in oab_questions).
 export type AiExplanation = {
   whyCorrect: string;
@@ -116,24 +84,23 @@ export type ExplainInput = {
   legalBasis: string | null;
 };
 
-// Build the user message (the data half of the explanation prompt). Options are
-// labelled A/B/C/D — English letter codes become the `whyWrong` keys in the JSON,
-// matching the convention (no pt-BR literals as JSON keys).
-export function buildExplainUserMessage(input: ExplainInput): string {
+// Build the flat variable map for the relay's "oab-explain" prompt.
+// Options are flattened to labelled lines ("A: ...\nB: ...") here before
+// sending — the relay does flat string substitution only.
+export function buildExplainVariables(input: ExplainInput): Record<string, string> {
   const letters = ["A", "B", "C", "D", "E"];
-  const optionLines = input.options
+  const options = input.options
     .map((opt, i) => `${letters[i] ?? String(i + 1)}: ${opt}`)
     .join("\n");
-  const parts = [
-    `Questão:\n${input.questionText}`,
-    `\nAlternativas:\n${optionLines}`,
-    `\nAlternativa correta: ${input.correctAnswer}`,
-    input.legalBasis !== null && input.legalBasis.length > 0
-      ? `\nBase legal: ${input.legalBasis}`
-      : "",
-    "\nGere a explicação nos 4 pilares em JSON.",
-  ];
-  return parts.join("");
+  return {
+    questionText: input.questionText,
+    options,
+    correctAnswer: input.correctAnswer,
+    legalBasis:
+      input.legalBasis !== null && input.legalBasis.length > 0
+        ? input.legalBasis
+        : "(não informada)",
+  };
 }
 
 // Parse the relay's raw text into an AiExplanation. Tolerant of stray prose or
@@ -152,14 +119,18 @@ export function parseExplainResponse(text: string): AiExplanation | null {
   }
 }
 
-// ── Relay contract (mirrors mrhewbuc-issues task=complete) ────────────────────
+// ── Relay v2 contract ─────────────────────────────────────────────────────────
+//
+// POST { project: "lexflow", task: "complete", payload: AiCompletePayload }
+// with Authorization: Bearer <clerk-token>
+//
+// The relay owns the system prompt, user template, json flag, and maxOutputTokens.
+// The client sends ONLY the promptId and the declared variable values (flat strings).
+// Missing or extra variables return 400. Old {system, user} shape returns 400.
 
-// What the browser POSTs to the relay's payload. Provider-agnostic: names no vendor.
 export type AiCompletePayload = {
-  system?: string;
-  user: string;
-  json?: boolean;
-  maxOutputTokens?: number;
+  promptId: string;
+  variables: Record<string, string>;
 };
 
 export const aiCompleteResponseSchema = z.object({ text: z.string() });

@@ -1,19 +1,17 @@
 // app/src/components/discursive/DiscursiveRunner.tsx
 //
 // Steps through a list of discursive questions one at a time, collecting each
-// answer (text + self-score + optional AI grade). An AI grade is SERVER-TRUSTED
-// and persisted the moment it's produced: online we get a relay-signed completion
-// and fire-and-forget saveAnswer (which verifies the signature); locally we call
-// gradeWithAi (lexflow grades + persists directly). The persisted row id rides in
-// each CollectedAnswer so the page can finalize the rest at finish.
+// answer (text + self-score + optional AI grade). An AI grade is obtained via the
+// central relay (browser → relay → LLM) and persisted fire-and-forget via
+// saveAnswer. The relay owns the prompt; the client sends { promptId, variables }.
+// The persisted row id rides in each CollectedAnswer so the page can finalize at finish.
 
 import { useEffect, useRef, useState, type ReactElement } from "react";
 import { useGetToken } from "../../auth";
 import { trpc } from "../../shared/lib/trpc";
 import { aiComplete, isAiEvalConfigured } from "../../shared/lib/ai-eval-service";
 import {
-  buildGradeUserMessage,
-  DEFAULT_GRADE_SYSTEM_PROMPT,
+  buildGradeVariables,
   parseGradeResponse,
 } from "@shared/domain/ai-eval";
 import DiscursiveQuestionCard from "./DiscursiveQuestionCard";
@@ -36,14 +34,9 @@ export default function DiscursiveRunner({
 }: RunnerProps): ReactElement {
   const utils = trpc.useUtils();
   const getToken = useGetToken();
-  // Online (deployed, no NAT) → relay via the central service when its URL is set.
-  // Local dev → backend-direct (api/.env key) when the relay URL is absent.
-  const relayConfigured = isAiEvalConfigured();
-  const aiAvailable = trpc.discursive.aiAvailable.useQuery(undefined, { staleTime: 60 * 60 * 1000 });
-  const gradingPrompt = trpc.discursive.gradingPrompt.useQuery(undefined, { staleTime: 60 * 60 * 1000 });
-  const gradeMutation = trpc.discursive.gradeWithAi.useMutation();
   const saveAnswer = trpc.discursive.saveAnswer.useMutation();
-  const aiEnabled = relayConfigured || (aiAvailable.data?.available ?? false);
+  // AI grading is available when the relay URL is configured (VITE_AI_SERVICE_URL).
+  const aiEnabled = isAiEvalConfigured();
 
   const [index, setIndex] = useState(0);
   const [answerText, setAnswerText] = useState("");
@@ -89,19 +82,23 @@ export default function DiscursiveRunner({
     setRevealed(true);
   };
 
-  // Online: relay grades + signs; we display the parsed score immediately, then
-  // fire-and-forget saveAnswer (the server re-verifies the signature and persists).
+  // Relay grades (owns prompt); we display the parsed score immediately, then
+  // fire-and-forget saveAnswer (Clerk-gated, persists the client-parsed result).
   const gradeViaRelay = async (sessionId: string | null): Promise<void> => {
-    const system = gradingPrompt.data?.prompt ?? DEFAULT_GRADE_SYSTEM_PROMPT;
-    const user = buildGradeUserMessage({
-      statement: current.statement,
-      studentAnswer: answerText,
-      modelAnswer: answerKey?.modelAnswer ?? null,
-      legalBasis: answerKey?.legalBasis ?? null,
-      maxPoints: current.maxPoints,
-    });
     const token = await getToken();
-    const { text } = await aiComplete({ system, user, json: true }, token);
+    const { text } = await aiComplete(
+      {
+        promptId: "oab-grade",
+        variables: buildGradeVariables({
+          statement: current.statement,
+          studentAnswer: answerText,
+          modelAnswer: answerKey?.modelAnswer ?? null,
+          legalBasis: answerKey?.legalBasis ?? null,
+          maxPoints: current.maxPoints,
+        }),
+      },
+      token,
+    );
     const parsed = parseGradeResponse(text, current.maxPoints);
     if (parsed === null) throw new Error("Não foi possível interpretar a avaliação da IA");
     setAiResult(parsed); // inline display first — persistence is fire-and-forget
@@ -120,27 +117,12 @@ export default function DiscursiveRunner({
       .catch((err: unknown) => { console.error("Falha ao salvar avaliação da IA", err); });
   };
 
-  // Local dev: lexflow grades AND persists in one trusted server call.
-  const gradeViaBackend = async (sessionId: string | null): Promise<void> => {
-    const r = await gradeMutation.mutateAsync({
-      questionId: current.id,
-      answerText,
-      answerId: answerIdRef.current ?? undefined,
-      sessionId,
-      selfScore,
-      timeSpent: timer,
-    });
-    answerIdRef.current = r.answerId;
-    setAiResult({ score: r.score, feedback: r.feedback });
-  };
-
   const handleRequestAi = async (): Promise<void> => {
     setAiLoading(true);
     setAiError(null);
     try {
       const sessionId = await getSessionId();
-      if (relayConfigured) await gradeViaRelay(sessionId);
-      else await gradeViaBackend(sessionId);
+      await gradeViaRelay(sessionId);
     } catch (err) {
       setAiError(err instanceof Error ? err.message : "Falha ao avaliar com IA");
     } finally {

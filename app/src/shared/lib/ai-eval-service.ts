@@ -1,11 +1,11 @@
 // app/src/shared/lib/ai-eval-service.ts
 //
-// Thin client for the central mrhewbuc-issues relay (task=complete). Mirrors
-// issue-service.ts: the lexflow Lambda has no internet egress (no NAT), so AI
-// calls are made from the browser — we POST the prompt + the user's Clerk JWT to
-// the service's Function URL. The relay validates the JWT offline and calls the
-// LLM provider with its own key (provider is the service's concern). No secret
-// lives in this bundle. The grading prompt + reply parsing live in shared/domain.
+// Thin client for the central mrhewbuc relay (project=lexflow, task=complete).
+// AI calls are made from the browser: we POST { promptId, variables } + the
+// user's Clerk JWT to the relay's Function URL. The relay validates the JWT
+// offline, assembles system+user from server-side prompt templates, and calls
+// the LLM provider with its own key. No AI key or prompt text lives in this
+// bundle. Reply parsing stays in shared/domain/ai-eval.ts.
 
 import {
   aiCompleteResponseSchema,
@@ -13,7 +13,7 @@ import {
   type AiCompleteResponse,
 } from "@shared/domain/ai-eval";
 
-// Identifies lexflow in the service's PROJECTS registry.
+// Identifies lexflow in the relay's PROJECTS registry.
 const PROJECT = "lexflow";
 
 const serviceUrl = import.meta.env.VITE_AI_SERVICE_URL ?? "";

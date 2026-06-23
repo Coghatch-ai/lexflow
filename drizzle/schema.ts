@@ -140,16 +140,6 @@ export const oabDiscursiveImports = pgTable(
   ],
 );
 
-// Small global key/value store for editable app config that we want to tune
-// without a deploy. Today it holds the discursive AI grading prompt (key
-// "grade-discursive-prompt") so it can be iterated during the POC; a missing key
-// falls back to the code default in shared/domain/ai-eval.ts.
-export const appConfig = pgTable("app_config", {
-  key: text("key").primaryKey(),
-  value: text("value").notNull(),
-  ...systemFields,
-});
-
 // ── Per-user activity ─────────────────────────────────────────────────────────
 
 export const userAnswers = pgTable(

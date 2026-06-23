@@ -7,7 +7,7 @@ import { BLANK_FORM } from './admin-csv-helpers';
 import { useGetToken } from '../auth';
 import { aiComplete, isAiEvalConfigured } from '../shared/lib/ai-eval-service';
 import {
-  buildExplainUserMessage,
+  buildExplainVariables,
   parseExplainResponse,
   type AiExplanation,
 } from '@shared/domain/ai-eval';
@@ -59,7 +59,6 @@ interface AiExplanationPanelProps {
   options: string[];
   correctAnswer: string;
   legalBasis: string | null;
-  systemPrompt: string | undefined;
   getToken: () => Promise<string | null>;
   onSaved: () => void;
 }
@@ -70,7 +69,6 @@ function AiExplanationPanel({
   options,
   correctAnswer,
   legalBasis,
-  systemPrompt,
   getToken,
   onSaved,
 }: AiExplanationPanelProps): ReactElement {
@@ -88,9 +86,14 @@ function AiExplanationPanel({
     setError(null);
     setPreview(null);
     try {
-      const user = buildExplainUserMessage({ questionText, options, correctAnswer, legalBasis });
       const token = await getToken();
-      const { text } = await aiComplete({ system: systemPrompt, user, json: true }, token);
+      const { text } = await aiComplete(
+        {
+          promptId: "oab-explain",
+          variables: buildExplainVariables({ questionText, options, correctAnswer, legalBasis }),
+        },
+        token,
+      );
       const parsed = parseExplainResponse(text);
       if (parsed === null) {
         setError('A IA retornou um formato inesperado. Tente novamente.');
@@ -154,11 +157,6 @@ export function QuestionForm({
 
   const [form, setForm] = useState<AdminQuestionInput>(initial ?? BLANK_FORM);
   const [errors, setErrors] = useState<string[]>([]);
-
-  const promptQuery = trpc.admin.questions.explanationPrompt.useQuery(undefined, {
-    enabled: isAiEvalConfigured() && isEdit,
-    staleTime: 60 * 60 * 1000,
-  });
 
   const invalidate = (): void => { void utils.admin.questions.list.invalidate(); };
 
@@ -375,7 +373,6 @@ export function QuestionForm({
           options={form.options}
           correctAnswer={form.correctAnswer}
           legalBasis={form.legalBasis ?? null}
-          systemPrompt={promptQuery.data?.prompt}
           getToken={getToken}
           onSaved={invalidate}
         />

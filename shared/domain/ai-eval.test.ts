@@ -1,25 +1,81 @@
 import { describe, expect, it } from "vitest";
 import {
   aiCompleteResponseSchema,
-  buildExplainUserMessage,
-  buildGradeUserMessage,
+  buildExplainVariables,
+  buildGradeVariables,
   parseExplainResponse,
   parseGradeResponse,
 } from "./ai-eval";
 
-describe("buildGradeUserMessage", () => {
-  it("includes the data and a padrão-missing note when absent", () => {
-    const msg = buildGradeUserMessage({
+describe("buildGradeVariables", () => {
+  it("returns all five expected keys", () => {
+    const vars = buildGradeVariables({
       statement: "Situação X",
       studentAnswer: "Minha resposta",
-      modelAnswer: null,
+      modelAnswer: "Padrão oficial",
       legalBasis: "CC art. 938",
       maxPoints: 1.25,
     });
-    expect(msg).toContain("Situação X");
-    expect(msg).toContain("Minha resposta");
-    expect(msg).toContain("CC art. 938");
-    expect(msg).toContain("não disponível");
+    expect(Object.keys(vars).sort()).toEqual(
+      ["legalBasis", "maxPoints", "modelAnswer", "statement", "studentAnswer"].sort(),
+    );
+  });
+
+  it("all values are strings", () => {
+    const vars = buildGradeVariables({
+      statement: "S",
+      studentAnswer: "A",
+      modelAnswer: "M",
+      legalBasis: "L",
+      maxPoints: 5,
+    });
+    for (const v of Object.values(vars)) {
+      expect(typeof v).toBe("string");
+    }
+  });
+
+  it("resolves null modelAnswer to the fallback string", () => {
+    const vars = buildGradeVariables({
+      statement: "S",
+      studentAnswer: "A",
+      modelAnswer: null,
+      legalBasis: "L",
+      maxPoints: 1.25,
+    });
+    expect(vars["modelAnswer"]).toBe("(não disponível — avalie pela técnica jurídica)");
+  });
+
+  it("resolves empty modelAnswer to the fallback string", () => {
+    const vars = buildGradeVariables({
+      statement: "S",
+      studentAnswer: "A",
+      modelAnswer: "",
+      legalBasis: "L",
+      maxPoints: 1.25,
+    });
+    expect(vars["modelAnswer"]).toBe("(não disponível — avalie pela técnica jurídica)");
+  });
+
+  it("resolves null legalBasis to the fallback string", () => {
+    const vars = buildGradeVariables({
+      statement: "S",
+      studentAnswer: "A",
+      modelAnswer: "M",
+      legalBasis: null,
+      maxPoints: 1.25,
+    });
+    expect(vars["legalBasis"]).toBe("(não informada)");
+  });
+
+  it("converts maxPoints to its string form", () => {
+    const vars = buildGradeVariables({
+      statement: "S",
+      studentAnswer: "A",
+      modelAnswer: "M",
+      legalBasis: "L",
+      maxPoints: 1.25,
+    });
+    expect(vars["maxPoints"]).toBe("1.25");
   });
 });
 
@@ -46,29 +102,83 @@ describe("aiCompleteResponseSchema", () => {
   });
 });
 
-describe("buildExplainUserMessage", () => {
-  it("includes question text, options with letter labels, correct answer, and legal basis", () => {
-    const msg = buildExplainUserMessage({
-      questionText: "Questão sobre contrato",
+describe("buildExplainVariables", () => {
+  it("returns all four expected keys", () => {
+    const vars = buildExplainVariables({
+      questionText: "Q",
       options: ["Nula", "Anulável", "Válida", "Ineficaz"],
       correctAnswer: "Anulável",
       legalBasis: "CC art. 171",
     });
-    expect(msg).toContain("Questão sobre contrato");
-    expect(msg).toContain("A: Nula");
-    expect(msg).toContain("B: Anulável");
-    expect(msg).toContain("Alternativa correta: Anulável");
-    expect(msg).toContain("CC art. 171");
+    expect(Object.keys(vars).sort()).toEqual(
+      ["correctAnswer", "legalBasis", "options", "questionText"].sort(),
+    );
   });
 
-  it("omits base legal line when legalBasis is null", () => {
-    const msg = buildExplainUserMessage({
+  it("all values are strings", () => {
+    const vars = buildExplainVariables({
       questionText: "Q",
       options: ["A", "B"],
       correctAnswer: "A",
       legalBasis: null,
     });
-    expect(msg).not.toContain("Base legal");
+    for (const v of Object.values(vars)) {
+      expect(typeof v).toBe("string");
+    }
+  });
+
+  it("flattens options with letter labels into one string", () => {
+    const vars = buildExplainVariables({
+      questionText: "Questão sobre contrato",
+      options: ["Nula", "Anulável", "Válida", "Ineficaz"],
+      correctAnswer: "Anulável",
+      legalBasis: "CC art. 171",
+    });
+    expect(vars["options"]).toContain("A: Nula");
+    expect(vars["options"]).toContain("B: Anulável");
+    expect(vars["options"]).toContain("C: Válida");
+    expect(vars["options"]).toContain("D: Ineficaz");
+  });
+
+  it("passes through questionText and correctAnswer verbatim", () => {
+    const vars = buildExplainVariables({
+      questionText: "Questão sobre contrato",
+      options: ["X"],
+      correctAnswer: "Anulável",
+      legalBasis: null,
+    });
+    expect(vars["questionText"]).toBe("Questão sobre contrato");
+    expect(vars["correctAnswer"]).toBe("Anulável");
+  });
+
+  it("resolves null legalBasis to the fallback string", () => {
+    const vars = buildExplainVariables({
+      questionText: "Q",
+      options: ["A", "B"],
+      correctAnswer: "A",
+      legalBasis: null,
+    });
+    expect(vars["legalBasis"]).toBe("(não informada)");
+  });
+
+  it("resolves empty legalBasis to the fallback string", () => {
+    const vars = buildExplainVariables({
+      questionText: "Q",
+      options: ["A", "B"],
+      correctAnswer: "A",
+      legalBasis: "",
+    });
+    expect(vars["legalBasis"]).toBe("(não informada)");
+  });
+
+  it("passes non-null legalBasis through verbatim", () => {
+    const vars = buildExplainVariables({
+      questionText: "Q",
+      options: ["A"],
+      correctAnswer: "A",
+      legalBasis: "CC art. 171",
+    });
+    expect(vars["legalBasis"]).toBe("CC art. 171");
   });
 });
 

@@ -6,11 +6,10 @@
 // essays have no options and no text-match grading — the student self-scores
 // against the padrão, optionally backed by an AI score.
 //
-// AI grading: online the browser gets the model's raw text from the central relay
+// AI grading: the browser sends { promptId, variables } to the central relay
 // (task=complete), parses {score, feedback} (shared/domain/ai-eval), and persists
 // it via saveAnswer — Clerk-gated through protectedProcedure, exactly like the
-// student's own self-score. Locally (no NAT) gradeWithAi calls the model directly
-// and persists in one server call.
+// student's own self-score. The relay owns the system prompt and user template.
 
 import { z } from "zod";
 import { and, desc, eq, inArray, sql, type SQL } from "drizzle-orm";
@@ -18,20 +17,12 @@ import { TRPCError } from "@trpc/server";
 import { db } from "../../db/client";
 import type { ScopedDb } from "../../db/scope";
 import {
-  appConfig,
   discursiveSessions,
   oabDiscursiveQuestions,
   userDiscursiveAnswers,
 } from "../../../drizzle/schema";
-import { adminProcedure, protectedProcedure, router } from "../procedures";
-import { aiConfigured, completeAi } from "../../lib/ai-provider";
+import { protectedProcedure, router } from "../procedures";
 import { QUESTION_TYPES } from "../../../shared/domain/discursive-question";
-import {
-  buildGradeUserMessage,
-  DEFAULT_GRADE_SYSTEM_PROMPT,
-  GRADE_PROMPT_KEY,
-  parseGradeResponse,
-} from "../../../shared/domain/ai-eval";
 
 // Catalog fields safe to expose before the student submits — deliberately omits
 // modelAnswer + legalBasis (the answer key), which only answerKey() returns.
@@ -73,31 +64,8 @@ const saveAnswerInput = z.object({
 
 type AiGrade = { aiScore: number; aiFeedback: string };
 
-// Load the answer-key + maxPoints for one question (global catalog).
-async function loadQuestion(questionId: string): Promise<{
-  statement: string;
-  modelAnswer: string | null;
-  legalBasis: string | null;
-  maxPoints: number;
-}> {
-  const [q] = await db
-    .select({
-      statement: oabDiscursiveQuestions.statement,
-      modelAnswer: oabDiscursiveQuestions.modelAnswer,
-      legalBasis: oabDiscursiveQuestions.legalBasis,
-      maxPoints: oabDiscursiveQuestions.maxPoints,
-    })
-    .from(oabDiscursiveQuestions)
-    .where(eq(oabDiscursiveQuestions.id, questionId))
-    .limit(1);
-  if (q === undefined)
-    throw new TRPCError({ code: "NOT_FOUND", message: "Questão não encontrada" });
-  return q;
-}
-
-// Shared upsert for both the online (saveAnswer) and local-dev (gradeWithAi)
-// grade paths. ai_* columns are written only when a grade is supplied; a no-grade
-// call (e.g. finalizing an ungraded answer) leaves any existing grade intact.
+// Upsert one user answer. ai_* columns are written only when a grade is supplied;
+// a no-grade call (e.g. finalizing an ungraded answer) leaves any existing grade intact.
 async function upsertAnswer(
   ctx: { userId: string; db: ScopedDb },
   input: {
@@ -284,96 +252,6 @@ export const discursiveRouter = router({
           and(eq(discursiveSessions.id, input.sessionId), ctx.db.conditions(discursiveSessions)),
         );
       return { ok: true as const };
-    }),
-
-  // The effective AI grading prompt — the editable app_config override if set,
-  // else the code default. The browser sends this as the `system` half to the relay.
-  gradingPrompt: protectedProcedure.query(async () => {
-    const [row] = await db
-      .select({ value: appConfig.value })
-      .from(appConfig)
-      .where(eq(appConfig.key, GRADE_PROMPT_KEY))
-      .limit(1);
-    return { prompt: row?.value ?? DEFAULT_GRADE_SYSTEM_PROMPT };
-  }),
-
-  // Admin-only: override the grading prompt at runtime (no deploy). Empty string
-  // resets to the code default (delete the row).
-  setGradingPrompt: adminProcedure
-    .input(z.object({ prompt: z.string().max(20000) }))
-    .mutation(async ({ ctx, input }) => {
-      if (input.prompt.trim().length === 0) {
-        await db.delete(appConfig).where(eq(appConfig.key, GRADE_PROMPT_KEY));
-        return { ok: true as const };
-      }
-      await db
-        .insert(appConfig)
-        .values({
-          key: GRADE_PROMPT_KEY,
-          value: input.prompt,
-          createdBy: ctx.userId,
-          lastUpdBy: ctx.userId,
-        })
-        .onConflictDoUpdate({
-          target: appConfig.key,
-          set: { value: input.prompt, lastUpdAt: sql`now()`, lastUpdBy: ctx.userId },
-        });
-      return { ok: true as const };
-    }),
-
-  // Whether AI grading is configured (a key is present) — gates the UI button.
-  aiAvailable: protectedProcedure.query(() => ({ available: aiConfigured() })),
-
-  // Grade one answer with AI AND persist it (local-dev path). lexflow calls the
-  // model directly here, so it is the trusted server — no relay signature needed.
-  // NOTE: the deployed Lambda has no NAT, so the outbound call fails in prod;
-  // online grading goes browser → relay → saveAnswer (signed). Mirrors saveAnswer's
-  // upsert so dev exercises the same "grade persists immediately" behaviour.
-  gradeWithAi: protectedProcedure
-    .input(
-      z.object({
-        questionId: z.string().min(1),
-        answerText: z.string().min(1),
-        answerId: z.string().uuid().optional(),
-        sessionId: z.string().uuid().nullable().default(null),
-        selfScore: z.number().min(0).nullable().default(null),
-        timeSpent: z.number().int().min(0).default(0),
-      }),
-    )
-    .mutation(async ({ ctx, input }) => {
-      const q = await loadQuestion(input.questionId);
-      const [cfg] = await db
-        .select({ value: appConfig.value })
-        .from(appConfig)
-        .where(eq(appConfig.key, GRADE_PROMPT_KEY))
-        .limit(1);
-      const system = cfg?.value ?? DEFAULT_GRADE_SYSTEM_PROMPT;
-      const user = buildGradeUserMessage({
-        statement: q.statement,
-        studentAnswer: input.answerText,
-        modelAnswer: q.modelAnswer,
-        legalBasis: q.legalBasis,
-        maxPoints: q.maxPoints,
-      });
-
-      const text = await completeAi({ system, user, json: true });
-      const parsed = parseGradeResponse(text, q.maxPoints);
-      if (parsed === null) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "Não foi possível interpretar a avaliação da IA",
-        });
-      }
-      const answerId = await upsertAnswer(ctx, {
-        answerId: input.answerId,
-        questionId: input.questionId,
-        answerText: input.answerText,
-        selfScore: input.selfScore,
-        timeSpent: input.timeSpent,
-        sessionId: input.sessionId,
-        ai: { aiScore: parsed.score, aiFeedback: parsed.feedback },
-      });
-      return { score: parsed.score, feedback: parsed.feedback, answerId };
     }),
 
   // Recent answers with their question context — for the history tab.
