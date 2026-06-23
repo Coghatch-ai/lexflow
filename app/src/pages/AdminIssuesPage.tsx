@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback, type ReactElement, type FormEvent } from 'react';
 import { Check, Bug, RefreshCw, X } from 'lucide-react';
-import { useGetToken } from '../auth';
+import { useGetToken, useSession } from '../auth';
 import {
   ISSUE_KINDS,
   githubIssueInputSchema,
+  appendRequester,
   type GithubIssueInput,
 } from '@shared/domain/github-issue';
 import {
@@ -19,6 +20,7 @@ const BLANK: GithubIssueInput = { title: '', body: '', kind: 'bug' };
 
 function IssueForm(): ReactElement {
   const getToken = useGetToken();
+  const { user } = useSession();
   const [form, setForm] = useState<GithubIssueInput>(BLANK);
   const [errors, setErrors] = useState<string[]>([]);
   const [created, setCreated] = useState<CreateIssueResult | null>(null);
@@ -40,7 +42,11 @@ function IssueForm(): ReactElement {
     setPending(true);
     try {
       const token = await getToken();
-      const issue = await createIssue(result.data, token);
+      const payload = {
+        ...result.data,
+        body: appendRequester(result.data.body, user?.email ?? ''),
+      };
+      const issue = await createIssue(payload, token);
       setCreated(issue);
       setForm(BLANK);
     } catch (err) {

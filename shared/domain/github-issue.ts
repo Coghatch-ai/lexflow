@@ -22,3 +22,12 @@ export const githubIssueInputSchema = z.object({
 });
 
 export type GithubIssueInput = z.infer<typeof githubIssueInputSchema>;
+
+/**
+ * Appends a "Solicitante" footer to a GitHub issue body.
+ * Falls back to "desconhecido" when email is empty.
+ */
+export function appendRequester(body: string, email: string): string {
+  const requester = email.length > 0 ? email : "desconhecido";
+  return `${body}\n\n---\nSolicitante: ${requester}`;
+}
