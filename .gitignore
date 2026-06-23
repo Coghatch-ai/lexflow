@@ -43,3 +43,6 @@ graphify-out/
 
 # OAB 2ª-fase import drafts (review artifacts; data lives in the DB)
 scripts/out/
+
+# Xenomoon autonomous-agent local state (machine-managed, churns constantly)
+.xenomoon/
