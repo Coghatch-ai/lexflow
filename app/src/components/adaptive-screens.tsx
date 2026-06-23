@@ -2,8 +2,10 @@ import type { ReactElement } from 'react';
 import { Brain, ChevronRight, CheckCircle, XCircle, Clock, Zap } from 'lucide-react';
 import { nextDifficulty } from '@shared/domain/adaptive';
 import { accuracyPct } from '@shared/domain/scoring';
+import type { AiExplanation } from '@shared/domain/ai-eval';
 import { type NotesAndBookmarks } from '../shared/hooks/use-notes-bookmarks';
 import QuestionCard from '@/shared/components/QuestionCard';
+import AiExplanationView from '@/shared/components/AiExplanationView';
 
 export type Difficulty = 'easy' | 'medium' | 'hard';
 
@@ -16,6 +18,7 @@ export type AdaptiveQuestion = {
   discipline: string;
   examBoard: string;
   explanation: string;
+  aiExplanation: AiExplanation | null;
   legislationTitle: string | null;
 };
 
@@ -234,8 +237,11 @@ export function AdaptiveFeedback({
         )}
 
         <div className="bg-white rounded-lg p-4">
-          <p className="text-sm font-medium text-gray-700 mb-1">Explicação:</p>
-          <p className="text-gray-800">{currentQuestion.explanation}</p>
+          <p className="text-sm font-medium text-gray-700 mb-2">Explicação:</p>
+          <AiExplanationView
+            aiExplanation={currentQuestion.aiExplanation}
+            explanation={currentQuestion.explanation}
+          />
           <p className="text-sm text-[#16161a] mt-2 font-medium">{currentQuestion.legislationTitle}</p>
         </div>
       </div>

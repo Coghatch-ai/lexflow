@@ -7,8 +7,10 @@ import { findNextUnanswered } from '../shared/lib/exam-queue';
 import ExamQuestionNav from './ExamQuestionNav';
 import ExamFinishDialog from './ExamFinishDialog';
 import { accuracyPct } from '@shared/domain/scoring';
+import type { AiExplanation } from '@shared/domain/ai-eval';
 import { useNotesAndBookmarks, type NotesAndBookmarks } from '../shared/hooks/use-notes-bookmarks';
 import QuestionCard from '@/shared/components/QuestionCard';
+import AiExplanationView from '@/shared/components/AiExplanationView';
 
 type Status = 'setup' | 'playing' | 'review' | 'finished';
 
@@ -21,6 +23,7 @@ type ExamQuestion = {
   discipline: string;
   examBoard: string;
   explanation: string;
+  aiExplanation: AiExplanation | null;
   legislationTitle: string | null;
 };
 
@@ -250,6 +253,60 @@ interface ExamReviewProps {
   onReset: () => void;
 }
 
+interface QuestionReviewRowProps {
+  question: ExamQuestion;
+  idx: number;
+  userAnswer: string | undefined;
+  disciplineLov: Lov;
+}
+
+function QuestionReviewRow({ question, idx, userAnswer, disciplineLov }: QuestionReviewRowProps): ReactElement {
+  const isCorrect = userAnswer === question.correctAnswer;
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div
+      className={`p-3 rounded-lg border-l-4 ${
+        isCorrect ? 'bg-green-50 border-green-500' : userAnswer !== undefined ? 'bg-red-50 border-red-500' : 'bg-gray-50 border-gray-400'
+      }`}
+    >
+      <div className="flex items-start justify-between">
+        <div className="flex-1">
+          <p className="font-medium text-gray-800 text-sm">
+            Questão {idx + 1} - {disciplineLov.labelOf(question.discipline)}
+          </p>
+          {!isCorrect && (
+            <div className="mt-1 text-xs">
+              <p className="text-red-600">Sua resposta: {userAnswer ?? 'Não respondida'}</p>
+              <p className="text-green-600">Correta: {question.correctAnswer}</p>
+            </div>
+          )}
+          {!isCorrect && (
+            <button
+              onClick={() => { setExpanded((v) => !v); }}
+              className="mt-2 text-xs text-[#16161a] font-medium underline"
+            >
+              {expanded ? 'Ocultar explicação' : 'Ver explicação'}
+            </button>
+          )}
+          {!isCorrect && expanded && (
+            <div className="mt-2 bg-white rounded-lg p-3">
+              <AiExplanationView
+                aiExplanation={question.aiExplanation}
+                explanation={question.explanation}
+              />
+            </div>
+          )}
+        </div>
+        {isCorrect ? (
+          <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" />
+        ) : (
+          <XCircle className="w-5 h-5 text-red-600 flex-shrink-0" />
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ExamReview({ questions, answers, timeLeft, disciplineLov, onReset }: ExamReviewProps): ReactElement {
   let correctCount = 0;
   questions.forEach((q, idx) => {
@@ -291,37 +348,15 @@ function ExamReview({ questions, answers, timeLeft, disciplineLov, onReset }: Ex
       <div className="bg-white rounded-xl p-6 shadow">
         <h4 className="text-lg font-bold text-[#16161a] mb-4">Revisão por Questão</h4>
         <div className="space-y-2 max-h-[500px] overflow-y-auto">
-          {questions.map((q, idx) => {
-            const userAnswer = answers.get(idx);
-            const isCorrect = userAnswer === q.correctAnswer;
-            return (
-              <div
-                key={q.id}
-                className={`p-3 rounded-lg border-l-4 ${
-                  isCorrect ? 'bg-green-50 border-green-500' : userAnswer !== undefined ? 'bg-red-50 border-red-500' : 'bg-gray-50 border-gray-400'
-                }`}
-              >
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <p className="font-medium text-gray-800 text-sm">
-                      Questão {idx + 1} - {disciplineLov.labelOf(q.discipline)}
-                    </p>
-                    {!isCorrect && (
-                      <div className="mt-1 text-xs">
-                        <p className="text-red-600">Sua resposta: {userAnswer ?? 'Não respondida'}</p>
-                        <p className="text-green-600">Correta: {q.correctAnswer}</p>
-                      </div>
-                    )}
-                  </div>
-                  {isCorrect ? (
-                    <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" />
-                  ) : (
-                    <XCircle className="w-5 h-5 text-red-600 flex-shrink-0" />
-                  )}
-                </div>
-              </div>
-            );
-          })}
+          {questions.map((q, idx) => (
+            <QuestionReviewRow
+              key={q.id}
+              question={q}
+              idx={idx}
+              userAnswer={answers.get(idx)}
+              disciplineLov={disciplineLov}
+            />
+          ))}
         </div>
       </div>
 
@@ -391,6 +426,7 @@ export default function RealExamSimulation(): ReactElement {
         discipline: r.discipline,
         examBoard: r.examBoard,
         explanation: r.explanation,
+        aiExplanation: r.aiExplanation ?? null,
         legislationTitle: r.legislationTitle,
       }));
       setQuestions(mapped);

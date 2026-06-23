@@ -96,6 +96,7 @@ export default function AdaptiveSimulation(): ReactElement {
         discipline: r.discipline,
         examBoard: r.examBoard,
         explanation: r.explanation,
+        aiExplanation: r.aiExplanation ?? null,
         legislationTitle: r.legislationTitle,
       }));
       setQuestionPool(mapped);

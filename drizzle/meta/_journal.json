@@ -85,6 +85,13 @@
       "when": 1782197627069,
       "tag": "0011_outgoing_talon",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1782198352615,
+      "tag": "0012_rare_sinister_six",
+      "breakpoints": true
     }
   ]
 }

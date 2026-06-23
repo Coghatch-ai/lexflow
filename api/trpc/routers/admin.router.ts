@@ -9,6 +9,7 @@ import { z } from "zod";
 import { and, asc, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { db } from "../../db/client";
 import {
+  appConfig,
   examCalendarEvents,
   examCalendars,
   oabQuestions,
@@ -17,6 +18,11 @@ import {
 import { adminProcedure, router } from "../procedures";
 import { adminQuestionInputSchema } from "../../../shared/domain/admin-question";
 import { DEFAULT_SM2_CONFIG } from "../../../shared/domain/spaced-repetition";
+import {
+  aiExplanationSchema,
+  DEFAULT_EXPLAIN_SYSTEM_PROMPT,
+  EXPLAIN_PROMPT_KEY,
+} from "../../../shared/domain/ai-eval";
 
 const calendarEventInput = z.object({
   label: z.string().min(1),
@@ -359,6 +365,54 @@ export const adminRouter = router({
         }
 
         return { upserted: rows.length };
+      }),
+
+    // Persist an admin-reviewed AI explanation for a question. The explanation is
+    // generated in the admin's browser (relay call) and sent here already parsed —
+    // client-asserted, Clerk-gated to admin role. Mirrors discursive saveAnswer.
+    saveAiExplanation: adminProcedure
+      .input(z.object({ id: z.string().min(1), explanation: aiExplanationSchema }))
+      .mutation(async ({ input }) => {
+        await db
+          .update(oabQuestions)
+          .set({ aiExplanation: input.explanation, lastUpdAt: new Date().toISOString() })
+          .where(eq(oabQuestions.id, input.id));
+        return { ok: true as const };
+      }),
+
+    // The effective AI explanation prompt — app_config override if set, else the
+    // code default. The admin page sends this as the `system` half to the relay.
+    explanationPrompt: adminProcedure.query(async () => {
+      const [row] = await db
+        .select({ value: appConfig.value })
+        .from(appConfig)
+        .where(eq(appConfig.key, EXPLAIN_PROMPT_KEY))
+        .limit(1);
+      return { prompt: row?.value ?? DEFAULT_EXPLAIN_SYSTEM_PROMPT };
+    }),
+
+    // Admin-only: override the explanation prompt at runtime (no deploy). Empty
+    // string resets to the code default (deletes the row).
+    setExplanationPrompt: adminProcedure
+      .input(z.object({ prompt: z.string().max(20000) }))
+      .mutation(async ({ ctx, input }) => {
+        if (input.prompt.trim().length === 0) {
+          await db.delete(appConfig).where(eq(appConfig.key, EXPLAIN_PROMPT_KEY));
+          return { ok: true as const };
+        }
+        await db
+          .insert(appConfig)
+          .values({
+            key: EXPLAIN_PROMPT_KEY,
+            value: input.prompt,
+            createdBy: ctx.userId,
+            lastUpdBy: ctx.userId,
+          })
+          .onConflictDoUpdate({
+            target: appConfig.key,
+            set: { value: input.prompt, lastUpdAt: sql`now()`, lastUpdBy: ctx.userId },
+          });
+        return { ok: true as const };
       }),
   }),
 });

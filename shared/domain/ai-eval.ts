@@ -1,9 +1,10 @@
 // shared/domain/ai-eval.ts
 //
-// AI grading for discursive answers. The actual model call goes through the
-// central mrhewbuc-issues relay (task=complete) — a thin LLM proxy that returns
-// raw text. ALL the domain logic lives here in the calling app: the grading
-// prompt, how the question data is laid out, and how the reply is parsed. The
+// AI evaluation for OAB questions: grading for discursive answers (2ª fase) and
+// explanation generation for objective questions (1ª fase). The actual model call
+// goes through the central mrhewbuc-issues relay (task=complete) — a thin LLM
+// proxy that returns raw text. ALL the domain logic lives here in the calling app:
+// the prompts, how the question data is laid out, and how the reply is parsed. The
 // relay never sees OAB specifics — see [[project-2fase-discursive]].
 
 import { z } from "zod";
@@ -68,6 +69,84 @@ export function parseGradeResponse(
     if (!Number.isFinite(rawScore)) return null;
     const feedback = typeof parsed["feedback"] === "string" ? parsed["feedback"] : "";
     return { score: clampScore(rawScore, maxPoints), feedback };
+  } catch {
+    return null;
+  }
+}
+
+// ── 1ª-fase objective explanation ─────────────────────────────────────────────
+
+// Config key for the editable explanation prompt (app_config table). Missing row
+// falls back to DEFAULT_EXPLAIN_SYSTEM_PROMPT below.
+export const EXPLAIN_PROMPT_KEY = "explain-objective-prompt";
+
+// Default explanation instructions (system prompt). Editable at runtime via the
+// app_config row so it can be tuned during the POC without a deploy.
+export const DEFAULT_EXPLAIN_SYSTEM_PROMPT = [
+  "Você é um professor especialista no Exame de Ordem da OAB.",
+  "Para a questão objetiva fornecida, explique em português (pt-BR):",
+  "1) Por que a alternativa correta está certa (whyCorrect);",
+  "2) Por que cada alternativa incorreta está errada — use a letra/código da alternativa como chave (whyWrong);",
+  "3) Uma dica de memorização do conteúdo envolvido (memoryTip);",
+  "4) Pegadinhas comuns que fazem candidatos errarem questões assim (commonTraps).",
+  "Responda SOMENTE com um objeto JSON no formato",
+  '{"whyCorrect":"...","whyWrong":{"A":"...","B":"..."},"memoryTip":"...","commonTraps":"..."}',
+  "— sem cercas de código e sem comentários.",
+].join(" ");
+
+// Shape of one AI-generated explanation (stored as jsonb in oab_questions).
+export type AiExplanation = {
+  whyCorrect: string;
+  whyWrong: Record<string, string>;
+  memoryTip: string;
+  commonTraps: string;
+};
+
+export const aiExplanationSchema = z.object({
+  whyCorrect: z.string().min(1),
+  whyWrong: z.record(z.string(), z.string()),
+  memoryTip: z.string().min(1),
+  commonTraps: z.string().min(1),
+});
+
+export type ExplainInput = {
+  questionText: string;
+  options: string[];
+  correctAnswer: string;
+  legalBasis: string | null;
+};
+
+// Build the user message (the data half of the explanation prompt). Options are
+// labelled A/B/C/D — English letter codes become the `whyWrong` keys in the JSON,
+// matching the convention (no pt-BR literals as JSON keys).
+export function buildExplainUserMessage(input: ExplainInput): string {
+  const letters = ["A", "B", "C", "D", "E"];
+  const optionLines = input.options
+    .map((opt, i) => `${letters[i] ?? String(i + 1)}: ${opt}`)
+    .join("\n");
+  const parts = [
+    `Questão:\n${input.questionText}`,
+    `\nAlternativas:\n${optionLines}`,
+    `\nAlternativa correta: ${input.correctAnswer}`,
+    input.legalBasis !== null && input.legalBasis.length > 0
+      ? `\nBase legal: ${input.legalBasis}`
+      : "",
+    "\nGere a explicação nos 4 pilares em JSON.",
+  ];
+  return parts.join("");
+}
+
+// Parse the relay's raw text into an AiExplanation. Tolerant of stray prose or
+// code fences around the JSON. Returns null if the response is invalid.
+export function parseExplainResponse(text: string): AiExplanation | null {
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start === -1 || end <= start) return null;
+  try {
+    const raw = JSON.parse(text.slice(start, end + 1)) as Record<string, unknown>;
+    const result = aiExplanationSchema.safeParse(raw);
+    if (!result.success) return null;
+    return result.data;
   } catch {
     return null;
   }

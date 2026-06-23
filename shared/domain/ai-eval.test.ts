@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { aiCompleteResponseSchema, buildGradeUserMessage, parseGradeResponse } from "./ai-eval";
+import {
+  aiCompleteResponseSchema,
+  buildExplainUserMessage,
+  buildGradeUserMessage,
+  parseExplainResponse,
+  parseGradeResponse,
+} from "./ai-eval";
 
 describe("buildGradeUserMessage", () => {
   it("includes the data and a padrão-missing note when absent", () => {
@@ -37,5 +43,73 @@ describe("aiCompleteResponseSchema", () => {
   it("parses { text }", () => {
     const parsed = aiCompleteResponseSchema.parse({ text: "hi" });
     expect(parsed.text).toBe("hi");
+  });
+});
+
+describe("buildExplainUserMessage", () => {
+  it("includes question text, options with letter labels, correct answer, and legal basis", () => {
+    const msg = buildExplainUserMessage({
+      questionText: "Questão sobre contrato",
+      options: ["Nula", "Anulável", "Válida", "Ineficaz"],
+      correctAnswer: "Anulável",
+      legalBasis: "CC art. 171",
+    });
+    expect(msg).toContain("Questão sobre contrato");
+    expect(msg).toContain("A: Nula");
+    expect(msg).toContain("B: Anulável");
+    expect(msg).toContain("Alternativa correta: Anulável");
+    expect(msg).toContain("CC art. 171");
+  });
+
+  it("omits base legal line when legalBasis is null", () => {
+    const msg = buildExplainUserMessage({
+      questionText: "Q",
+      options: ["A", "B"],
+      correctAnswer: "A",
+      legalBasis: null,
+    });
+    expect(msg).not.toContain("Base legal");
+  });
+});
+
+describe("parseExplainResponse", () => {
+  const valid = JSON.stringify({
+    whyCorrect: "Está correto porque...",
+    whyWrong: { A: "errada por X", B: "errada por Y" },
+    memoryTip: "Lembre-se de...",
+    commonTraps: "Candidatos confundem...",
+  });
+
+  it("parses a well-formed 4-pilar JSON", () => {
+    const result = parseExplainResponse(valid);
+    expect(result).not.toBeNull();
+    expect(result?.whyCorrect).toBe("Está correto porque...");
+    expect(result?.whyWrong["A"]).toBe("errada por X");
+    expect(result?.memoryTip).toBe("Lembre-se de...");
+    expect(result?.commonTraps).toBe("Candidatos confundem...");
+  });
+
+  it("tolerates prose and code fences surrounding the JSON", () => {
+    const wrapped = `Aqui está a explicação:\n\`\`\`json\n${valid}\n\`\`\`\nFim.`;
+    expect(parseExplainResponse(wrapped)).not.toBeNull();
+  });
+
+  it("returns null on garbage input", () => {
+    expect(parseExplainResponse("sem json aqui")).toBeNull();
+  });
+
+  it("returns null when a required pillar is missing", () => {
+    const missing = JSON.stringify({ whyCorrect: "ok", whyWrong: {}, memoryTip: "ok" });
+    expect(parseExplainResponse(missing)).toBeNull();
+  });
+
+  it("returns null when whyWrong is not a record of strings", () => {
+    const bad = JSON.stringify({
+      whyCorrect: "ok",
+      whyWrong: "not a record",
+      memoryTip: "ok",
+      commonTraps: "ok",
+    });
+    expect(parseExplainResponse(bad)).toBeNull();
   });
 });

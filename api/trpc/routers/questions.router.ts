@@ -49,6 +49,7 @@ export const questionsRouter = router({
         options: oabQuestions.options,
         correctAnswer: oabQuestions.correctAnswer,
         explanation: oabQuestions.explanation,
+        aiExplanation: oabQuestions.aiExplanation,
         discipline: oabQuestions.discipline,
         examBoard: oabQuestions.examBoard,
         difficulty: oabQuestions.difficulty,

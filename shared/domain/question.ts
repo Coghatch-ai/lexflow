@@ -4,6 +4,8 @@
 // snake_case `interface Question` copies in the simulation flows — import this
 // type and `toQuestion()` instead of redefining + remapping in each component.
 
+import type { AiExplanation } from "./ai-eval";
+
 export type Question = {
   id: string;
   questionText: string;
@@ -11,6 +13,7 @@ export type Question = {
   correctAnswer: string;
   legalBasis: string | null;
   explanation: string;
+  aiExplanation: AiExplanation | null;
   legislationLink: string | null;
   legislationTitle: string | null;
   difficulty: string;
@@ -33,6 +36,7 @@ export function toQuestion(row: QuestionRow): Question {
     correctAnswer: row.correctAnswer,
     legalBasis: row.legalBasis,
     explanation: row.explanation,
+    aiExplanation: row.aiExplanation,
     legislationLink: row.legislationLink,
     legislationTitle: row.legislationTitle,
     difficulty: row.difficulty,

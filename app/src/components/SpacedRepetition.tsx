@@ -5,8 +5,10 @@ import { useLov } from '../shared/hooks/use-lov';
 import { trpc } from '../shared/lib/trpc';
 import { shuffle } from '../shared/lib/shuffle';
 import { accuracyPct } from '@shared/domain/scoring';
+import type { AiExplanation } from '@shared/domain/ai-eval';
 import { useNotesAndBookmarks } from '../shared/hooks/use-notes-bookmarks';
 import QuestionCard from '@/shared/components/QuestionCard';
+import AiExplanationView from '@/shared/components/AiExplanationView';
 
 type Status = 'loading' | 'empty' | 'playing' | 'feedback' | 'done';
 
@@ -16,6 +18,7 @@ type ReviewItem = {
   options: string[];
   correctAnswer: string;
   explanation: string;
+  aiExplanation: AiExplanation | null;
   discipline: string;
   examBoard: string;
   difficulty: string;
@@ -119,6 +122,7 @@ export default function SpacedRepetition(): ReactElement {
       options: shuffle(q.options),
       correctAnswer: q.correctAnswer,
       explanation: q.explanation,
+      aiExplanation: q.aiExplanation ?? null,
       discipline: q.discipline,
       examBoard: q.examBoard,
       difficulty: q.difficulty,
@@ -266,7 +270,10 @@ export default function SpacedRepetition(): ReactElement {
           )}
 
           <div className="bg-white rounded-lg p-4 mb-4">
-            <p className="text-gray-800">{currentQuestion.explanation}</p>
+            <AiExplanationView
+              aiExplanation={currentQuestion.aiExplanation}
+              explanation={currentQuestion.explanation}
+            />
           </div>
 
           <div className="bg-white rounded-lg p-4 flex items-center gap-3">

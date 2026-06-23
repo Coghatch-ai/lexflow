@@ -1,9 +1,17 @@
 import { useState, type ReactElement, type FormEvent } from 'react';
-import { Check } from 'lucide-react';
+import { Check, Sparkles } from 'lucide-react';
 import { trpc } from '../shared/lib/trpc';
 import { useLov } from '../shared/hooks/use-lov';
 import { adminQuestionInputSchema, type AdminQuestionInput } from '@shared/domain/admin-question';
 import { BLANK_FORM } from './admin-csv-helpers';
+import { useGetToken } from '../auth';
+import { aiComplete, isAiEvalConfigured } from '../shared/lib/ai-eval-service';
+import {
+  buildExplainUserMessage,
+  parseExplainResponse,
+  type AiExplanation,
+} from '@shared/domain/ai-eval';
+import AiExplanationView from '../shared/components/AiExplanationView';
 
 interface LegislationFieldsProps {
   legislationTitle?: string | null;
@@ -44,6 +52,93 @@ function LegislationFields({
   );
 }
 
+// Props that the AI panel needs — kept narrow to avoid coupling.
+interface AiExplanationPanelProps {
+  questionId: string;
+  questionText: string;
+  options: string[];
+  correctAnswer: string;
+  legalBasis: string | null;
+  systemPrompt: string | undefined;
+  getToken: () => Promise<string | null>;
+  onSaved: () => void;
+}
+
+function AiExplanationPanel({
+  questionId,
+  questionText,
+  options,
+  correctAnswer,
+  legalBasis,
+  systemPrompt,
+  getToken,
+  onSaved,
+}: AiExplanationPanelProps): ReactElement {
+  const [preview, setPreview] = useState<AiExplanation | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const saveMutation = trpc.admin.questions.saveAiExplanation.useMutation({
+    onSuccess: onSaved,
+    onError: (e) => { setError(e.message); },
+  });
+
+  const handleGenerate = async (): Promise<void> => {
+    setLoading(true);
+    setError(null);
+    setPreview(null);
+    try {
+      const user = buildExplainUserMessage({ questionText, options, correctAnswer, legalBasis });
+      const token = await getToken();
+      const { text } = await aiComplete({ system: systemPrompt, user, json: true }, token);
+      const parsed = parseExplainResponse(text);
+      if (parsed === null) {
+        setError('A IA retornou um formato inesperado. Tente novamente.');
+        return;
+      }
+      setPreview(parsed);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Falha ao gerar explicação');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="border border-line rounded-xl p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-semibold text-ink">Explicação IA (4 pilares)</p>
+        <button
+          type="button"
+          onClick={() => { void handleGenerate(); }}
+          disabled={loading || questionText.trim().length === 0}
+          className="flex items-center gap-1.5 px-3 py-1.5 bg-[#16161a] text-white text-xs font-semibold rounded-lg hover:bg-[#26262c] disabled:opacity-50 transition-colors"
+        >
+          <Sparkles className="w-3.5 h-3.5" />
+          {loading ? 'Gerando...' : 'Gerar explicação IA'}
+        </button>
+      </div>
+      {error !== null && <p className="text-xs text-red-600">{error}</p>}
+      {preview !== null && (
+        <div className="space-y-3">
+          <div className="bg-paper-sink rounded-lg p-3">
+            <AiExplanationView aiExplanation={preview} explanation="" />
+          </div>
+          <button
+            type="button"
+            onClick={() => { saveMutation.mutate({ id: questionId, explanation: preview }); }}
+            disabled={saveMutation.isPending}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-green-600 text-white text-xs font-semibold rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors"
+          >
+            <Check className="w-3.5 h-3.5" />
+            {saveMutation.isPending ? 'Salvando...' : 'Confirmar e salvar explicação'}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function QuestionForm({
   initial,
   onSuccess,
@@ -54,12 +149,18 @@ export function QuestionForm({
   onCancel: () => void;
 }): ReactElement {
   const utils = trpc.useUtils();
+  const getToken = useGetToken();
   const isEdit = initial !== null;
 
   const [form, setForm] = useState<AdminQuestionInput>(initial ?? BLANK_FORM);
   const [errors, setErrors] = useState<string[]>([]);
 
-  const invalidate = () => { void utils.admin.questions.list.invalidate(); };
+  const promptQuery = trpc.admin.questions.explanationPrompt.useQuery(undefined, {
+    enabled: isAiEvalConfigured() && isEdit,
+    staleTime: 60 * 60 * 1000,
+  });
+
+  const invalidate = (): void => { void utils.admin.questions.list.invalidate(); };
 
   const createMutation = trpc.admin.questions.create.useMutation({
     onSuccess: () => { invalidate(); onSuccess(); },
@@ -70,17 +171,17 @@ export function QuestionForm({
     onError: (e) => { setErrors([e.message]); },
   });
 
-  function setField<K extends keyof AdminQuestionInput>(key: K, value: AdminQuestionInput[K]) {
+  function setField<K extends keyof AdminQuestionInput>(key: K, value: AdminQuestionInput[K]): void {
     setForm((prev) => ({ ...prev, [key]: value }));
   }
 
-  function setOption(index: number, value: string) {
+  function setOption(index: number, value: string): void {
     const opts = [...form.options];
     opts[index] = value;
     setField('options', opts);
   }
 
-  function handleSubmit(e: FormEvent) {
+  function handleSubmit(e: FormEvent): void {
     e.preventDefault();
     setErrors([]);
     const result = adminQuestionInputSchema.safeParse(form);
@@ -266,6 +367,19 @@ export function QuestionForm({
           required
         />
       </div>
+
+      {isAiEvalConfigured() && isEdit && form.id !== undefined && form.id.length > 0 && (
+        <AiExplanationPanel
+          questionId={form.id}
+          questionText={form.questionText}
+          options={form.options}
+          correctAnswer={form.correctAnswer}
+          legalBasis={form.legalBasis ?? null}
+          systemPrompt={promptQuery.data?.prompt}
+          getToken={getToken}
+          onSaved={invalidate}
+        />
+      )}
 
       <LegislationFields
         legislationTitle={form.legislationTitle}

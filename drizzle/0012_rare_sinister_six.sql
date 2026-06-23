@@ -1,0 +1,1 @@
+ALTER TABLE "oab_questions" ADD COLUMN "ai_explanation" jsonb;
