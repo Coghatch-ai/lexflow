@@ -3,7 +3,7 @@ import { Plus, Pencil, Trash2, Check, X } from 'lucide-react';
 import { trpc } from '../shared/lib/trpc';
 import { AdminGate } from './admin-gate';
 
-type CalendarEvent = { label: string; dateText: string; sortOrder: number };
+type CalendarEvent = { label: string; dateText: string; eventDate: string | null; sortOrder: number };
 type CalendarRow = {
   id: string;
   title: string;
@@ -13,7 +13,7 @@ type CalendarRow = {
   events: CalendarEvent[];
 };
 
-const EMPTY_EVENT: CalendarEvent = { label: '', dateText: '', sortOrder: 0 };
+const EMPTY_EVENT: CalendarEvent = { label: '', dateText: '', eventDate: null, sortOrder: 0 };
 const EMPTY_FORM = { title: '', note: '', active: true, sortOrder: 0, events: [{ ...EMPTY_EVENT }] };
 
 function CalendarAdmin(): ReactElement {
@@ -56,7 +56,7 @@ function CalendarAdmin(): ReactElement {
   }
 
   function handleSave() {
-    const payload = { ...form, events: form.events.map((e, i) => ({ ...e, sortOrder: i })) };
+    const payload = { ...form, events: form.events.map((e, i) => ({ ...e, sortOrder: i, eventDate: e.eventDate === '' ? null : e.eventDate })) };
     if (editingId !== null) { updateMutation.mutate({ id: editingId, ...payload }); }
     else { createMutation.mutate(payload); }
   }
@@ -142,6 +142,13 @@ function CalendarAdmin(): ReactElement {
                     onChange={(e) => { setEvent(i, 'dateText', e.target.value); }}
                     placeholder="Data ou período"
                     className="w-44 px-3 py-2 border border-line rounded-lg text-sm bg-white text-ink focus:outline-none focus:ring-2 focus:ring-[#d9ab53]"
+                  />
+                  <input
+                    type="date"
+                    value={ev.eventDate ?? ''}
+                    onChange={(e) => { setEvent(i, 'eventDate', e.target.value); }}
+                    title="Data estruturada para contagem regressiva (opcional)"
+                    className="w-40 px-3 py-2 border border-line rounded-lg text-sm bg-white text-ink focus:outline-none focus:ring-2 focus:ring-[#d9ab53]"
                   />
                   <button onClick={() => { removeEvent(i); }} className="p-1.5 text-ink-mute hover:text-red-500 transition-colors">
                     <X className="w-4 h-4" />

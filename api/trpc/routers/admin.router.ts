@@ -22,6 +22,11 @@ const calendarEventInput = z.object({
   label: z.string().min(1),
   dateText: z.string().min(1),
   sortOrder: z.number().int().default(0),
+  eventDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .nullable()
+    .optional(),
 });
 
 const calendarInput = z.object({
@@ -101,6 +106,7 @@ export const adminRouter = router({
             calendarId: cal.id,
             label: e.label,
             dateText: e.dateText,
+            eventDate: e.eventDate ?? null,
             sortOrder: e.sortOrder,
             createdAt: now,
             lastUpdAt: now,
@@ -133,6 +139,7 @@ export const adminRouter = router({
               calendarId: input.id,
               label: e.label,
               dateText: e.dateText,
+              eventDate: e.eventDate ?? null,
               sortOrder: e.sortOrder,
               createdAt: now,
               lastUpdAt: now,

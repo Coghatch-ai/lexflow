@@ -15,6 +15,7 @@
 import { relations } from "drizzle-orm";
 import {
   boolean,
+  date,
   index,
   integer,
   jsonb,
@@ -465,6 +466,7 @@ export const examCalendarEvents = pgTable(
       .references(() => examCalendars.id, { onDelete: "cascade" }),
     label: text("label").notNull(), // event name
     dateText: text("date_text").notNull(), // free-text date (supports ranges)
+    eventDate: date("event_date"), // optional ISO YYYY-MM-DD for countdown
     sortOrder: integer("sort_order").notNull().default(0),
     ...systemFields,
   },
