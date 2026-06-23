@@ -89,6 +89,60 @@ export async function listOpenIssues(token: string | null): Promise<IssueListIte
   return data.issues;
 }
 
+export interface IssueAuthor {
+  login: string | null;
+  avatarUrl: string | null;
+}
+
+export interface IssueComment {
+  id: number;
+  body: string;
+  createdAt: string;
+  author: IssueAuthor;
+}
+
+export interface IssueDetail {
+  number: number;
+  title: string;
+  body: string | null;
+  state: string;
+  url: string;
+  createdAt: string;
+  updatedAt: string;
+  author: IssueAuthor;
+  labels: string[];
+}
+
+export interface IssueDetailResult {
+  issue: IssueDetail;
+  comments: IssueComment[];
+}
+
+export async function getIssue(number: number, token: string | null): Promise<IssueDetailResult> {
+  if (serviceUrl.length === 0) {
+    throw new Error("VITE_ISSUE_SERVICE_URL não configurado");
+  }
+  if (token === null || token.length === 0) {
+    throw new Error("Sessão expirada — faça login novamente");
+  }
+
+  const res = await fetch(serviceUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ project: PROJECT, action: "get", number }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(text.length > 0 ? text : `Falha ao carregar issue (${String(res.status)})`);
+  }
+
+  return (await res.json()) as IssueDetailResult;
+}
+
 export async function closeIssue(number: number, token: string | null): Promise<void> {
   if (serviceUrl.length === 0) {
     throw new Error("VITE_ISSUE_SERVICE_URL não configurado");

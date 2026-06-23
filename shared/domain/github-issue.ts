@@ -31,3 +31,14 @@ export function appendRequester(body: string, email: string): string {
   const requester = email.length > 0 ? email : "desconhecido";
   return `${body}\n\n---\nSolicitante: ${requester}`;
 }
+
+const REQUESTER_RE = /\n---\nSolicitante: (.+?)\s*$/;
+
+/**
+ * Extracts the "Solicitante" email appended by {@link appendRequester} from a
+ * GitHub issue body. Returns null when the footer is absent (issue created
+ * outside the app form). The body is otherwise returned verbatim by the caller.
+ */
+export function parseRequester(body: string): string | null {
+  return REQUESTER_RE.exec(body)?.[1] ?? null;
+}

@@ -1,18 +1,22 @@
-import { useState, useEffect, useCallback, type ReactElement, type FormEvent } from 'react';
-import { Check, Bug, RefreshCw, X } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef, type ReactElement, type FormEvent } from 'react';
+import { Check, Bug, RefreshCw, X, Mail, MessageSquare, ExternalLink } from 'lucide-react';
 import { useGetToken, useSession } from '../auth';
 import {
   ISSUE_KINDS,
   githubIssueInputSchema,
   appendRequester,
+  parseRequester,
   type GithubIssueInput,
 } from '@shared/domain/github-issue';
 import {
   createIssue,
   listOpenIssues,
   closeIssue,
+  getIssue,
   type CreateIssueResult,
   type IssueListItem,
+  type IssueDetailResult,
+  type IssueComment,
 } from '../shared/lib/issue-service';
 import { AdminGate } from './admin-gate';
 
@@ -135,12 +139,133 @@ function formatDate(iso: string): string {
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString('pt-BR');
 }
 
+function formatDateTime(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString('pt-BR');
+}
+
+// Body sans the "Solicitante" footer (surfaced separately as a chip below).
+function bodyWithoutRequester(body: string): string {
+  return body.split('\n\n---\nSolicitante:')[0] ?? body;
+}
+
+function CommentList({ comments }: { comments: IssueComment[] }): ReactElement | null {
+  if (comments.length === 0) return null;
+  return (
+    <div className="space-y-3">
+      <p className="flex items-center gap-1.5 text-xs font-semibold text-ink-mute">
+        <MessageSquare className="w-3.5 h-3.5" />
+        {comments.length} comentário{comments.length === 1 ? '' : 's'}
+      </p>
+      {comments.map((c) => (
+        <div key={c.id} className="rounded-lg border border-line bg-paper-sink p-3">
+          <div className="mb-1 flex items-center gap-2 text-xs text-ink-mute">
+            <span className="font-medium text-ink">{c.author.login ?? 'desconhecido'}</span>
+            <span>{formatDateTime(c.createdAt)}</span>
+          </div>
+          <p className="whitespace-pre-wrap break-words text-sm text-ink">{c.body}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function IssueDetailBody({ data }: { data: IssueDetailResult }): ReactElement {
+  const { issue, comments } = data;
+  const requester = parseRequester(issue.body ?? '');
+  const body = bodyWithoutRequester(issue.body ?? '').trim();
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2 text-xs text-ink-mute">
+        <span className="rounded-full bg-paper-sink px-2 py-0.5 font-medium">{issue.state}</span>
+        {issue.labels.map((l) => (
+          <span key={l} className="rounded-full bg-paper-sink px-2 py-0.5">{l}</span>
+        ))}
+        <span>aberta em {formatDateTime(issue.createdAt)}</span>
+      </div>
+      {requester !== null && (
+        <div className="flex items-center gap-1.5 rounded-lg border border-line bg-paper-sink px-3 py-2 text-sm text-ink">
+          <Mail className="w-4 h-4 shrink-0 text-ink-mute" />
+          <span className="font-medium">Solicitante:</span>
+          <a href={`mailto:${requester}`} className="text-[#b07d1a] hover:underline">{requester}</a>
+        </div>
+      )}
+      <p className="whitespace-pre-wrap break-words text-sm text-ink">
+        {body.length > 0 ? body : <span className="text-ink-mute">(sem descrição)</span>}
+      </p>
+      <CommentList comments={comments} />
+      <a
+        href={issue.url}
+        target="_blank"
+        rel="noreferrer"
+        className="inline-flex items-center gap-1.5 text-xs text-ink-mute hover:text-ink"
+      >
+        <ExternalLink className="w-3.5 h-3.5" />
+        Abrir no GitHub
+      </a>
+    </div>
+  );
+}
+
+function IssueDetailModal({ number, onClose }: { number: number; onClose: () => void }): ReactElement {
+  const getToken = useGetToken();
+  const aliveRef = useRef(true);
+  const [data, setData] = useState<IssueDetailResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    aliveRef.current = true;
+    void (async () => {
+      try {
+        const token = await getToken();
+        const result = await getIssue(number, token);
+        if (aliveRef.current) setData(result);
+      } catch (err) {
+        if (aliveRef.current) setError(err instanceof Error ? err.message : 'Erro desconhecido');
+      }
+    })();
+    return () => { aliveRef.current = false; };
+  }, [number, getToken]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="my-8 w-full max-w-2xl rounded-xl border border-line bg-surface shadow-xl"
+        onClick={(e) => { e.stopPropagation(); }}
+      >
+        <div className="flex items-start justify-between gap-3 border-b border-line p-4">
+          <h3 className="text-sm font-semibold text-ink">
+            <span className="font-mono text-ink-mute">#{number}</span>{' '}
+            {data?.issue.title ?? ''}
+          </h3>
+          <button onClick={onClose} className="shrink-0 text-ink-mute hover:text-ink" aria-label="Fechar">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="p-4">
+          {error !== null ? (
+            <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>
+          ) : data === null ? (
+            <p className="py-8 text-center text-sm text-ink-mute">Carregando...</p>
+          ) : (
+            <IssueDetailBody data={data} />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function OpenIssuesList(): ReactElement {
   const getToken = useGetToken();
   const [issues, setIssues] = useState<IssueListItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [closingNumber, setClosingNumber] = useState<number | null>(null);
+  const [selected, setSelected] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -201,7 +326,12 @@ function OpenIssuesList(): ReactElement {
               <div className="flex items-start gap-3">
                 <span className="text-xs font-mono text-ink-mute mt-0.5 shrink-0">#{it.number}</span>
                 <div className="min-w-0 flex-1">
-                  <span className="text-sm font-medium text-ink">{it.title}</span>
+                  <button
+                    onClick={() => { setSelected(it.number); }}
+                    className="text-left text-sm font-medium text-ink hover:text-[#b07d1a]"
+                  >
+                    {it.title}
+                  </button>
                   <div className="mt-1 flex flex-wrap items-center gap-2">
                     {it.labels.map((l) => (
                       <span key={l} className="px-1.5 py-0.5 rounded-full bg-paper-sink text-[0.65rem] text-ink-mute">
@@ -223,6 +353,10 @@ function OpenIssuesList(): ReactElement {
             </li>
           ))}
         </ul>
+      )}
+
+      {selected !== null && (
+        <IssueDetailModal number={selected} onClose={() => { setSelected(null); }} />
       )}
     </div>
   );

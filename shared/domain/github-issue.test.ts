@@ -3,7 +3,7 @@
 // Unit tests for appendRequester — the pure body-composition helper.
 
 import { describe, it, expect } from "vitest";
-import { appendRequester } from "./github-issue";
+import { appendRequester, parseRequester } from "./github-issue";
 
 describe("appendRequester", () => {
   it("appends the email when present", () => {
@@ -21,5 +21,25 @@ describe("appendRequester", () => {
     const result = appendRequester(body, "dev@lexflow.io");
     expect(result.startsWith(body)).toBe(true);
     expect(result).toContain("\n\n---\nSolicitante: dev@lexflow.io");
+  });
+});
+
+describe("parseRequester", () => {
+  it("round-trips the email appended by appendRequester", () => {
+    const body = appendRequester("Body with steps", "user@example.com");
+    expect(parseRequester(body)).toBe("user@example.com");
+  });
+
+  it("reads the fallback marker", () => {
+    expect(parseRequester(appendRequester("x", ""))).toBe("desconhecido");
+  });
+
+  it("returns null when the footer is absent", () => {
+    expect(parseRequester("Body created outside the app form")).toBeNull();
+  });
+
+  it("ignores an earlier --- divider in the body", () => {
+    const body = "Intro\n\n---\nMid section\n\n---\nSolicitante: real@x.com";
+    expect(parseRequester(body)).toBe("real@x.com");
   });
 });
