@@ -4,6 +4,10 @@
 // Returns permissionDecision "ask" for branch-creating commands; otherwise stays
 // silent (allow). Listing/checking out existing branches, deleting, status, log,
 // commit, push, etc. pass through untouched.
+//
+// Quoted strings and heredoc bodies are blanked to a placeholder BEFORE matching,
+// so text inside a commit message (e.g. `git commit -m "... git checkout -b ..."`)
+// can never trip the guard — only an actual branch-creating command token does.
 
 let input = "";
 process.stdin.setEncoding("utf8");
@@ -16,7 +20,7 @@ process.stdin.on("end", () => {
     process.exit(0); // can't parse → don't block
   }
 
-  if (createsBranch(cmd)) {
+  if (createsBranch(stripQuoted(cmd))) {
     process.stdout.write(
       JSON.stringify({
         hookSpecificOutput: {
@@ -31,6 +35,21 @@ process.stdin.on("end", () => {
   }
   process.exit(0);
 });
+
+// Replace quoted strings and heredoc bodies with a harmless placeholder token so
+// branch-pattern matching only sees actual command tokens, never message text.
+// A placeholder (not empty) is used so a genuinely quoted branch name still counts
+// as a name, e.g. `git branch "x"` -> `git branch Q` still matches the create form.
+function stripQuoted(cmd) {
+  let s = cmd;
+  // Heredoc bodies first (e.g. `-m "$(cat <<'EOF' ... EOF)"`): <<EOF / <<'EOF' / <<-EOF
+  s = s.replace(/<<-?\s*(['"]?)([A-Za-z_]\w*)\1[\s\S]*?\n[ \t]*\2\b/g, " Q ");
+  // $'...' (ANSI-C, backslash escapes), then '...' (literal), then "..." (\" escapes)
+  s = s.replace(/\$'(?:[^'\\]|\\.)*'/g, " Q ");
+  s = s.replace(/'[^']*'/g, " Q ");
+  s = s.replace(/"(?:[^"\\]|\\.)*"/g, " Q ");
+  return s;
+}
 
 function createsBranch(cmd) {
   // `git checkout -b|-B <name>`

@@ -1,28 +1,11 @@
 [
   {
-    "id": "t11",
-    "title": "Deploy #18 fix — commit+deploy \"close\" handler in mrhewbuc-issues repo",
-    "owner": "user",
-    "status": "pending",
-    "note": "External repo, not implementable by lexflow developer. solution-ready+needs-deploy on #18.",
-    "agent": "main",
-    "created": "2026-06-22T19:34:40.399Z"
-  },
-  {
-    "id": "t12",
-    "title": "Fix XXXI scrape — http→https in downloadB64 (#5)",
+    "id": "t1",
+    "title": "Implement issue #21",
     "owner": "agent",
-    "status": "done",
-    "note": "committed e9c3b29; validate+build green. Live XXXI import not yet re-run.",
-    "agent": "main",
-    "created": "2026-06-22T20:24:06.647Z"
-  },
-  {
-    "id": "t13",
-    "title": "Implement #5 — XXXI 2ª-fase scrape HTTP→HTTPS fix",
-    "owner": "agent",
-    "status": "done",
-    "agent": "main",
-    "created": "2026-06-22T20:24:30.812Z"
+    "status": "in_progress",
+    "note": "background worker",
+    "agent": "background",
+    "created": "2026-06-22T22:07:35.348Z"
   }
 ]

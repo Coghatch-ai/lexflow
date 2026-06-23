@@ -1,10 +1,10 @@
 {
-  "active": true,
+  "active": false,
   "goal": "for every bug that we have on gh, one by one, call triage, senior and dev",
   "intervalMs": 300000,
   "startedAt": "2026-06-22T19:21:31.125Z",
-  "lastCheckAt": "2026-06-22T20:31:31.173Z",
+  "lastCheckAt": "2026-06-22T20:36:35.012Z",
   "checks": 1,
-  "status": "running",
-  "report": null
+  "status": "complete",
+  "report": "Goal \"for every bug on gh, one by one, call triage, senior and dev\" — achieved (user confirmed wrap-up).\n\nBugs processed:\n- #6 Questoes espaçadas — triage→senior→dev ✅, committed cf8da8d (wrong answers now become due immediately; needs-deploy).\n- #7 Revisao portugues — triage→senior→dev ✅, committed 89e000a (pt-BR accents + difficulty via useLov; needs-deploy). Layout.tsx nav fix left uncommitted (mixed with pre-existing work).\n- #17 scrape-2fase duplicate-edition — senior→dev ✅, committed b18ccd4 (fail-loud + --edition selector).\n- #18 fechar tarefa — triage→senior ✅; dev is an EXTERNAL blocker (fix lives in mrhewbuc-issues repo, not implementable by lexflow developer) → left on board as user to-do t11.\n\nAll commits are on branch feat/oab-2fase-import (unpushed); issues remain open (user chose \"do nothing\" on landing to main, so no auto-close/deploy yet).\n\nOpen items (user-owned): land #6/#7/#17 on main (auto-close + CI deploy via PR); #18 external deploy in mrhewbuc-issues; commit/fold Layout.tsx; the db-query.ts tool remains uncommitted.\n\nSide-work done this session (not part of goal): built read-only pnpm db:query tool; XXXII 2ª-fase imported 7/7; XXXI http→https downloadB64 fix committed e9c3b29 (live XXXI re-import offered, not yet run)."
 }
