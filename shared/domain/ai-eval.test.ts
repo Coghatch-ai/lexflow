@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  aiCompleteResponseSchema,
   buildExplainVariables,
   buildGradeVariables,
   parseExplainResponse,
@@ -92,13 +91,6 @@ describe("parseGradeResponse", () => {
 
   it("returns null when there is no JSON object", () => {
     expect(parseGradeResponse("sem json aqui", 1.25)).toBeNull();
-  });
-});
-
-describe("aiCompleteResponseSchema", () => {
-  it("parses { text }", () => {
-    const parsed = aiCompleteResponseSchema.parse({ text: "hi" });
-    expect(parsed.text).toBe("hi");
   });
 });
 

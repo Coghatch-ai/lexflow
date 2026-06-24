@@ -16,6 +16,8 @@ import { adminRouter } from "./routers/admin.router";
 import { calendarsRouter } from "./routers/calendars.router";
 import { notesRouter } from "./routers/notes.router";
 import { bookmarksRouter } from "./routers/bookmarks.router";
+import { aiRouter } from "./routers/ai.router";
+import { issuesRouter } from "./routers/issues.router";
 
 export const appRouter = router({
   health: publicProcedure.query(() => ({ status: "ok" as const })),
@@ -31,6 +33,8 @@ export const appRouter = router({
   calendars: calendarsRouter,
   notes: notesRouter,
   bookmarks: bookmarksRouter,
+  ai: aiRouter,
+  issues: issuesRouter,
 });
 
 export type AppRouter = typeof appRouter;

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, type ReactElement, type FormEvent } from 'react';
 import { Check, Bug, RefreshCw, X, Mail, MessageSquare, ExternalLink } from 'lucide-react';
-import { useGetToken, useSession } from '../auth';
+import { useSession } from '../auth';
 import {
   ISSUE_KINDS,
   githubIssueInputSchema,
@@ -8,23 +8,25 @@ import {
   parseRequester,
   type GithubIssueInput,
 } from '@shared/domain/github-issue';
-import {
-  createIssue,
-  listOpenIssues,
-  closeIssue,
-  getIssue,
-  type CreateIssueResult,
-  type IssueListItem,
-  type IssueDetailResult,
-  type IssueComment,
-} from '../shared/lib/issue-service';
+import { trpc, type TrpcOutput } from '../shared/lib/trpc';
 import { AdminGate } from './admin-gate';
+
+// Issue ops now go through the API (trpc.issues.* → lexflow-relay → GitHub),
+// replacing the former browser → mrhewbuc-issues Function URL path.
+type CreateIssueResult = TrpcOutput['issues']['create'];
+type IssueListItem = TrpcOutput['issues']['list'][number];
+type IssueDetailResult = TrpcOutput['issues']['get'];
+type IssueComment = IssueDetailResult['comments'][number];
+
+function ghLabelFor(kind: GithubIssueInput['kind']): string {
+  return ISSUE_KINDS.find((k) => k.code === kind)?.ghLabel ?? kind;
+}
 
 const BLANK: GithubIssueInput = { title: '', body: '', kind: 'bug' };
 
 function IssueForm(): ReactElement {
-  const getToken = useGetToken();
   const { user } = useSession();
+  const createMutation = trpc.issues.create.useMutation();
   const [form, setForm] = useState<GithubIssueInput>(BLANK);
   const [errors, setErrors] = useState<string[]>([]);
   const [created, setCreated] = useState<CreateIssueResult | null>(null);
@@ -45,12 +47,11 @@ function IssueForm(): ReactElement {
     }
     setPending(true);
     try {
-      const token = await getToken();
-      const payload = {
-        ...result.data,
+      const issue = await createMutation.mutateAsync({
+        title: result.data.title,
         body: appendRequester(result.data.body, user?.email ?? ''),
-      };
-      const issue = await createIssue(payload, token);
+        labels: [ghLabelFor(result.data.kind)],
+      });
       setCreated(issue);
       setForm(BLANK);
     } catch (err) {
@@ -208,7 +209,7 @@ function IssueDetailBody({ data }: { data: IssueDetailResult }): ReactElement {
 }
 
 function IssueDetailModal({ number, onClose }: { number: number; onClose: () => void }): ReactElement {
-  const getToken = useGetToken();
+  const utils = trpc.useUtils();
   const aliveRef = useRef(true);
   const [data, setData] = useState<IssueDetailResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -217,15 +218,14 @@ function IssueDetailModal({ number, onClose }: { number: number; onClose: () => 
     aliveRef.current = true;
     void (async () => {
       try {
-        const token = await getToken();
-        const result = await getIssue(number, token);
+        const result = await utils.issues.get.fetch({ number });
         if (aliveRef.current) setData(result);
       } catch (err) {
         if (aliveRef.current) setError(err instanceof Error ? err.message : 'Erro desconhecido');
       }
     })();
     return () => { aliveRef.current = false; };
-  }, [number, getToken]);
+  }, [number, utils]);
 
   return (
     <div
@@ -260,7 +260,8 @@ function IssueDetailModal({ number, onClose }: { number: number; onClose: () => 
 }
 
 function OpenIssuesList(): ReactElement {
-  const getToken = useGetToken();
+  const utils = trpc.useUtils();
+  const { mutateAsync: closeIssue } = trpc.issues.close.useMutation();
   const [issues, setIssues] = useState<IssueListItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -271,29 +272,27 @@ function OpenIssuesList(): ReactElement {
     setLoading(true);
     setError(null);
     try {
-      const token = await getToken();
-      setIssues(await listOpenIssues(token));
+      setIssues(await utils.issues.list.fetch());
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erro desconhecido');
     } finally {
       setLoading(false);
     }
-  }, [getToken]);
+  }, [utils]);
 
   const handleClose = useCallback(async (number: number) => {
     if (!window.confirm(`Fechar issue #${String(number)}?`)) return;
     setClosingNumber(number);
     setError(null);
     try {
-      const token = await getToken();
-      await closeIssue(number, token);
+      await closeIssue({ number });
       setIssues((prev) => prev?.filter((it) => it.number !== number) ?? null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erro desconhecido');
     } finally {
       setClosingNumber(null);
     }
-  }, [getToken]);
+  }, [closeIssue]);
 
   useEffect(() => { void load(); }, [load]);
 

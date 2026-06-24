@@ -40,7 +40,6 @@ jobs:
         env:
           VITE_CLERK_PUBLISHABLE_KEY: ${{ secrets.VITE_CLERK_PUBLISHABLE_KEY }}
           VITE_API_URL: ${{ secrets.VITE_API_URL }}
-          VITE_ISSUE_SERVICE_URL: ${{ secrets.VITE_ISSUE_SERVICE_URL }}
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}

@@ -46,7 +46,10 @@
       "Sid": "Lambda",
       "Effect": "Allow",
       "Action": ["lambda:*"],
-      "Resource": "arn:aws:lambda:sa-east-1:394559824800:function:lexflow-api-*"
+      "Resource": [
+        "arn:aws:lambda:sa-east-1:394559824800:function:lexflow-api-*",
+        "arn:aws:lambda:sa-east-1:394559824800:function:lexflow-relay-*"
+      ]
     },
     {
       "Sid": "LambdaLayersGlobal",
@@ -87,7 +90,10 @@
         "logs:DeleteLogGroup",
         "logs:TagResource"
       ],
-      "Resource": "arn:aws:logs:sa-east-1:394559824800:log-group:/aws/lambda/lexflow-api-*"
+      "Resource": [
+        "arn:aws:logs:sa-east-1:394559824800:log-group:/aws/lambda/lexflow-api-*",
+        "arn:aws:logs:sa-east-1:394559824800:log-group:/aws/lambda/lexflow-relay-*"
+      ]
     },
     {
       "Sid": "EC2VPCRead",

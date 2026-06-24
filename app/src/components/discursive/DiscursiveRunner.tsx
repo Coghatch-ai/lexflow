@@ -1,19 +1,13 @@
 // app/src/components/discursive/DiscursiveRunner.tsx
 //
 // Steps through a list of discursive questions one at a time, collecting each
-// answer (text + self-score + optional AI grade). An AI grade is obtained via the
-// central relay (browser → relay → LLM) and persisted fire-and-forget via
-// saveAnswer. The relay owns the prompt; the client sends { promptId, variables }.
-// The persisted row id rides in each CollectedAnswer so the page can finalize at finish.
+// answer (text + self-score + optional AI grade). An AI grade comes from the
+// ai.grade tRPC procedure (API → lexflow-relay → Gemini) and is persisted
+// fire-and-forget via saveAnswer. The persisted row id rides in each
+// CollectedAnswer so the page can finalize at finish.
 
 import { useEffect, useRef, useState, type ReactElement } from "react";
-import { useGetToken } from "../../auth";
 import { trpc } from "../../shared/lib/trpc";
-import { aiComplete, isAiEvalConfigured } from "../../shared/lib/ai-eval-service";
-import {
-  buildGradeVariables,
-  parseGradeResponse,
-} from "@shared/domain/ai-eval";
 import DiscursiveQuestionCard from "./DiscursiveQuestionCard";
 import type { AiResult, AnswerKey, CollectedAnswer, DiscursiveQuestion, Lov } from "./types";
 
@@ -33,10 +27,10 @@ export default function DiscursiveRunner({
   questions, areaLov, questionTypeLov, finishing, getSessionId, onBack, onFinish,
 }: RunnerProps): ReactElement {
   const utils = trpc.useUtils();
-  const getToken = useGetToken();
   const saveAnswer = trpc.discursive.saveAnswer.useMutation();
-  // AI grading is available when the relay URL is configured (VITE_AI_SERVICE_URL).
-  const aiEnabled = isAiEvalConfigured();
+  const gradeMutation = trpc.ai.grade.useMutation();
+  // AI grading runs server-side (API → lexflow-relay → Gemini); always available.
+  const aiEnabled = true;
 
   const [index, setIndex] = useState(0);
   const [answerText, setAnswerText] = useState("");
@@ -82,25 +76,17 @@ export default function DiscursiveRunner({
     setRevealed(true);
   };
 
-  // Relay grades (owns prompt); we display the parsed score immediately, then
-  // fire-and-forget saveAnswer (Clerk-gated, persists the client-parsed result).
+  // The API resolves the prompt, calls the relay (→ Gemini), and returns the
+  // parsed {score, feedback}; we display it, then fire-and-forget saveAnswer
+  // (Clerk-gated, persists the result alongside the self-score).
   const gradeViaRelay = async (sessionId: string | null): Promise<void> => {
-    const token = await getToken();
-    const { text } = await aiComplete(
-      {
-        promptId: "oab-grade",
-        variables: buildGradeVariables({
-          statement: current.statement,
-          studentAnswer: answerText,
-          modelAnswer: answerKey?.modelAnswer ?? null,
-          legalBasis: answerKey?.legalBasis ?? null,
-          maxPoints: current.maxPoints,
-        }),
-      },
-      token,
-    );
-    const parsed = parseGradeResponse(text, current.maxPoints);
-    if (parsed === null) throw new Error("Não foi possível interpretar a avaliação da IA");
+    const parsed = await gradeMutation.mutateAsync({
+      statement: current.statement,
+      studentAnswer: answerText,
+      modelAnswer: answerKey?.modelAnswer ?? null,
+      legalBasis: answerKey?.legalBasis ?? null,
+      maxPoints: current.maxPoints,
+    });
     setAiResult(parsed); // inline display first — persistence is fire-and-forget
     gradePersistRef.current = saveAnswer
       .mutateAsync({

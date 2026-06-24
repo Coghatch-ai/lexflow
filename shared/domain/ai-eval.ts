@@ -1,11 +1,11 @@
 // shared/domain/ai-eval.ts
 //
 // AI evaluation for OAB questions: grading for discursive answers (2ª fase) and
-// explanation generation for objective questions (1ª fase). The actual model call
-// goes through the central mrhewbuc relay (project=lexflow, task=complete) — a
-// thin LLM proxy that owns the system prompt and user template server-side.
-// The client sends only the variable values; the relay handles prompt assembly.
-// Reply parsing stays here in the calling app. See relay v2 contract below.
+// explanation generation for objective questions (1ª fase). The variable builders
+// + response parsers here are used SERVER-SIDE by the tRPC routers (ai.grade,
+// admin.questions.generateExplanation): the API builds the variables, resolves the
+// server-owned prompt (api/lib/ai-prompts.ts), invokes lexflow-relay (→ Gemini),
+// and parses the reply. The prompt text no longer lives on a shared central relay.
 
 import { z } from "zod";
 import { clampScore } from "./discursive-attempt";
@@ -118,20 +118,3 @@ export function parseExplainResponse(text: string): AiExplanation | null {
     return null;
   }
 }
-
-// ── Relay v2 contract ─────────────────────────────────────────────────────────
-//
-// POST { project: "lexflow", task: "complete", payload: AiCompletePayload }
-// with Authorization: Bearer <clerk-token>
-//
-// The relay owns the system prompt, user template, json flag, and maxOutputTokens.
-// The client sends ONLY the promptId and the declared variable values (flat strings).
-// Missing or extra variables return 400. Old {system, user} shape returns 400.
-
-export type AiCompletePayload = {
-  promptId: string;
-  variables: Record<string, string>;
-};
-
-export const aiCompleteResponseSchema = z.object({ text: z.string() });
-export type AiCompleteResponse = z.infer<typeof aiCompleteResponseSchema>;

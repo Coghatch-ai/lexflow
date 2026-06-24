@@ -77,6 +77,68 @@ aws cloudformation describe-stacks --region sa-east-1 --stack-name lexflow-api-p
 
 ---
 
+## Outbound relay bootstrap (lexflow-relay)
+
+The relay (`lexflow-relay-{env}`; channels `ai`/`github`/`email`) deploys as part of the
+`lexflow-api-prod` stack via `deploy-api.yml`. It replaced the shared `mrhewbuc-issues` central
+Lambda. One-time prep **before the first deploy that includes it**:
+
+1. **[you] Re-apply the deploy policy** — `infra/deploy-policy.json` was broadened so the CI role
+   can manage `lexflow-relay-*` (Lambda + log group). Re-run put-role-policy (substitute the real
+   CloudFront distribution id for the placeholder):
+
+   ```bash
+   sed "s/DISTRIBUTION_ID_PLACEHOLDER/$DISTRIBUTION_ID/" infra/deploy-policy.json > /tmp/lexflow-deploy-policy.json
+   aws iam put-role-policy --role-name lexflow-github-actions-role \
+     --policy-name lexflow-deploy-policy \
+     --policy-document file:///tmp/lexflow-deploy-policy.json
+   ```
+
+2. **[you] Create the relay SSM params** (region sa-east-1) — `ai-*` + `github-token` are needed
+   immediately; the `smtp-*` set only when you actually wire email (the channel exists but isn't
+   invoked until then):
+
+   ```bash
+   R=sa-east-1
+   aws ssm put-parameter --region $R --name /lexflow/relay/prod/ai-api-key   --type SecureString --value '<gemini-key>'
+   aws ssm put-parameter --region $R --name /lexflow/relay/prod/ai-model     --type String       --value 'gemini-2.0-flash'
+   aws ssm put-parameter --region $R --name /lexflow/relay/prod/github-token --type SecureString --value '<fine-grained PAT>'
+   # email (later): smtp-host/smtp-port/smtp-secure/smtp-user/smtp-from (String) + smtp-password (SecureString)
+   ```
+
+   Use a **fresh** fine-grained GitHub PAT scoped to `Coghatch-ai/lexflow` Issues:Read+Write
+   (per-project secret isolation — do not reuse the shared mrhewbuc-issues PAT). `ai-model` is read
+   live (uncached) — swap it with `--overwrite`, no redeploy.
+
+3. **[you] Clerk webhook** (activates auto user-creation; CFN resolves the param at deploy, so it
+   must exist first or the stack fails):
+
+   ```bash
+   aws ssm put-parameter --region sa-east-1 --name /lexflow/api/prod/clerk-webhook-secret \
+     --type SecureString --value '<whsec_… from Clerk dashboard>'
+   ```
+
+   Then Clerk dashboard → Webhooks → add endpoint `https://api.probius.app/webhooks/clerk`,
+   subscribe `user.created` / `user.updated` / `user.deleted`.
+
+4. **Deploy** via `deploy-api.yml`. The relay has **no** Function URL — confirm:
+   `aws lambda get-function-url-config --function-name lexflow-relay-prod` → ResourceNotFound.
+
+5. **[you, after LexFlow is live] Cut LexFlow from `mrhewbuc-issues`** (separate repo): remove
+   `PROJECTS.lexflow` from its `src/config.ts`, drop the lexflow origins from its `template.yaml`
+   CORS, delete SSM `/mrhewbuc/issues/clerk-jwt-key-lexflow`. Leave the shared stack + shared
+   Gemini key / multi-repo PAT running for other projects.
+
+### Smoke-test the relay (post-deploy)
+
+```bash
+aws lambda invoke --region sa-east-1 --function-name lexflow-relay-prod \
+  --payload '{"channel":"github","action":"list"}' --cli-binary-format raw-in-base64-out /tmp/out.json
+cat /tmp/out.json   # {"success":true,"data":{"issues":[...]}}
+```
+
+---
+
 ## Custom domain setup (one-time, post-bootstrap)
 
 Custom domains: `my.probius.app` (frontend) and `api.probius.app` (API).

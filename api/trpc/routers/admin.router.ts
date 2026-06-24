@@ -7,6 +7,7 @@
 
 import { z } from "zod";
 import { and, asc, eq, inArray, sql, type SQL } from "drizzle-orm";
+import { TRPCError } from "@trpc/server";
 import { db } from "../../db/client";
 import {
   examCalendarEvents,
@@ -17,7 +18,13 @@ import {
 import { adminProcedure, router } from "../procedures";
 import { adminQuestionInputSchema } from "../../../shared/domain/admin-question";
 import { DEFAULT_SM2_CONFIG } from "../../../shared/domain/spaced-repetition";
-import { aiExplanationSchema } from "../../../shared/domain/ai-eval";
+import {
+  aiExplanationSchema,
+  buildExplainVariables,
+  parseExplainResponse,
+} from "../../../shared/domain/ai-eval";
+import { invokeRelay } from "../../lib/relay";
+import { resolveAiPrompt } from "../../lib/ai-prompts";
 
 const calendarEventInput = z.object({
   label: z.string().min(1),
@@ -362,8 +369,33 @@ export const adminRouter = router({
         return { upserted: rows.length };
       }),
 
+    // Generate a 4-pillar explanation via the relay (lexflow-relay → Gemini).
+    // Server-owned prompt; returns the parsed explanation for admin review before
+    // saveAiExplanation persists it. No DB write here.
+    generateExplanation: adminProcedure
+      .input(
+        z.object({
+          questionText: z.string().min(1),
+          options: z.array(z.string()).min(2),
+          correctAnswer: z.string().min(1),
+          legalBasis: z.string().nullable(),
+        }),
+      )
+      .mutation(async ({ input }) => {
+        const payload = resolveAiPrompt("oab-explain", buildExplainVariables(input));
+        const { text } = await invokeRelay<{ text: string }>(payload);
+        const parsed = parseExplainResponse(text);
+        if (parsed === null) {
+          throw new TRPCError({
+            code: "UNPROCESSABLE_CONTENT",
+            message: "A IA retornou um formato inesperado. Tente novamente.",
+          });
+        }
+        return parsed;
+      }),
+
     // Persist an admin-reviewed AI explanation for a question. The explanation is
-    // generated in the admin's browser (relay call) and sent here already parsed —
+    // generated via generateExplanation and sent here already parsed —
     // client-asserted, Clerk-gated to admin role. Mirrors discursive saveAnswer.
     saveAiExplanation: adminProcedure
       .input(z.object({ id: z.string().min(1), explanation: aiExplanationSchema }))

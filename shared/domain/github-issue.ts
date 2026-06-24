@@ -1,8 +1,9 @@
 // shared/domain/github-issue.ts
 //
 // Zod schema for the admin "create GitHub issue" form. The actual issue is
-// created by the central mrhewbuc-issues service (the lexflow Lambda has no NAT
-// egress); this schema only validates the client-side form payload.
+// created server-side via trpc.issues.* → lexflow-relay → GitHub (the API Lambda
+// has no NAT egress, so the relay makes the call); this schema only validates the
+// client-side form payload.
 
 import { z } from "zod";
 

@@ -21,9 +21,16 @@ text is Brazilian Portuguese (pt-BR). URLs/slugs are English kebab-case.
 - **Backend:** AWS (sa-east-1) Lambda + API Gateway (HTTP API) + tRPC 11 + Drizzle ORM +
   PostgreSQL (own `lexflow` database on the shared `mrhewbuc-rds` instance)
 - **Auth:** Clerk — single-user B2C, **no organizations**. Offline JWT verification via
-  `CLERK_JWT_KEY` (PEM public key). **POC: no webhook** — local `users` rows are created
-  manually with `pnpm db:create-user <clerk-user-id>` (the `webhook-routes.ts` path exists but
-  is inert until a Clerk webhook + `clerk-webhook-secret` SSM param are configured).
+  `CLERK_JWT_KEY` (PEM public key). Clerk **webhook is active** (`POST /webhooks/clerk`,
+  Svix-verified in `api/routes/webhook-routes.ts`): `user.created/updated/deleted` upsert the
+  local `users` row so signups auto-provision. Requires the `/lexflow/api/{env}/clerk-webhook-secret`
+  SSM param (`whsec_…`) + the endpoint configured in the Clerk dashboard. `pnpm db:create-user
+<clerk-user-id>` remains as a manual fallback.
+- **Outbound relay:** `lexflow-relay-{env}` — a **non-VPC**, channel-routed Lambda the API invokes
+  over IAM (`api/lib/relay.ts` → `api/relay/relay-handler.ts`); the VPC API Lambda has no internet
+  egress (no NAT), so all outbound calls go through it. Channels: `ai` (Gemini), `github` (issue
+  ops), `email` (SMTP scaffold). Secrets under SSM `/lexflow/relay/{env}/*`. This replaced the
+  shared `mrhewbuc-issues` central Lambda. See `docs/relay_lambda.md` + `docs/smtp_notification_setup.md`.
 - **Package manager:** pnpm 10. **Node:** 24 (Lambda runtime + CI).
 
 ## Data model — single-user B2C (NOT multi-tenant)
@@ -59,8 +66,11 @@ pnpm smoke        # End-to-end check of the data API against the DB (throwaway u
 
 `questions` (list/filter, disciplines, reviewQueue), `sessions` (record session + answers in one
 transaction, listRecent), `stats` (summary / byDiscipline / byExamBoard / byResponseTime /
-recurringErrors, computed on read), `goals` (list/create/update/delete), `users.me`. All are
-`protectedProcedure` (require a local users row).
+recurringErrors, computed on read), `goals` (list/create/update/delete), `users.me`,
+`ai.grade` (2ª-fase discursive grading via the relay → Gemini; `admin.questions.generateExplanation`
+does 1ª-fase explanations). Most are `protectedProcedure`; `issues` (create/list/get/close GitHub
+issues via the relay → GitHub) is `adminProcedure`. The relay owns the secrets; the API owns the
+server-side prompts (`api/lib/ai-prompts.ts`).
 
 The whole bolt UI is now wired onto these routers (no more mock data). Navigation uses Wouter.
 Most pages pass full strict lint; `TestingPage`, `StudyPlanPage`, `AdminPage`, and the three
@@ -89,8 +99,14 @@ conventions.md playbook A/B/C before they can be un-quarantined).
   (`mrhewbuc-rds.ctaccs4ugjxb.sa-east-1.rds.amazonaws.com`). Never use the RDS master from the app.
 - **Network:** shared VPC, SG `sg-0d065bb06c8c04a68`, subnets `subnet-0cc43286651b1e2d9`,
   `subnet-03602b4d349546b6b`, `subnet-0ffadc50f6a7a1f26`. **No NAT.**
-- **Secrets:** SSM Parameter Store at `/lexflow/api/{env}/*` (resolved at deploy by `template.yaml`).
-- **Stack:** `lexflow-api-prod`. Frontend bucket `lexflow-frontend-mrhewbuc` + CloudFront `E31A7ZWGZ815JT`.
+- **Secrets:** SSM Parameter Store at `/lexflow/api/{env}/*` (API: db-_, clerk-jwt-key,
+  clerk-webhook-secret) and `/lexflow/relay/{env}/_`(relay: ai-api-key, ai-model, github-token,
+smtp-*) — resolved at deploy by`template.yaml`, or fetched at runtime by the relay.
+- **Lambda VPC endpoint:** the VPC API Lambda invokes the relay through the shared
+  `com.amazonaws.sa-east-1.lambda` interface endpoint already present in the VPC
+  (`vpce-0e7bd5c5b3c6f5e84`, private DNS, same 3 subnets) — no NAT, no per-stack endpoint.
+- **Stack:** `lexflow-api-prod` (now also holds `lexflow-relay-{env}` + its log group).
+  Frontend bucket `lexflow-frontend-mrhewbuc` + CloudFront `E31A7ZWGZ815JT`.
 - **Live (deployed):** API `https://api.probius.app` (execute-api default still resolves);
   frontend `https://my.probius.app` (CloudFront `d1qru6bxdnwd2r.cloudfront.net` still resolves).
   DNS managed in Cloudflare (CNAME, DNS-only/grey cloud).

@@ -4,13 +4,7 @@ import { trpc } from '../shared/lib/trpc';
 import { useLov } from '../shared/hooks/use-lov';
 import { adminQuestionInputSchema, type AdminQuestionInput } from '@shared/domain/admin-question';
 import { BLANK_FORM } from './admin-csv-helpers';
-import { useGetToken } from '../auth';
-import { aiComplete, isAiEvalConfigured } from '../shared/lib/ai-eval-service';
-import {
-  buildExplainVariables,
-  parseExplainResponse,
-  type AiExplanation,
-} from '@shared/domain/ai-eval';
+import { type AiExplanation } from '@shared/domain/ai-eval';
 import AiExplanationView from '../shared/components/AiExplanationView';
 
 interface LegislationFieldsProps {
@@ -59,7 +53,6 @@ interface AiExplanationPanelProps {
   options: string[];
   correctAnswer: string;
   legalBasis: string | null;
-  getToken: () => Promise<string | null>;
   onSaved: () => void;
 }
 
@@ -69,36 +62,31 @@ function AiExplanationPanel({
   options,
   correctAnswer,
   legalBasis,
-  getToken,
   onSaved,
 }: AiExplanationPanelProps): ReactElement {
   const [preview, setPreview] = useState<AiExplanation | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const generateMutation = trpc.admin.questions.generateExplanation.useMutation();
   const saveMutation = trpc.admin.questions.saveAiExplanation.useMutation({
     onSuccess: onSaved,
     onError: (e) => { setError(e.message); },
   });
 
+  // The API resolves the prompt, calls the relay (→ Gemini), and returns the
+  // parsed 4-pillar explanation for review before saveAiExplanation persists it.
   const handleGenerate = async (): Promise<void> => {
     setLoading(true);
     setError(null);
     setPreview(null);
     try {
-      const token = await getToken();
-      const { text } = await aiComplete(
-        {
-          promptId: "oab-explain",
-          variables: buildExplainVariables({ questionText, options, correctAnswer, legalBasis }),
-        },
-        token,
-      );
-      const parsed = parseExplainResponse(text);
-      if (parsed === null) {
-        setError('A IA retornou um formato inesperado. Tente novamente.');
-        return;
-      }
+      const parsed = await generateMutation.mutateAsync({
+        questionText,
+        options,
+        correctAnswer,
+        legalBasis,
+      });
       setPreview(parsed);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Falha ao gerar explicação');
@@ -152,7 +140,6 @@ export function QuestionForm({
   onCancel: () => void;
 }): ReactElement {
   const utils = trpc.useUtils();
-  const getToken = useGetToken();
   const isEdit = initial !== null;
 
   const [form, setForm] = useState<AdminQuestionInput>(initial ?? BLANK_FORM);
@@ -366,14 +353,13 @@ export function QuestionForm({
         />
       </div>
 
-      {isAiEvalConfigured() && isEdit && form.id !== undefined && form.id.length > 0 && (
+      {isEdit && form.id !== undefined && form.id.length > 0 && (
         <AiExplanationPanel
           questionId={form.id}
           questionText={form.questionText}
           options={form.options}
           correctAnswer={form.correctAnswer}
           legalBasis={form.legalBasis ?? null}
-          getToken={getToken}
           onSaved={invalidate}
         />
       )}

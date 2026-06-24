@@ -87,11 +87,19 @@ Resources:
           DB_USER: !Sub "{{resolve:ssm:/lexflow/api/${Environment}/db-user}}"
           DB_PASSWORD: !Sub "{{resolve:ssm:/lexflow/api/${Environment}/db-password}}"
           CLERK_JWT_KEY: !Sub "{{resolve:ssm:/lexflow/api/${Environment}/clerk-jwt-key}}"
-          # Clerk webhook is deferred for the POC (users are created manually via
-          # `pnpm db:create-user`). When the webhook lands, add the
-          # /lexflow/api/${Environment}/clerk-webhook-secret SSM param and restore:
-          # CLERK_WEBHOOK_SECRET: !Sub "{{resolve:ssm:/lexflow/api/${Environment}/clerk-webhook-secret}}"
+          # Clerk webhook (POST /webhooks/clerk): signups auto-create the local
+          # users row. The SSM param /lexflow/api/${Environment}/clerk-webhook-secret
+          # must exist (whsec_...) before deploy — CFN resolves it here.
+          CLERK_WEBHOOK_SECRET: !Sub "{{resolve:ssm:/lexflow/api/${Environment}/clerk-webhook-secret}}"
           ENVIRONMENT: !Ref Environment
+      # Invoke the outbound relay (non-VPC sender) for the ai/github/email channels.
+      # Name-derived ARN (a plain !Sub string, NOT !GetAtt) so the API function's
+      # role takes no CloudFormation dependency on the relay function.
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:lexflow-relay-${Environment}"
       Events:
         ApiEvent:
           Type: HttpApi
@@ -99,6 +107,55 @@ Resources:
             ApiId: !Ref LexFlowHttpApi
             Path: /{proxy+}
             Method: ANY
+
+  LexFlowRelayLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/lexflow-relay-${Environment}"
+      RetentionInDays: 7
+
+  # Outbound relay — NON-VPC (needs internet egress for Gemini / GitHub / SMTP).
+  # Invoked ONLY by LexFlowApiFunction via IAM (no Function URL / API event), so
+  # it is unreachable from a browser. The VPC-bound API function reaches the Lambda
+  # control plane to invoke it through the shared interface endpoint already present
+  # in this VPC (com.amazonaws.sa-east-1.lambda, vpce-0e7bd5c5b3c6f5e84, private DNS
+  # on the same 3 subnets) — so no NAT and no per-stack VPC endpoint are needed.
+  # Channel-routed: ai (Gemini) / github (issue ops) / email (SMTP scaffold).
+  LexFlowRelayFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: LexFlowRelayLogGroup
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints:
+          - api/relay/relay-handler.ts
+        Minify: true
+        Target: es2022
+        Sourcemap: true
+    Properties:
+      FunctionName: !Sub lexflow-relay-${Environment}
+      CodeUri: .
+      Handler: api/relay/relay-handler.handler
+      MemorySize: 256
+      Tracing: PassThrough
+      # NO VpcConfig — must reach the public internet.
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+          # SMTP / Gemini key / GitHub PAT are fetched from here at runtime (KMS-decrypted).
+          SSM_PREFIX: !Sub "/lexflow/relay/${Environment}"
+          # Repo is server-derived — the caller (API) never picks it.
+          GITHUB_REPO: Coghatch-ai/lexflow
+      Policies:
+        - SSMParameterReadPolicy:
+            ParameterName: !Sub "lexflow/relay/${Environment}/*"
+        - Statement:
+            - Effect: Allow
+              Action: kms:Decrypt
+              Resource: "*"
+              Condition:
+                StringEquals:
+                  kms:ViaService: !Sub "ssm.${AWS::Region}.amazonaws.com"
 
 Outputs:
   ApiUrl:
@@ -112,3 +169,6 @@ Outputs:
     Value: !GetAtt LexFlowHttpApi.DomainName.RegionalDomainName
   FunctionArn:
     Value: !GetAtt LexFlowApiFunction.Arn
+  RelayFunctionArn:
+    Description: Outbound relay Lambda ARN (invoked by the API for ai/github/email)
+    Value: !GetAtt LexFlowRelayFunction.Arn
