@@ -14,6 +14,7 @@ export function ResultPage(): ReactElement {
     setResult(null);
     void utils.stats.summary.invalidate();
     void utils.questions.dueCount.invalidate();
+    void utils.questions.reviewQueue.invalidate();
     navigate("/");
   }
 
@@ -30,13 +31,14 @@ export function ResultPage(): ReactElement {
 
   const pct = accuracyPct(result.correctAnswers, result.totalQuestions);
   const tone = pct >= 70 ? "text-pos" : pct >= 50 ? "text-warn" : "text-neg";
+  const heading = result.mode === "review" ? "Revisão concluída" : "Sessão concluída";
 
   return (
     <div className="flex min-h-screen flex-col bg-paper">
       <div className="flex-1 px-4 py-8 pb-28">
         {/* Score hero */}
         <div className="panel-ink stagger flex flex-col items-center px-6 py-10 text-center">
-          <p className="eyebrow !text-seal-bright">Sessão concluída</p>
+          <p className="eyebrow !text-seal-bright">{heading}</p>
           <p className={`mt-3 font-display text-6xl font-bold tnum ${tone}`}>{pct}%</p>
           <p className="mt-2 text-sm text-ink-mute">
             {result.correctAnswers} de {result.totalQuestions} corretas · {result.discipline}

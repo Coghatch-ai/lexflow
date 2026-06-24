@@ -9,6 +9,12 @@ import { createContext, useContext } from "react";
 
 export type Difficulty = "easy" | "medium" | "hard";
 
+// A session is either fresh practice (questions picked by discipline) or a
+// spaced-repetition review (questions pulled from the due queue). Both run the
+// same QuestionRunner UI and record via sessions.record; the tag only changes
+// the Result screen wording.
+export type PracticeMode = "practice" | "review";
+
 export type AnswerRecap = {
   questionId: string;
   questionText: string;
@@ -21,6 +27,7 @@ export type AnswerRecap = {
 export type PracticeResult = {
   discipline: string;
   difficulty: Difficulty;
+  mode: PracticeMode;
   totalQuestions: number;
   correctAnswers: number;
   recap: AnswerRecap[];

@@ -1,6 +1,7 @@
-import { useEffect, type ReactElement } from "react";
-import { useLocation } from "wouter";
-import { Flame, Play, Target, TrendingUp } from "lucide-react";
+import { useEffect, useMemo, type ReactElement } from "react";
+import { Link, useLocation } from "wouter";
+import { ChevronRight, Flame, Play, Target, TrendingUp } from "lucide-react";
+import { goalProgressPct } from "@shared/domain/scoring";
 import { useSession } from "../auth";
 import { trpc } from "../lib/trpc";
 import { usePracticeState } from "../state/practice-context";
@@ -13,21 +14,30 @@ export function HomePage(): ReactElement {
   const disciplinesQ = trpc.questions.disciplines.useQuery();
   const summaryQ = trpc.stats.summary.useQuery();
   const dueQ = trpc.questions.dueCount.useQuery();
+  const goalsQ = trpc.goals.list.useQuery();
+  const byDisciplineQ = trpc.stats.byDiscipline.useQuery();
 
   const disciplines = disciplinesQ.data;
 
   // Default to the first discipline once the catalog loads.
   useEffect(() => {
     if (discipline === "" && disciplines !== undefined && disciplines.length > 0) {
-      setDiscipline(disciplines[0]);
+      setDiscipline(disciplines[0] ?? "");
     }
   }, [discipline, disciplines, setDiscipline]);
+
+  const accuracyByDiscipline = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const d of byDisciplineQ.data ?? []) map.set(d.discipline, d.accuracy);
+    return map;
+  }, [byDisciplineQ.data]);
 
   const firstName = (user?.name ?? "").split(" ")[0] ?? "";
   const accuracy = summaryQ.data?.accuracy ?? 0;
   const totalAnswered = summaryQ.data?.totalAnswered ?? 0;
   const totalSessions = summaryQ.data?.totalSessions ?? 0;
   const dueCount = dueQ.data?.count ?? 0;
+  const goals = (goalsQ.data ?? []).slice(0, 2);
   const ready = discipline !== "" && disciplines !== undefined;
 
   function start(): void {
@@ -44,8 +54,14 @@ export function HomePage(): ReactElement {
         <p className="mt-1 text-sm text-ink-mute">Pronto para algumas questões da OAB?</p>
       </header>
 
-      {/* Due-for-review banner */}
-      <div className="panel-ink flex items-center justify-between px-5 py-4">
+      {/* Due-for-review banner -> review flow */}
+      <button
+        type="button"
+        onClick={() => {
+          navigate("/review");
+        }}
+        className="panel-ink flex items-center justify-between px-5 py-4 text-left"
+      >
         <div className="flex items-center gap-3">
           <Flame className="h-6 w-6 text-seal-bright" strokeWidth={1.75} />
           <div>
@@ -53,7 +69,8 @@ export function HomePage(): ReactElement {
             <p className="mt-0.5 text-xs text-ink-mute">questões para revisar</p>
           </div>
         </div>
-      </div>
+        <ChevronRight className="h-5 w-5 text-ink-mute" />
+      </button>
 
       {/* Quick stats */}
       <div className="grid grid-cols-3 gap-3">
@@ -103,6 +120,46 @@ export function HomePage(): ReactElement {
           Começar prática
         </button>
       </div>
+
+      {/* Goals snapshot */}
+      <section className="flex flex-col gap-2">
+        <div className="flex items-center justify-between">
+          <p className="eyebrow">Metas</p>
+          <Link href="/goals" className="text-xs font-semibold text-seal">
+            {goals.length > 0 ? "Ver todas" : "Definir meta"}
+          </Link>
+        </div>
+        {goals.length === 0 ? (
+          <Link href="/goals" className="card-default text-sm text-ink-mute">
+            Defina uma meta de acerto por disciplina para acompanhar seu progresso.
+          </Link>
+        ) : (
+          <div className="card-default flex flex-col gap-3">
+            {goals.map((g) => {
+              const current = accuracyByDiscipline.get(g.discipline) ?? 0;
+              const progress = goalProgressPct(current, g.targetAccuracy);
+              return (
+                <div key={g.id}>
+                  <div className="mb-1 flex items-baseline justify-between gap-2">
+                    <span className="truncate text-sm font-medium text-ink">{g.discipline}</span>
+                    <span className="shrink-0 text-xs tnum text-ink-mute">
+                      {current}% / {g.targetAccuracy}%
+                    </span>
+                  </div>
+                  <div className="h-2 overflow-hidden rounded-full bg-line">
+                    <div
+                      className={`h-full rounded-full transition-all ${
+                        current >= g.targetAccuracy ? "bg-pos" : "bg-seal"
+                      }`}
+                      style={{ width: `${progress}%` }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
     </div>
   );
 }
