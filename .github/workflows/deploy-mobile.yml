@@ -1,0 +1,50 @@
+name: Deploy Mobile
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/mobile/**"
+      - "shared/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "tailwind.config.js"
+      - "tsconfig.mobile.json"
+      - "tsconfig.base.json"
+      - ".github/workflows/deploy-mobile.yml"
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: PROD
+    env:
+      AWS_REGION: sa-east-1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "pnpm"
+      - run: pnpm install --frozen-lockfile
+      - name: Typecheck Mobile
+        run: pnpm exec tsc --noEmit -p tsconfig.mobile.json
+      - name: Build Mobile
+        run: pnpm exec vite build --config apps/mobile/vite.config.ts
+        env:
+          VITE_CLERK_PUBLISHABLE_KEY: ${{ secrets.VITE_CLERK_PUBLISHABLE_KEY }}
+          VITE_API_URL: ${{ secrets.VITE_API_URL }}
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - run: aws s3 sync dist/mobile/ s3://lexflow-mobile-frontend-mrhewbuc/ --delete
+      - run: aws cloudfront create-invalidation --distribution-id ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID_MOBILE }} --paths "/*"

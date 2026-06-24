@@ -1,0 +1,15 @@
+{
+  // Mobile-first POC frontend (apps/mobile). Mirrors tsconfig.json: browser libs,
+  // react-jsx, and the backend AppRouter type-import (pulls the api/ graph for
+  // end-to-end tRPC typing). Checked at base strictness like the main app's UI.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["esnext", "dom", "dom.iterable"],
+    "jsx": "react-jsx",
+    "types": ["node", "vite/client"],
+    "incremental": true,
+    "tsBuildInfoFile": "./node_modules/.cache/tsbuildinfo.mobile"
+  },
+  "include": ["apps/mobile/src/**/*"],
+  "exclude": ["node_modules", "dist", "build", ".aws-sam"]
+}

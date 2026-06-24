@@ -88,6 +88,7 @@ export default [
   {
     files: [
       "app/src/**/*.ts",
+      "apps/mobile/src/**/*.ts",
       "api/**/*.ts",
       "shared/**/*.ts",
       "drizzle/**/*.ts",
@@ -100,7 +101,7 @@ export default [
       parserOptions: {
         ecmaVersion: "latest",
         sourceType: "module",
-        project: ["./tsconfig.api.json", "./tsconfig.json"],
+        project: ["./tsconfig.api.json", "./tsconfig.json", "./tsconfig.mobile.json"],
         tsconfigRootDir: import.meta.dirname,
       },
       globals: { ...globals.browser, ...globals.node },
@@ -119,13 +120,13 @@ export default [
   },
   // Authored React components (.tsx) — relaxed function limits for JSX.
   {
-    files: ["app/src/**/*.tsx"],
+    files: ["app/src/**/*.tsx", "apps/mobile/src/**/*.tsx"],
     languageOptions: {
       parser: tsPlugin.parser,
       parserOptions: {
         ecmaVersion: "latest",
         sourceType: "module",
-        project: ["./tsconfig.api.json", "./tsconfig.json"],
+        project: ["./tsconfig.api.json", "./tsconfig.json", "./tsconfig.mobile.json"],
         tsconfigRootDir: import.meta.dirname,
         ecmaFeatures: { jsx: true },
       },
@@ -151,7 +152,11 @@ export default [
   },
   // Auth adapter folders: direct @clerk/* imports allowed (this is the adapter).
   {
-    files: ["app/src/auth/**/*.{ts,tsx}", "api/lib/auth-provider/**/*.ts"],
+    files: [
+      "app/src/auth/**/*.{ts,tsx}",
+      "apps/mobile/src/auth/**/*.{ts,tsx}",
+      "api/lib/auth-provider/**/*.ts",
+    ],
     rules: {
       "no-restricted-imports": "off",
     },
