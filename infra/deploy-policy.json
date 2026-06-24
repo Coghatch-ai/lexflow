@@ -118,14 +118,19 @@
       "Action": ["s3:PutObject", "s3:GetObject", "s3:DeleteObject", "s3:ListBucket"],
       "Resource": [
         "arn:aws:s3:::lexflow-frontend-mrhewbuc",
-        "arn:aws:s3:::lexflow-frontend-mrhewbuc/*"
+        "arn:aws:s3:::lexflow-frontend-mrhewbuc/*",
+        "arn:aws:s3:::lexflow-mobile-frontend-mrhewbuc",
+        "arn:aws:s3:::lexflow-mobile-frontend-mrhewbuc/*"
       ]
     },
     {
       "Sid": "CloudFrontInvalidation",
       "Effect": "Allow",
       "Action": ["cloudfront:CreateInvalidation"],
-      "Resource": "arn:aws:cloudfront::394559824800:distribution/DISTRIBUTION_ID_PLACEHOLDER"
+      "Resource": [
+        "arn:aws:cloudfront::394559824800:distribution/DISTRIBUTION_ID_PLACEHOLDER",
+        "arn:aws:cloudfront::394559824800:distribution/E2A8P4MSEE55DT"
+      ]
     }
   ]
 }
