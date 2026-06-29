@@ -150,10 +150,7 @@
       "Sid": "CloudFrontInvalidation",
       "Effect": "Allow",
       "Action": ["cloudfront:CreateInvalidation"],
-      "Resource": [
-        "arn:aws:cloudfront::394559824800:distribution/DISTRIBUTION_ID_PLACEHOLDER",
-        "arn:aws:cloudfront::394559824800:distribution/E2A8P4MSEE55DT"
-      ]
+      "Resource": "arn:aws:cloudfront::394559824800:distribution/*"
     }
   ]
 }
