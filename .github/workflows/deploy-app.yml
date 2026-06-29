@@ -40,6 +40,10 @@ jobs:
         env:
           VITE_CLERK_PUBLISHABLE_KEY: ${{ secrets.VITE_CLERK_PUBLISHABLE_KEY }}
           VITE_API_URL: ${{ secrets.VITE_API_URL }}
+          # Central mrhewbuc-issues Function URL (public; auth is the Clerk JWT +
+          # origin allowlist, repo scoped server-side). Not a secret — same public
+          # value maggie ships in its config.
+          VITE_ISSUES_FUNCTION_URL: https://calvwcs2st3frn6qkfwj6rhdta0foavj.lambda-url.sa-east-1.on.aws/
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}

@@ -32,6 +32,12 @@ export function setTokenGetter(getter: () => Promise<string | null>): void {
   getToken = getter;
 }
 
+// Same injected Clerk getter, exposed for non-tRPC fetch clients (e.g. the central
+// mrhewbuc-issues Function URL client) so they share one session-token source.
+export async function getAuthToken(): Promise<string | null> {
+  return getToken !== null ? getToken() : null;
+}
+
 const apiUrl = import.meta.env.VITE_API_URL;
 if (apiUrl.length === 0) {
   throw new Error("VITE_API_URL is required");

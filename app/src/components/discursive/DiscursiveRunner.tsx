@@ -8,6 +8,8 @@
 
 import { useEffect, useRef, useState, type ReactElement } from "react";
 import { trpc } from "../../shared/lib/trpc";
+import { pollRelayJob } from "../../shared/lib/relay-poll";
+import { parseGradeResponse } from "@shared/domain/ai-eval";
 import DiscursiveQuestionCard from "./DiscursiveQuestionCard";
 import type { AiResult, AnswerKey, CollectedAnswer, DiscursiveQuestion, Lov } from "./types";
 
@@ -80,13 +82,17 @@ export default function DiscursiveRunner({
   // parsed {score, feedback}; we display it, then fire-and-forget saveAnswer
   // (Clerk-gated, persists the result alongside the self-score).
   const gradeViaRelay = async (sessionId: string | null): Promise<void> => {
-    const parsed = await gradeMutation.mutateAsync({
+    // Enqueue the grading job, poll until the relay writes the result, then parse.
+    const { jobId } = await gradeMutation.mutateAsync({
       statement: current.statement,
       studentAnswer: answerText,
       modelAnswer: answerKey?.modelAnswer ?? null,
       legalBasis: answerKey?.legalBasis ?? null,
       maxPoints: current.maxPoints,
     });
+    const data = await pollRelayJob(() => utils.relay.job.fetch({ jobId }, { staleTime: 0 }));
+    const parsed = parseGradeResponse((data as { text: string }).text, current.maxPoints);
+    if (parsed === null) throw new Error("Não foi possível interpretar a avaliação da IA");
     setAiResult(parsed); // inline display first — persistence is fire-and-forget
     gradePersistRef.current = saveAnswer
       .mutateAsync({

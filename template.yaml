@@ -92,14 +92,23 @@ Resources:
           # must exist (whsec_...) before deploy — CFN resolves it here.
           CLERK_WEBHOOK_SECRET: !Sub "{{resolve:ssm:/lexflow/api/${Environment}/clerk-webhook-secret}}"
           ENVIRONMENT: !Ref Environment
-      # Invoke the outbound relay (non-VPC sender) for the ai/github/email channels.
-      # Name-derived ARN (a plain !Sub string, NOT !GetAtt) so the API function's
-      # role takes no CloudFormation dependency on the relay function.
+          # Relay outbox bucket: the API PutObjects jobs/{userId}/{id}.json and reads
+          # results/{userId}/{id}.json. Literal !Sub (not !Ref) so the function takes
+          # no CloudFormation dependency on the bucket (avoids the S3-event cycle).
+          OUTBOX_BUCKET: !Sub "lexflow-relay-outbox-${Environment}"
+      # Enqueue relay jobs + read their results via the relay outbox bucket (reached
+      # through the free S3 gateway endpoint — no NAT, no Lambda interface endpoint).
+      # Literal ARN (not !Ref) so the role takes no dependency on the bucket resource.
       Policies:
         - Statement:
-            - Effect: Allow
-              Action: lambda:InvokeFunction
-              Resource: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:lexflow-relay-${Environment}"
+            - Sid: RelayEnqueue
+              Effect: Allow
+              Action: s3:PutObject
+              Resource: !Sub "arn:aws:s3:::lexflow-relay-outbox-${Environment}/jobs/*"
+            - Sid: RelayReadResult
+              Effect: Allow
+              Action: s3:GetObject
+              Resource: !Sub "arn:aws:s3:::lexflow-relay-outbox-${Environment}/results/*"
       Events:
         ApiEvent:
           Type: HttpApi
@@ -114,13 +123,12 @@ Resources:
       LogGroupName: !Sub "/aws/lambda/lexflow-relay-${Environment}"
       RetentionInDays: 7
 
-  # Outbound relay — NON-VPC (needs internet egress for Gemini / GitHub / SMTP).
-  # Invoked ONLY by LexFlowApiFunction via IAM (no Function URL / API event), so
-  # it is unreachable from a browser. The VPC-bound API function reaches the Lambda
-  # control plane to invoke it through the shared interface endpoint already present
-  # in this VPC (com.amazonaws.sa-east-1.lambda, vpce-0e7bd5c5b3c6f5e84, private DNS
-  # on the same 3 subnets) — so no NAT and no per-stack VPC endpoint are needed.
-  # Channel-routed: ai (Gemini) / github (issue ops) / email (SMTP scaffold).
+  # Outbound relay — NON-VPC (needs internet egress for Gemini / SMTP). S3-triggered:
+  # the VPC API drops a job in the relay outbox bucket (jobs/ prefix) via the free S3
+  # gateway endpoint, and this function runs on the ObjectCreated event, writes the
+  # result under results/, and deletes the job. No Lambda interface endpoint needed.
+  # Channel-routed: ai (Gemini) / email (SMTP scaffold). GitHub issues moved to the
+  # central mrhewbuc-issues service (browser-direct).
   LexFlowRelayFunction:
     Type: AWS::Serverless::Function
     DependsOn: LexFlowRelayLogGroup
@@ -142,10 +150,21 @@ Resources:
       Environment:
         Variables:
           ENVIRONMENT: !Ref Environment
-          # SMTP / Gemini key / GitHub PAT are fetched from here at runtime (KMS-decrypted).
+          # SMTP / Gemini key fetched from here at runtime (KMS-decrypted).
           SSM_PREFIX: !Sub "/lexflow/relay/${Environment}"
-          # Repo is server-derived — the caller (API) never picks it.
-          GITHUB_REPO: Coghatch-ai/lexflow
+      Events:
+        # Fires when the API enqueues a job under the jobs/ prefix. The prefix filter
+        # is essential: result writes land under results/ and must NOT re-trigger.
+        OutboxJob:
+          Type: S3
+          Properties:
+            Bucket: !Ref LexFlowRelayOutboxBucket
+            Events: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: jobs/
       Policies:
         - SSMParameterReadPolicy:
             ParameterName: !Sub "lexflow/relay/${Environment}/*"
@@ -156,6 +175,32 @@ Resources:
               Condition:
                 StringEquals:
                   kms:ViaService: !Sub "ssm.${AWS::Region}.amazonaws.com"
+            - Sid: RelayConsumeJob
+              Effect: Allow
+              Action: [s3:GetObject, s3:DeleteObject]
+              Resource: !Sub "arn:aws:s3:::lexflow-relay-outbox-${Environment}/jobs/*"
+            - Sid: RelayWriteResult
+              Effect: Allow
+              Action: s3:PutObject
+              Resource: !Sub "arn:aws:s3:::lexflow-relay-outbox-${Environment}/results/*"
+
+  # Relay outbox bucket for the async job pattern (jobs/ in → relay → results/ out).
+  # Private; a 1-day lifecycle clears stale jobs + results. The free S3 gateway
+  # endpoint in the VPC lets the API Lambda reach it with no NAT.
+  LexFlowRelayOutboxBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "lexflow-relay-outbox-${Environment}"
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-jobs
+            Status: Enabled
+            ExpirationInDays: 1
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
 
 Outputs:
   ApiUrl:

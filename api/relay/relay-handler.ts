@@ -1,30 +1,37 @@
 // api/relay/relay-handler.ts
 //
-// Per-project outbound "relay" Lambda — the non-VPC sender that the VPC-bound
-// API Lambda invokes (via lambda:InvokeFunction) to reach external services it
-// cannot hit from inside the VPC (no NAT). Replaces the shared mrhewbuc-issues
-// central Lambda for LexFlow. Channel-routed: a new channel is one more case in
-// the dispatch switch, not a new Lambda.
+// Per-project outbound "relay" Lambda — the non-VPC sender for services the
+// VPC-bound API Lambda can't reach (no NAT, no Lambda interface endpoint). It is
+// S3-triggered: the API enqueues a job to the relay outbox bucket
+// (jobs/{userId}/{jobId}.json) via the free S3 gateway endpoint; this handler runs
+// on the ObjectCreated event, processes the channel, writes the result to
+// results/{userId}/{jobId}.json, and deletes the job. Channels:
 //
-//   ai     → Google Gemini completion (API resolves the prompt; relay forwards)
-//   github → GitHub issue ops (create/list/get/close) against a FIXED repo
-//   email  → SMTP via nodemailer (scaffold; live once /smtp-* SSM params exist)
+//   ai    → Google Gemini completion (API resolves the prompt; relay forwards)
+//   email → SMTP via nodemailer (scaffold; live once /smtp-* SSM params exist)
 //
-// Trust boundary: invoked ONLY by the LexFlow API role (IAM-gated) — no Function
-// URL / API Gateway event, so it is unreachable from a browser and can never act
-// as an open relay. The API has already verified the Clerk JWT + role; the relay
-// does no auth of its own. Secrets (Gemini key, GitHub PAT, SMTP creds) are read
+// GitHub issues moved back to the central mrhewbuc-issues service (browser-direct),
+// so there is no github channel here anymore.
+//
+// Trust boundary: triggered only by objects the API wrote to the private outbox
+// bucket (the API already verified the Clerk JWT + role). No Function URL / API
+// event → unreachable from a browser. Secrets (Gemini key, SMTP creds) are read
 // from SSM under SSM_PREFIX at runtime, KMS-decrypted, and cached for the life of
 // the warm container — never placed in the function's environment configuration.
 
 import nodemailer, { type Transporter } from "nodemailer";
 import { SSMClient, GetParameterCommand, GetParametersCommand } from "@aws-sdk/client-ssm";
+import {
+  S3Client,
+  GetObjectCommand,
+  PutObjectCommand,
+  DeleteObjectCommand,
+} from "@aws-sdk/client-s3";
+import type { S3Event } from "aws-lambda";
 
 const REGION = process.env.AWS_REGION ?? "sa-east-1";
 // Set by the SAM template to /lexflow/relay/${Environment}.
 const SSM_PREFIX = process.env.SSM_PREFIX ?? "/lexflow/relay/prod";
-// Repo is server-derived — the caller never picks it (scoping is the boundary).
-const GITHUB_REPO = process.env.GITHUB_REPO ?? "Coghatch-ai/lexflow";
 
 const DEFAULT_AI_MODEL = "gemini-2.0-flash";
 // Bound the upstream LLM call below the Lambda timeout so a hung provider returns
@@ -32,8 +39,9 @@ const DEFAULT_AI_MODEL = "gemini-2.0-flash";
 const AI_TIMEOUT_MS = 25_000;
 
 const ssm = new SSMClient({ region: REGION });
+const s3 = new S3Client({ region: REGION });
 
-// ── Channel-tagged event (discriminated union; sent by api/lib/relay.ts) ───────
+// ── Channel-tagged event (the job payload written by api/lib/relay.ts) ──────────
 interface AiEvent {
   channel: "ai";
   // RESOLVED prompt: the API already interpolated the template. The relay never
@@ -43,14 +51,6 @@ interface AiEvent {
   json?: boolean;
   maxOutputTokens?: number;
 }
-interface GithubEvent {
-  channel: "github";
-  action: "list" | "get" | "create" | "close";
-  title?: string;
-  body?: string;
-  labels?: string[];
-  number?: number;
-}
 interface EmailEvent {
   channel: "email";
   to: string;
@@ -58,7 +58,7 @@ interface EmailEvent {
   body: string;
   html?: string;
 }
-type RelayEvent = AiEvent | GithubEvent | EmailEvent;
+type RelayEvent = AiEvent | EmailEvent;
 
 // Success carries a channel-specific `data`; failure carries an error string.
 type RelayResult = { success: true; data: unknown } | { success: false; error: string };
@@ -139,159 +139,6 @@ async function aiChannel(e: AiEvent): Promise<string> {
   return geminiComplete(apiKey, model, e);
 }
 
-// ── github channel (issue ops; declarative registry) ───────────────────────────
-function author(u: { login?: string; avatar_url?: string } | undefined): {
-  login: string | null;
-  avatarUrl: string | null;
-} {
-  return { login: u?.login ?? null, avatarUrl: u?.avatar_url ?? null };
-}
-
-interface IssueOp {
-  method: "GET" | "POST" | "PATCH";
-  sub: (e: GithubEvent) => string;
-  requires?: ReadonlyArray<"title" | "body" | "number">;
-  body?: (e: GithubEvent) => unknown;
-  // Also GET the comment thread (in parallel) for composite read views.
-  withComments?: boolean;
-  transform: (data: unknown, e: GithubEvent, comments?: unknown) => unknown;
-}
-
-const ISSUE_OPS: Record<GithubEvent["action"], IssueOp> = {
-  list: {
-    method: "GET",
-    sub: () => "?state=open&per_page=50&sort=created&direction=desc",
-    transform: (data) => {
-      const rows = data as Array<{
-        number: number;
-        title: string;
-        html_url: string;
-        created_at: string;
-        pull_request?: unknown;
-        labels: Array<{ name: string }>;
-      }>;
-      const issues = rows
-        .filter((r) => r.pull_request === undefined)
-        .map((r) => ({
-          number: r.number,
-          title: r.title,
-          url: r.html_url,
-          createdAt: r.created_at,
-          labels: r.labels.map((l) => l.name),
-        }));
-      return { issues };
-    },
-  },
-  get: {
-    method: "GET",
-    requires: ["number"],
-    sub: (e) => `/${String(e.number)}`,
-    withComments: true,
-    transform: (data, _e, comments) => {
-      const i = data as {
-        number: number;
-        title: string;
-        body: string | null;
-        state: string;
-        html_url: string;
-        created_at: string;
-        updated_at: string;
-        user?: { login?: string; avatar_url?: string };
-        labels: Array<{ name: string }>;
-      };
-      const rows = (comments ?? []) as Array<{
-        id: number;
-        body: string;
-        created_at: string;
-        user?: { login?: string; avatar_url?: string };
-      }>;
-      return {
-        issue: {
-          number: i.number,
-          title: i.title,
-          body: i.body,
-          state: i.state,
-          url: i.html_url,
-          createdAt: i.created_at,
-          updatedAt: i.updated_at,
-          author: author(i.user),
-          labels: i.labels.map((l) => l.name),
-        },
-        comments: rows.map((c) => ({
-          id: c.id,
-          body: c.body,
-          createdAt: c.created_at,
-          author: author(c.user),
-        })),
-      };
-    },
-  },
-  create: {
-    method: "POST",
-    requires: ["title", "body"],
-    sub: () => "",
-    body: (e) => ({ title: e.title, body: e.body, labels: e.labels ?? [] }),
-    transform: (data) => {
-      const issue = data as { number: number; html_url: string };
-      return { number: issue.number, url: issue.html_url };
-    },
-  },
-  close: {
-    method: "PATCH",
-    requires: ["number"],
-    sub: (e) => `/${String(e.number)}`,
-    body: () => ({ state: "closed" }),
-    transform: (data) => {
-      const issue = data as { number: number; state: string };
-      return { number: issue.number, state: issue.state };
-    },
-  },
-};
-
-async function githubChannel(e: GithubEvent): Promise<unknown> {
-  const op = ISSUE_OPS[e.action];
-  for (const field of op.requires ?? []) {
-    if (e[field] === undefined) throw new Error(`${field} is required for ${e.action}`);
-  }
-
-  const token = await getSecret("github-token");
-  const ghHeaders: Record<string, string> = {
-    authorization: `Bearer ${token}`,
-    accept: "application/vnd.github+json",
-    "x-github-api-version": "2022-11-28",
-    "user-agent": "lexflow-relay",
-    "content-type": "application/json",
-  };
-  const issuesBase = `https://api.github.com/repos/${GITHUB_REPO}/issues`;
-  const init: { method: string; headers: Record<string, string>; body?: string } = {
-    method: op.method,
-    headers: ghHeaders,
-  };
-  if (op.body !== undefined) init.body = JSON.stringify(op.body(e));
-
-  const commentsUrl =
-    op.withComments === true && e.number !== undefined
-      ? `${issuesBase}/${String(e.number)}/comments?per_page=100`
-      : null;
-
-  const [res, commentsRes] = await Promise.all([
-    fetch(`${issuesBase}${op.sub(e)}`, init),
-    commentsUrl !== null ? fetch(commentsUrl, { method: "GET", headers: ghHeaders }) : null,
-  ]);
-
-  for (const r of [res, commentsRes]) {
-    if (r !== null && !r.ok) {
-      const detail = await r.text().catch(() => "");
-      console.error(`[relay:github] GitHub ${String(r.status)}: ${detail}`);
-      throw new Error(`GitHub API error ${String(r.status)}`);
-    }
-  }
-
-  const data: unknown = await res.json();
-  const comments: unknown = commentsRes !== null ? await commentsRes.json() : undefined;
-  return op.transform(data, e, comments);
-}
-
 // ── email channel (SMTP, scaffold) ──────────────────────────────────────────────
 interface SmtpConfig {
   host: string;
@@ -368,18 +215,41 @@ async function dispatch(event: RelayEvent): Promise<RelayResult> {
   switch (event.channel) {
     case "ai":
       return { success: true, data: { text: await aiChannel(event) } };
-    case "github":
-      return { success: true, data: await githubChannel(event) };
     case "email":
       return emailChannel(event);
   }
 }
 
-export const handler = async (event: RelayEvent): Promise<RelayResult> => {
-  try {
-    return await dispatch(event);
-  } catch (err) {
-    console.error(`[relay:${event.channel}] failed`, err);
-    return { success: false, error: String(err) };
+// S3-triggered (ObjectCreated on the `jobs/` prefix): for each job object, read it,
+// run the channel, write the result under the matching `results/` key, delete the
+// job. Result writes land under `results/` (not `jobs/`) so they never re-trigger.
+export const handler = async (event: S3Event): Promise<void> => {
+  for (const record of event.Records) {
+    const bucket = record.s3.bucket.name;
+    const jobKey = decodeURIComponent(record.s3.object.key.replace(/\+/g, " "));
+    const resultKey = jobKey.replace(/^jobs\//, "results/");
+    let result: RelayResult;
+    try {
+      const obj = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: jobKey }));
+      if (obj.Body === undefined) throw new Error("empty job object");
+      const payload = JSON.parse(await obj.Body.transformToString()) as RelayEvent;
+      result = await dispatch(payload);
+    } catch (err) {
+      console.error("[relay] job failed", { jobKey, err });
+      result = { success: false, error: String(err) };
+    }
+    try {
+      await s3.send(
+        new PutObjectCommand({
+          Bucket: bucket,
+          Key: resultKey,
+          Body: JSON.stringify(result),
+          ContentType: "application/json",
+        }),
+      );
+      await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: jobKey }));
+    } catch (err) {
+      console.error("[relay] result write failed", { resultKey, err });
+    }
   }
 };

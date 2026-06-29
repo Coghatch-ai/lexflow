@@ -4,7 +4,8 @@ import { trpc } from '../shared/lib/trpc';
 import { useLov } from '../shared/hooks/use-lov';
 import { adminQuestionInputSchema, type AdminQuestionInput } from '@shared/domain/admin-question';
 import { BLANK_FORM } from './admin-csv-helpers';
-import { type AiExplanation } from '@shared/domain/ai-eval';
+import { type AiExplanation, parseExplainResponse } from '@shared/domain/ai-eval';
+import { pollRelayJob } from '../shared/lib/relay-poll';
 import AiExplanationView from '../shared/components/AiExplanationView';
 
 interface LegislationFieldsProps {
@@ -68,6 +69,7 @@ function AiExplanationPanel({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const utils = trpc.useUtils();
   const generateMutation = trpc.admin.questions.generateExplanation.useMutation();
   const saveMutation = trpc.admin.questions.saveAiExplanation.useMutation({
     onSuccess: onSaved,
@@ -81,12 +83,15 @@ function AiExplanationPanel({
     setError(null);
     setPreview(null);
     try {
-      const parsed = await generateMutation.mutateAsync({
+      const { jobId } = await generateMutation.mutateAsync({
         questionText,
         options,
         correctAnswer,
         legalBasis,
       });
+      const data = await pollRelayJob(() => utils.relay.job.fetch({ jobId }, { staleTime: 0 }));
+      const parsed = parseExplainResponse((data as { text: string }).text);
+      if (parsed === null) throw new Error('A IA retornou um formato inesperado. Tente novamente.');
       setPreview(parsed);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Falha ao gerar explicação');

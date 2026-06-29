@@ -1,75 +1,69 @@
 // api/lib/relay.ts
 //
-// Thin client for LexFlow's own outbound relay Lambda (lexflow-relay-${env}).
-// The API Lambda is VPC-bound with no NAT, so it cannot reach Gemini / GitHub /
-// SMTP directly — it invokes the non-VPC relay over IAM (via the Lambda VPC
-// interface endpoint). Replaces the browser → mrhewbuc-issues Function URL path.
+// Client for LexFlow's outbound relay (lexflow-relay). The VPC-bound API Lambda
+// has no internet egress and no Lambda interface endpoint, so it can't invoke the
+// relay directly. Instead it enqueues a job to the relay outbox S3 bucket (reached
+// via the free S3 gateway endpoint, no NAT); an S3 ObjectCreated event triggers the
+// relay, which writes the result back to S3. The caller polls getRelayJob().
 //
-//   invokeRelay      — synchronous (RequestResponse): ai + github channels need
-//                      the result back. Relay errors surface as TRPCError.
-//   invokeRelayAsync — fire-and-forget (Event): the email channel; never fails
-//                      or blocks the parent request (logs only).
+// Per-user isolation: jobs/results are keyed by userId; getRelayJob only ever reads
+// the caller's own prefix, so one user can never poll another user's result.
 
-import {
-  LambdaClient,
-  InvokeCommand,
-  InvocationType,
-  type InvokeCommandOutput,
-} from "@aws-sdk/client-lambda";
+import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import { randomUUID } from "node:crypto";
 import { TRPCError } from "@trpc/server";
 
 const REGION = process.env.AWS_REGION ?? "sa-east-1";
-const RELAY_FN = `lexflow-relay-${process.env.ENVIRONMENT ?? "prod"}`;
+// Set by the SAM template to the relay outbox bucket name.
+const OUTBOX_BUCKET = process.env.OUTBOX_BUCKET ?? "";
 
-const lambda = new LambdaClient({ region: REGION });
+const s3 = new S3Client({ region: REGION });
 
-type RelayResult = { success: true; data: unknown } | { success: false; error: string };
+export type RelayJobStatus =
+  | { status: "pending" }
+  | { status: "done"; data: unknown }
+  | { status: "error"; error: string };
 
-function gateway(message: string): TRPCError {
-  return new TRPCError({ code: "BAD_GATEWAY", message });
-}
-
-export async function invokeRelay<T>(payload: object): Promise<T> {
-  let out: InvokeCommandOutput;
+// Enqueue a relay job for `userId`; returns the jobId the client polls with.
+export async function enqueueRelayJob(userId: string, payload: object): Promise<string> {
+  const jobId = randomUUID();
   try {
-    out = await lambda.send(
-      new InvokeCommand({
-        FunctionName: RELAY_FN,
-        InvocationType: InvocationType.RequestResponse,
-        Payload: Buffer.from(JSON.stringify(payload)),
+    await s3.send(
+      new PutObjectCommand({
+        Bucket: OUTBOX_BUCKET,
+        Key: `jobs/${userId}/${jobId}.json`,
+        Body: JSON.stringify(payload),
+        ContentType: "application/json",
       }),
     );
   } catch (err) {
-    console.error("[relay] invoke failed", err);
-    throw gateway("Falha ao contatar o serviço externo");
+    console.error("[relay] enqueue failed", err);
+    throw new TRPCError({ code: "BAD_GATEWAY", message: "Falha ao contatar o serviço externo" });
   }
-
-  if (out.FunctionError !== undefined) {
-    console.error("[relay] function error", out.FunctionError);
-    throw gateway("Falha no serviço externo");
-  }
-  if (out.Payload === undefined) {
-    throw gateway("Resposta vazia do serviço externo");
-  }
-
-  const parsed = JSON.parse(Buffer.from(out.Payload).toString("utf8")) as RelayResult;
-  if (!parsed.success) {
-    console.error("[relay] channel error", parsed.error);
-    throw gateway("Erro no serviço externo");
-  }
-  return parsed.data as T;
+  return jobId;
 }
 
-export async function invokeRelayAsync(payload: object): Promise<void> {
+// Poll the result for a job owned by `userId`. A missing result object → pending.
+export async function getRelayJob(userId: string, jobId: string): Promise<RelayJobStatus> {
+  let text: string;
   try {
-    await lambda.send(
-      new InvokeCommand({
-        FunctionName: RELAY_FN,
-        InvocationType: InvocationType.Event,
-        Payload: Buffer.from(JSON.stringify(payload)),
-      }),
+    const out = await s3.send(
+      new GetObjectCommand({ Bucket: OUTBOX_BUCKET, Key: `results/${userId}/${jobId}.json` }),
     );
+    if (out.Body === undefined) return { status: "pending" };
+    text = await out.Body.transformToString();
   } catch (err) {
-    console.error("[relay] async invoke failed", err);
+    if (isNotFound(err)) return { status: "pending" };
+    console.error("[relay] result read failed", err);
+    throw new TRPCError({ code: "BAD_GATEWAY", message: "Falha ao ler o resultado" });
   }
+  const parsed = JSON.parse(text) as { success: boolean; data?: unknown; error?: string };
+  if (parsed.success) return { status: "done", data: parsed.data ?? null };
+  return { status: "error", error: parsed.error ?? "Erro no serviço externo" };
+}
+
+function isNotFound(err: unknown): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  const e = err as { name?: string; $metadata?: { httpStatusCode?: number } };
+  return e.name === "NoSuchKey" || e.$metadata?.httpStatusCode === 404;
 }

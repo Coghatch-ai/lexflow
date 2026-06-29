@@ -7,7 +7,6 @@
 
 import { z } from "zod";
 import { and, asc, eq, inArray, sql, type SQL } from "drizzle-orm";
-import { TRPCError } from "@trpc/server";
 import { db } from "../../db/client";
 import {
   examCalendarEvents,
@@ -18,12 +17,8 @@ import {
 import { adminProcedure, router } from "../procedures";
 import { adminQuestionInputSchema } from "../../../shared/domain/admin-question";
 import { DEFAULT_SM2_CONFIG } from "../../../shared/domain/spaced-repetition";
-import {
-  aiExplanationSchema,
-  buildExplainVariables,
-  parseExplainResponse,
-} from "../../../shared/domain/ai-eval";
-import { invokeRelay } from "../../lib/relay";
+import { aiExplanationSchema, buildExplainVariables } from "../../../shared/domain/ai-eval";
+import { enqueueRelayJob } from "../../lib/relay";
 import { resolveAiPrompt } from "../../lib/ai-prompts";
 
 const calendarEventInput = z.object({
@@ -381,17 +376,10 @@ export const adminRouter = router({
           legalBasis: z.string().nullable(),
         }),
       )
-      .mutation(async ({ input }) => {
+      .mutation(async ({ ctx, input }) => {
         const payload = resolveAiPrompt("oab-explain", buildExplainVariables(input));
-        const { text } = await invokeRelay<{ text: string }>(payload);
-        const parsed = parseExplainResponse(text);
-        if (parsed === null) {
-          throw new TRPCError({
-            code: "UNPROCESSABLE_CONTENT",
-            message: "A IA retornou um formato inesperado. Tente novamente.",
-          });
-        }
-        return parsed;
+        const jobId = await enqueueRelayJob(ctx.userId, payload);
+        return { jobId };
       }),
 
     // Persist an admin-reviewed AI explanation for a question. The explanation is

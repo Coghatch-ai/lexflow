@@ -19,6 +19,29 @@
       "Resource": ["arn:aws:s3:::aws-sam-cli-managed-*", "arn:aws:s3:::aws-sam-cli-managed-*/*"]
     },
     {
+      "Sid": "S3RelayOutbox",
+      "Effect": "Allow",
+      "Action": [
+        "s3:CreateBucket",
+        "s3:DeleteBucket",
+        "s3:PutBucketTagging",
+        "s3:GetBucketTagging",
+        "s3:PutLifecycleConfiguration",
+        "s3:GetLifecycleConfiguration",
+        "s3:PutBucketPublicAccessBlock",
+        "s3:GetBucketPublicAccessBlock",
+        "s3:PutBucketNotification",
+        "s3:GetBucketNotification",
+        "s3:GetBucketPolicy",
+        "s3:ListBucket",
+        "s3:GetBucketLocation",
+        "s3:GetEncryptionConfiguration",
+        "s3:PutEncryptionConfiguration",
+        "s3:GetBucketVersioning"
+      ],
+      "Resource": ["arn:aws:s3:::lexflow-relay-outbox-*", "arn:aws:s3:::lexflow-relay-outbox-*/*"]
+    },
+    {
       "Sid": "CloudFormationStackScoped",
       "Effect": "Allow",
       "Action": ["cloudformation:*"],

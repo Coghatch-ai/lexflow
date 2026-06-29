@@ -8,15 +8,17 @@ import {
   parseRequester,
   type GithubIssueInput,
 } from '@shared/domain/github-issue';
-import { trpc, type TrpcOutput } from '../shared/lib/trpc';
 import { AdminGate } from './admin-gate';
+import {
+  issuesApi,
+  type IssueListItem,
+  type IssueComment,
+  type IssueDetailResult,
+} from '../shared/lib/issues-client';
 
-// Issue ops now go through the API (trpc.issues.* → lexflow-relay → GitHub),
-// replacing the former browser → mrhewbuc-issues Function URL path.
-type CreateIssueResult = TrpcOutput['issues']['create'];
-type IssueListItem = TrpcOutput['issues']['list'][number];
-type IssueDetailResult = TrpcOutput['issues']['get'];
-type IssueComment = IssueDetailResult['comments'][number];
+// Issue ops go browser-direct to the central mrhewbuc-issues Function URL (Clerk
+// JWT + origin, repo scoped to lexflow server-side) — off the lexflow API/relay.
+type CreateIssueResult = { number: number; url: string };
 
 function ghLabelFor(kind: GithubIssueInput['kind']): string {
   return ISSUE_KINDS.find((k) => k.code === kind)?.ghLabel ?? kind;
@@ -26,7 +28,6 @@ const BLANK: GithubIssueInput = { title: '', body: '', kind: 'bug' };
 
 function IssueForm(): ReactElement {
   const { user } = useSession();
-  const createMutation = trpc.issues.create.useMutation();
   const [form, setForm] = useState<GithubIssueInput>(BLANK);
   const [errors, setErrors] = useState<string[]>([]);
   const [created, setCreated] = useState<CreateIssueResult | null>(null);
@@ -47,7 +48,7 @@ function IssueForm(): ReactElement {
     }
     setPending(true);
     try {
-      const issue = await createMutation.mutateAsync({
+      const issue = await issuesApi.create({
         title: result.data.title,
         body: appendRequester(result.data.body, user?.email ?? ''),
         labels: [ghLabelFor(result.data.kind)],
@@ -209,7 +210,6 @@ function IssueDetailBody({ data }: { data: IssueDetailResult }): ReactElement {
 }
 
 function IssueDetailModal({ number, onClose }: { number: number; onClose: () => void }): ReactElement {
-  const utils = trpc.useUtils();
   const aliveRef = useRef(true);
   const [data, setData] = useState<IssueDetailResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -218,14 +218,14 @@ function IssueDetailModal({ number, onClose }: { number: number; onClose: () => 
     aliveRef.current = true;
     void (async () => {
       try {
-        const result = await utils.issues.get.fetch({ number });
+        const result = await issuesApi.get(number);
         if (aliveRef.current) setData(result);
       } catch (err) {
         if (aliveRef.current) setError(err instanceof Error ? err.message : 'Erro desconhecido');
       }
     })();
     return () => { aliveRef.current = false; };
-  }, [number, utils]);
+  }, [number]);
 
   return (
     <div
@@ -260,8 +260,6 @@ function IssueDetailModal({ number, onClose }: { number: number; onClose: () => 
 }
 
 function OpenIssuesList(): ReactElement {
-  const utils = trpc.useUtils();
-  const { mutateAsync: closeIssue } = trpc.issues.close.useMutation();
   const [issues, setIssues] = useState<IssueListItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -272,27 +270,27 @@ function OpenIssuesList(): ReactElement {
     setLoading(true);
     setError(null);
     try {
-      setIssues(await utils.issues.list.fetch());
+      setIssues((await issuesApi.list()).issues);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erro desconhecido');
     } finally {
       setLoading(false);
     }
-  }, [utils]);
+  }, []);
 
   const handleClose = useCallback(async (number: number) => {
     if (!window.confirm(`Fechar issue #${String(number)}?`)) return;
     setClosingNumber(number);
     setError(null);
     try {
-      await closeIssue({ number });
+      await issuesApi.close(number);
       setIssues((prev) => prev?.filter((it) => it.number !== number) ?? null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erro desconhecido');
     } finally {
       setClosingNumber(null);
     }
-  }, [closeIssue]);
+  }, []);
 
   useEffect(() => { void load(); }, [load]);
 
