@@ -5,6 +5,7 @@ import { goalProgressPct } from "@shared/domain/scoring";
 import { useSession } from "../auth";
 import { trpc } from "../lib/trpc";
 import { usePracticeState } from "../state/practice-context";
+import { ExamCountdown } from "../components/ExamCountdown";
 
 export function HomePage(): ReactElement {
   const [, navigate] = useLocation();
@@ -53,6 +54,8 @@ export function HomePage(): ReactElement {
         </h1>
         <p className="mt-1 text-sm text-ink-mute">Pronto para algumas questões da OAB?</p>
       </header>
+
+      <ExamCountdown />
 
       {/* Due-for-review banner -> review flow */}
       <button
