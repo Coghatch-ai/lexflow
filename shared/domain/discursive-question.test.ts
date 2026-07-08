@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { toRows, type DiscursiveDraft } from "./discursive-question";
+import {
+  toRows,
+  SECOND_PHASE_AREA_CODES,
+  isSecondPhaseArea,
+  type DiscursiveDraft,
+} from "./discursive-question";
 
 const draft: DiscursiveDraft = {
   examLabel: "XL Exame Unificado",
@@ -29,6 +34,39 @@ const draft: DiscursiveDraft = {
     },
   ],
 };
+
+describe("SECOND_PHASE_AREA_CODES / isSecondPhaseArea", () => {
+  it("contains exactly the 7 valid 2ª-fase discipline codes", () => {
+    expect([...SECOND_PHASE_AREA_CODES].sort()).toEqual(
+      [
+        "ADMINISTRATIVE_LAW",
+        "CIVIL_LAW",
+        "COMMERCIAL_LAW",
+        "CONSTITUTIONAL_LAW",
+        "CRIMINAL_LAW",
+        "LABOR_LAW",
+        "TAX_LAW",
+      ].sort(),
+    );
+  });
+
+  it("returns true for every valid 2ª-fase code", () => {
+    for (const code of SECOND_PHASE_AREA_CODES) {
+      expect(isSecondPhaseArea(code), code).toBe(true);
+    }
+  });
+
+  it("returns false for codes not in 2ª-fase (1ª-fase-only disciplines)", () => {
+    for (const code of [
+      "CIVIL_PROCEDURE",
+      "CRIMINAL_PROCEDURE",
+      "ENVIRONMENTAL_LAW",
+      "LEGAL_ETHICS",
+    ]) {
+      expect(isSecondPhaseArea(code), code).toBe(false);
+    }
+  });
+});
 
 describe("toRows", () => {
   it("derives deterministic ids from exam + area + position (idempotent upsert key)", () => {

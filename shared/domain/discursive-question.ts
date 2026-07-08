@@ -10,6 +10,22 @@ import { z } from "zod";
 export const QUESTION_TYPES = ["PECA_PRATICA", "DISCURSIVE"] as const;
 export type QuestionType = (typeof QUESTION_TYPES)[number];
 
+// The 7 DISCIPLINE codes that appear in OAB 2ª-fase provas. Used to filter the
+// full DISCIPLINE LOV so the área dropdown in DiscursivePage only shows valid choices.
+export const SECOND_PHASE_AREA_CODES = [
+  "ADMINISTRATIVE_LAW",
+  "CIVIL_LAW",
+  "CONSTITUTIONAL_LAW",
+  "LABOR_LAW",
+  "COMMERCIAL_LAW",
+  "CRIMINAL_LAW",
+  "TAX_LAW",
+] as const satisfies readonly string[];
+
+export function isSecondPhaseArea(code: string): boolean {
+  return (SECOND_PHASE_AREA_CODES as readonly string[]).includes(code);
+}
+
 // One extracted/draft item. The extractor emits "" for absent text fields and 0
 // for an unknown line limit (structured-output schemas stay simpler without
 // nullables); toRows() normalizes those to null when building DB rows.

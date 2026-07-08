@@ -11,6 +11,7 @@ import { useRef, useState, type ReactElement } from "react";
 import { useLov } from "../shared/hooks/use-lov";
 import { trpc } from "../shared/lib/trpc";
 import { sumScores } from "@shared/domain/discursive-attempt";
+import { isSecondPhaseArea } from "@shared/domain/discursive-question";
 import {
   DiscursiveModeSelect,
   DiscursiveProvaPicker,
@@ -61,7 +62,11 @@ async function persistAnswers(
 }
 
 export default function DiscursivePage(): ReactElement {
-  const areaLov = useLov("DISCIPLINE");
+  const allAreaLov = useLov("DISCIPLINE");
+  const areaLov = {
+    ...allAreaLov,
+    options: allAreaLov.options.filter((o) => isSecondPhaseArea(o.code)),
+  };
   const questionTypeLov = useLov("QUESTION_TYPE");
   const utils = trpc.useUtils();
   const exams = trpc.discursive.exams.useQuery();

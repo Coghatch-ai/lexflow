@@ -416,7 +416,7 @@ export default function RealExamSimulation(): ReactElement {
   const startExam = async () => {
     setLoading(true);
     try {
-      const rows = await utils.questions.list.fetch({ limit: QUESTIONS_PER_EXAM });
+      const rows = await utils.questions.list.fetch({ limit: QUESTIONS_PER_EXAM, phase: '1st' });
       const mapped: ExamQuestion[] = rows.map((r) => ({
         id: r.id,
         questionText: r.questionText,

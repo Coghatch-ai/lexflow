@@ -14,6 +14,7 @@ const listInput = z.object({
   discipline: z.string().min(1).optional(),
   examBoard: z.enum(["FGV", "CESPE"]).optional(),
   difficulty: z.enum(["easy", "medium", "hard"]).optional(),
+  phase: z.enum(["1st", "2nd"]).optional(),
   limit: z.number().int().min(1).max(100).default(10),
 });
 
@@ -23,6 +24,7 @@ export const questionsRouter = router({
     if (input.discipline !== undefined) conds.push(eq(oabQuestions.discipline, input.discipline));
     if (input.examBoard !== undefined) conds.push(eq(oabQuestions.examBoard, input.examBoard));
     if (input.difficulty !== undefined) conds.push(eq(oabQuestions.difficulty, input.difficulty));
+    if (input.phase !== undefined) conds.push(eq(oabQuestions.phase, input.phase));
 
     return db
       .select()

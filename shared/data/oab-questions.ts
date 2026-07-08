@@ -28,12 +28,12 @@ export const DISCIPLINES = [
   "Direito Constitucional",
   "Direito Civil",
   "Direito Penal",
-  "Direito Processual Civil",
-  "Direito Processual Penal",
+  "Processo Civil",
+  "Processo Penal",
   "Direito Administrativo",
   "Direito Tributário",
-  "Direito Trabalhista",
-  "Direito Comercial",
+  "Direito do Trabalho",
+  "Direito Empresarial",
   "Direito Ambiental",
   "Ética Profissional",
 ] as const;
@@ -234,7 +234,7 @@ export const QUESTION_TEMPLATES: Record<string, QuestionTemplate[]> = {
       topic: "Dolo e Culpa",
     },
   ],
-  "Direito Processual Civil": [
+  "Processo Civil": [
     {
       q: "O CPC atual e de qual ano?",
       opts: ["1973", "1988", "2015", "2020"],
@@ -297,7 +297,7 @@ export const QUESTION_TEMPLATES: Record<string, QuestionTemplate[]> = {
       topic: "Sentenca",
     },
   ],
-  "Direito Processual Penal": [
+  "Processo Penal": [
     {
       q: "O inquerito policial e um procedimento:",
       opts: ["Judicial", "Administrativo", "Legislativo", "Arbitral"],
@@ -484,7 +484,7 @@ export const QUESTION_TEMPLATES: Record<string, QuestionTemplate[]> = {
       topic: "Lancamento",
     },
   ],
-  "Direito Trabalhista": [
+  "Direito do Trabalho": [
     {
       q: "A CLT foi promulgada em:",
       opts: ["1934", "1943", "1956", "1988"],
@@ -537,7 +537,7 @@ export const QUESTION_TEMPLATES: Record<string, QuestionTemplate[]> = {
       topic: "Estabilidade",
     },
   ],
-  "Direito Comercial": [
+  "Direito Empresarial": [
     {
       q: "A sociedade limitada e regida por:",
       opts: ["Apenas pelo Codigo Civil", "Pela Lei das S/A", "Pela CLT", "Pelo Codigo Comercial"],

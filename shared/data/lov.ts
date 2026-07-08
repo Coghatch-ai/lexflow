@@ -21,23 +21,37 @@ export type LovSeedRow = {
 };
 
 export const LOV_SEED: LovSeedRow[] = [
-  // Disciplines (value matches the canonical pt-BR names)
-  { type: "DISCIPLINE", code: "CONSTITUTIONAL_LAW", value: "Direito Constitucional", sortOrder: 1 },
-  { type: "DISCIPLINE", code: "CIVIL_LAW", value: "Direito Civil", sortOrder: 2 },
-  { type: "DISCIPLINE", code: "CRIMINAL_LAW", value: "Direito Penal", sortOrder: 3 },
-  { type: "DISCIPLINE", code: "CIVIL_PROCEDURE", value: "Direito Processual Civil", sortOrder: 4 },
+  // Disciplines (value matches the canonical pt-BR names used in OAB 1ª Fase)
+  { type: "DISCIPLINE", code: "LEGAL_ETHICS", value: "Ética Profissional", sortOrder: 1 },
+  { type: "DISCIPLINE", code: "LEGAL_PHILOSOPHY", value: "Filosofia do Direito", sortOrder: 2 },
+  { type: "DISCIPLINE", code: "CONSTITUTIONAL_LAW", value: "Direito Constitucional", sortOrder: 3 },
+  { type: "DISCIPLINE", code: "HUMAN_RIGHTS", value: "Direitos Humanos", sortOrder: 4 },
+  { type: "DISCIPLINE", code: "ELECTORAL_LAW", value: "Direito Eleitoral", sortOrder: 5 },
+  { type: "DISCIPLINE", code: "INTERNATIONAL_LAW", value: "Direito Internacional", sortOrder: 6 },
+  { type: "DISCIPLINE", code: "FINANCIAL_LAW", value: "Direito Financeiro", sortOrder: 7 },
+  { type: "DISCIPLINE", code: "TAX_LAW", value: "Direito Tributário", sortOrder: 8 },
+  { type: "DISCIPLINE", code: "ADMINISTRATIVE_LAW", value: "Direito Administrativo", sortOrder: 9 },
+  { type: "DISCIPLINE", code: "ENVIRONMENTAL_LAW", value: "Direito Ambiental", sortOrder: 10 },
+  { type: "DISCIPLINE", code: "CIVIL_LAW", value: "Direito Civil", sortOrder: 11 },
   {
     type: "DISCIPLINE",
-    code: "CRIMINAL_PROCEDURE",
-    value: "Direito Processual Penal",
-    sortOrder: 5,
+    code: "CHILD_ADOLESCENT_LAW",
+    value: "ECA - Estatuto da Criança e do Adolescente",
+    sortOrder: 12,
   },
-  { type: "DISCIPLINE", code: "ADMINISTRATIVE_LAW", value: "Direito Administrativo", sortOrder: 6 },
-  { type: "DISCIPLINE", code: "TAX_LAW", value: "Direito Tributário", sortOrder: 7 },
-  { type: "DISCIPLINE", code: "LABOR_LAW", value: "Direito Trabalhista", sortOrder: 8 },
-  { type: "DISCIPLINE", code: "COMMERCIAL_LAW", value: "Direito Comercial", sortOrder: 9 },
-  { type: "DISCIPLINE", code: "ENVIRONMENTAL_LAW", value: "Direito Ambiental", sortOrder: 10 },
-  { type: "DISCIPLINE", code: "LEGAL_ETHICS", value: "Ética Profissional", sortOrder: 11 },
+  { type: "DISCIPLINE", code: "CONSUMER_LAW", value: "Direito do Consumidor", sortOrder: 13 },
+  { type: "DISCIPLINE", code: "COMMERCIAL_LAW", value: "Direito Empresarial", sortOrder: 14 },
+  { type: "DISCIPLINE", code: "CIVIL_PROCEDURE", value: "Processo Civil", sortOrder: 15 },
+  { type: "DISCIPLINE", code: "CRIMINAL_LAW", value: "Direito Penal", sortOrder: 16 },
+  { type: "DISCIPLINE", code: "CRIMINAL_PROCEDURE", value: "Processo Penal", sortOrder: 17 },
+  {
+    type: "DISCIPLINE",
+    code: "SOCIAL_SECURITY_LAW",
+    value: "Direito Previdenciário",
+    sortOrder: 18,
+  },
+  { type: "DISCIPLINE", code: "LABOR_LAW", value: "Direito do Trabalho", sortOrder: 19 },
+  { type: "DISCIPLINE", code: "LABOR_PROCEDURE", value: "Processo do Trabalho", sortOrder: 20 },
 
   // Difficulty
   { type: "DIFFICULTY", code: "easy", value: "Fácil", sortOrder: 1 },

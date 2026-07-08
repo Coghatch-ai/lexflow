@@ -86,6 +86,7 @@ export default function AdaptiveSimulation(): ReactElement {
       const rows = await utils.questions.list.fetch({
         discipline: selectedDiscipline !== '' ? selectedDiscipline : undefined,
         limit: 100,
+        phase: '1st',
       });
       const mapped: AdaptiveQuestion[] = rows.map((r) => ({
         id: r.id,
