@@ -10,6 +10,7 @@ import { ResultPage } from "./pages/ResultPage";
 import { ProgressPage } from "./pages/ProgressPage";
 import { SavedPage } from "./pages/SavedPage";
 import { GoalsPage } from "./pages/GoalsPage";
+import { FlashcardsPage } from "./pages/FlashcardsPage";
 
 export default function App(): ReactElement {
   return (
@@ -41,6 +42,9 @@ export default function App(): ReactElement {
               </Route>
               <Route path="/goals">
                 <GoalsPage />
+              </Route>
+              <Route path="/flashcards">
+                <FlashcardsPage />
               </Route>
               <Route>
                 <HomePage />
