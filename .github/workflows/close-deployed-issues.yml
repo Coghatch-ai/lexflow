@@ -14,6 +14,7 @@ on:
 permissions:
   issues: write
   contents: read
+  id-token: write
 
 jobs:
   close:
@@ -27,7 +28,14 @@ jobs:
       REPO: ${{ github.repository }}
       WF: ${{ github.event.workflow_run.name }}
       SHA: ${{ github.event.workflow_run.head_sha }}
+      RELAY_OUTBOX: lexflow-relay-outbox-prod
     steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: sa-east-1
+
       - name: Close issues labelled fixed-pending-deploy
         run: |
           set -euo pipefail
@@ -39,6 +47,25 @@ jobs:
           fi
           for n in $nums; do
             echo "Closing #$n (deployed via $WF @ ${SHA:0:7})"
+
+            # ── Optional email notification ──────────────────────────────────
+            # Parse the Solicitante footer written by shared/domain/github-issue.ts
+            # appendRequester. Mirror the REQUESTER_RE regex exactly.
+            body=$(gh issue view "$n" --repo "$REPO" --json body --jq '.body')
+            title=$(gh issue view "$n" --repo "$REPO" --json title --jq '.title')
+            requester=$(printf '%s' "$body" | grep -oP '(?<=\n---\nSolicitante: )[^\s]+$' || true)
+            if [ -n "$requester" ] && [ "$requester" != "desconhecido" ]; then
+              subject="[Probius] Sua solicitação #${n} foi resolvida"
+              mail_body=$(printf 'Olá,\n\nSua solicitação "%s" (issue #%s) foi resolvida e publicada em produção.\n\nAcesse a plataforma em https://my.probius.app para conferir as melhorias.\n\nObrigado pelo seu feedback!\n\n— Equipe Probius\n\n---\nEste e-mail foi enviado para %s porque você abriu uma solicitação na plataforma Probius.' "$title" "$n" "$requester")
+              job_id=$(uuidgen)
+              printf '%s' "{\"channel\":\"email\",\"to\":\"${requester}\",\"subject\":\"${subject}\",\"body\":$(printf '%s' "$mail_body" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')}" \
+                | aws s3 cp - "s3://${RELAY_OUTBOX}/jobs/system/${job_id}.json" || true
+              echo "Email job ${job_id} enqueued for ${requester}"
+            else
+              echo "No valid requester email for #$n — skipping notification"
+            fi
+            # ────────────────────────────────────────────────────────────────
+
             # Drop the deploy-gate labels (ignore if one isn't present).
             gh issue edit "$n" --repo "$REPO" \
               --remove-label fixed-pending-deploy --remove-label needs-deploy || true
