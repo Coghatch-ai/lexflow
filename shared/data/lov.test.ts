@@ -23,6 +23,12 @@ describe("LOV_SEED DISCIPLINE entries", () => {
     expect(orders).toEqual(Array.from({ length: 20 }, (_, i) => i + 1));
   });
 
+  it("sortOrder reflects pt-BR alphabetical order by value", () => {
+    const sorted = [...disciplines].sort((a, b) => a.value.localeCompare(b.value, "pt-BR"));
+    const byOrder = [...disciplines].sort((a, b) => a.sortOrder - b.sortOrder);
+    expect(byOrder.map((r) => r.code)).toEqual(sorted.map((r) => r.code));
+  });
+
   it("all codes are English (no pt-BR characters)", () => {
     const ptBrPattern = /[áàãâéêíóôõúçÁÀÃÂÉÊÍÓÔÕÚÇ]/u;
     for (const row of disciplines) {
