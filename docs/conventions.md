@@ -11,9 +11,10 @@ here already exists and is tested — adopt it; don't reinvent it.
    (disciplines, difficulties, exam boards, phases) live in the `list_of_values` table:
    `type` (UPPER_SNAKE) + `code` (English, stored in domain tables + used in logic) +
    `value` (pt-BR label shown to users). The UI gets options/labels from `useLov(type)`
-   (`app/src/shared/hooks/use-lov.ts`); the seed lives in `shared/data/lov.ts`. Adding a
-   value = add a row there + `pnpm db:seed`. NEVER put a pt-BR literal like `'Fácil'` or
-   `'Direito Civil'` in a component or router.
+   (`app/src/shared/hooks/use-lov.ts`); the seed lives in `shared/data/lov.ts`. Adding or
+   relabeling a value = add/edit a row there + `pnpm db:seed-lov` (the LOV-only, FK-free
+   delete+insert — **NOT** `pnpm db:seed`, which reseeds the whole `oab_questions` catalog).
+   NEVER put a pt-BR literal like `'Fácil'` or `'Direito Civil'` in a component or router.
 
 2. **No duplicated code.** If two files need the same thing, it goes in a shared module:
    - Cross-cutting types/business rules → `shared/` (importable by `api/` and `app/`).
@@ -104,7 +105,8 @@ selection) and `app/src/shared/hooks/use-exam-timer.ts`, then adopt them. Author
 ```bash
 pnpm validate          # tsc + eslint --max-warnings 0 + vitest  (MUST pass)
 pnpm build             # vite build  (MUST pass)
-pnpm db:seed           # if you changed LOV_SEED / questions seed (idempotent)
+pnpm db:seed-lov       # if you changed LOV_SEED (picklists only, FK-free, idempotent)
+pnpm db:seed           # only if you changed the oab_questions catalog seed (heavy; idempotent)
 pnpm smoke             # exercises the data API against the real DB, self-cleans
 ```
 

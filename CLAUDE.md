@@ -57,7 +57,9 @@ pnpm test         # Vitest
 pnpm validate     # check + lint + test
 pnpm db:generate  # Generate migration SQL from drizzle/schema.ts (review before applying)
 pnpm db:migrate   # Apply pending migrations
-pnpm db:seed      # Seed the global oab_questions catalog (idempotent)
+pnpm db:seed      # Seed the global oab_questions catalog (heavy; idempotent)
+pnpm db:seed-lov  # Sync ONLY list_of_values picklists from shared/data/lov.ts (FK-free, idempotent).
+                  # Use this for ANY LOV/disciplines/label change — NOT db:seed (see docs/conventions.md).
 pnpm db:create-user <clerk-user-id> [email] [name...]   # Manually create a local users row
 pnpm smoke        # End-to-end check of the data API against the DB (throwaway user, self-cleans)
 ```
@@ -131,6 +133,12 @@ when the fix merges. The `close-deployed-issues.yml` workflow runs after a succe
 issue (dropping the `needs-deploy`/`fixed-pending-deploy` labels, posting a pt-BR comment).
 So: keyword = closes on merge (use for non-gated docs/chore); `fixed-pending-deploy` label
 = closes on deploy (use for anything that must be live first).
+
+**Definition of done for any pipeline fix (`/implement`):** the fix is NOT handed back until
+the issue is labeled `fixed-pending-deploy` (deploy-gated work) OR the closing commit/PR
+carries a `Closes #N` line (non-gated work). An implemented issue left on `solution-ready`
+with no close mechanism will silently never close — this is what happened to #22/#24. Verify
+with `gh issue view <n> --json labels` before reporting the issue done.
 
 ## NEVER
 
