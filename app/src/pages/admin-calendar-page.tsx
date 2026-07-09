@@ -130,32 +130,44 @@ function CalendarAdmin(): ReactElement {
             </div>
             <div className="space-y-2">
               {form.events.map((ev, i) => (
-                <div key={i} className="flex gap-2 items-center">
-                  <input
-                    value={ev.label}
-                    onChange={(e) => { setEvent(i, 'label', e.target.value); }}
-                    placeholder="Descrição do evento"
-                    className="flex-1 px-3 py-2 border border-line rounded-lg text-sm bg-white text-ink focus:outline-none focus:ring-2 focus:ring-[#d9ab53]"
-                  />
-                  <input
-                    value={ev.dateText}
-                    onChange={(e) => { setEvent(i, 'dateText', e.target.value); }}
-                    placeholder="Data ou período"
-                    className="w-44 px-3 py-2 border border-line rounded-lg text-sm bg-white text-ink focus:outline-none focus:ring-2 focus:ring-[#d9ab53]"
-                  />
-                  <input
-                    type="date"
-                    value={ev.eventDate ?? ''}
-                    onChange={(e) => { setEvent(i, 'eventDate', e.target.value); }}
-                    title="Data estruturada para contagem regressiva (opcional)"
-                    className="w-40 px-3 py-2 border border-line rounded-lg text-sm bg-white text-ink focus:outline-none focus:ring-2 focus:ring-[#d9ab53]"
-                  />
-                  <button onClick={() => { removeEvent(i); }} className="p-1.5 text-ink-mute hover:text-red-500 transition-colors">
+                <div key={i} className="flex gap-2 items-end">
+                  <div className="flex-1">
+                    <label className="text-xs font-semibold text-ink-mute uppercase tracking-wide">Descrição</label>
+                    <input
+                      value={ev.label}
+                      onChange={(e) => { setEvent(i, 'label', e.target.value); }}
+                      placeholder="Descrição do evento"
+                      className="mt-1 w-full px-3 py-2 border border-line rounded-lg text-sm bg-white text-ink focus:outline-none focus:ring-2 focus:ring-[#d9ab53]"
+                    />
+                  </div>
+                  <div className="w-44">
+                    <label className="text-xs font-semibold text-ink-mute uppercase tracking-wide">Data (exibição)</label>
+                    <input
+                      value={ev.dateText}
+                      onChange={(e) => { setEvent(i, 'dateText', e.target.value); }}
+                      placeholder="Data ou período"
+                      className="mt-1 w-full px-3 py-2 border border-line rounded-lg text-sm bg-white text-ink focus:outline-none focus:ring-2 focus:ring-[#d9ab53]"
+                    />
+                  </div>
+                  <div className="w-40">
+                    <label className="text-xs font-semibold text-ink-mute uppercase tracking-wide">Data p/ contagem (opcional)</label>
+                    <input
+                      type="date"
+                      value={ev.eventDate ?? ''}
+                      onChange={(e) => { setEvent(i, 'eventDate', e.target.value); }}
+                      title="Data estruturada para contagem regressiva (opcional)"
+                      className="mt-1 w-full px-3 py-2 border border-line rounded-lg text-sm bg-white text-ink focus:outline-none focus:ring-2 focus:ring-[#d9ab53]"
+                    />
+                  </div>
+                  <button onClick={() => { removeEvent(i); }} className="mb-0.5 p-1.5 text-ink-mute hover:text-red-500 transition-colors">
                     <X className="w-4 h-4" />
                   </button>
                 </div>
               ))}
             </div>
+            <p className="mt-2 text-xs text-ink-mute">
+              Sem &quot;Data p/ contagem&quot;, o badge &quot;Próxima prova em N dias&quot; não aparece na página inicial.
+            </p>
           </div>
 
           <div className="flex gap-3 pt-2">
