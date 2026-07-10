@@ -29,6 +29,14 @@ here already exists and is tested — adopt it; don't reinvent it.
    - `shared/domain/scoring.ts` — `accuracyPct`, `goalProgressPct`
    - `shared/domain/adaptive.ts` — `nextDifficulty`, `DEFAULT_ADAPTIVE_CONFIG`
    - `shared/domain/spaced-repetition.ts` — `nextReviewIntervalDays`, `DEFAULT_REVIEW_INTERVALS_DAYS`
+   - `shared/domain/exam-calendar.ts` — `deriveEventDate` (`DD/MM/YYYY` → `YYYY-MM-DD`)
+   - `shared/domain/exam-countdown.ts` — `daysUntil`, `nextUpcomingEvent`
+
+   **Exam calendar dates:** `exam_calendar_events.date_text` is the canonical human-entered
+   value (free text, e.g. `20/12/2026`). `event_date` is DERIVED from it via `deriveEventDate`
+   on every admin save — never hand-entered. The countdown badge reads only `event_date`, so a
+   `date_text` that isn't a clean `DD/MM/YYYY` single date (a period/range) yields a null
+   `event_date` and no badge (by design).
 
 4. **Algorithms are config-driven (flexible).** Thresholds/intervals/levels are parameters
    with defaults (see the `*Config` objects above), not magic numbers scattered in code.

@@ -16,6 +16,7 @@ import {
 } from "../../../drizzle/schema";
 import { adminProcedure, router } from "../procedures";
 import { adminQuestionInputSchema } from "../../../shared/domain/admin-question";
+import { deriveEventDate } from "../../../shared/domain/exam-calendar";
 import { DEFAULT_SM2_CONFIG } from "../../../shared/domain/spaced-repetition";
 import { aiExplanationSchema, buildExplainVariables } from "../../../shared/domain/ai-eval";
 import { enqueueRelayJob } from "../../lib/relay";
@@ -109,7 +110,7 @@ export const adminRouter = router({
             calendarId: cal.id,
             label: e.label,
             dateText: e.dateText,
-            eventDate: e.eventDate ?? null,
+            eventDate: deriveEventDate(e.dateText) ?? e.eventDate ?? null,
             sortOrder: e.sortOrder,
             createdAt: now,
             lastUpdAt: now,
@@ -142,7 +143,7 @@ export const adminRouter = router({
               calendarId: input.id,
               label: e.label,
               dateText: e.dateText,
-              eventDate: e.eventDate ?? null,
+              eventDate: deriveEventDate(e.dateText) ?? e.eventDate ?? null,
               sortOrder: e.sortOrder,
               createdAt: now,
               lastUpdAt: now,
