@@ -77,7 +77,7 @@ function TipOfDay(): ReactElement {
           Dica do dia
         </p>
       </div>
-      <p className="text-sm leading-relaxed text-surface/80">{tip}</p>
+      <p className="text-sm leading-relaxed text-ink">{tip}</p>
     </div>
   );
 }
