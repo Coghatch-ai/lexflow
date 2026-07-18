@@ -7,7 +7,7 @@
 // on the ObjectCreated event, processes the channel, writes the result to
 // results/{userId}/{jobId}.json, and deletes the job. Channels:
 //
-//   ai    → Google Gemini completion (API resolves the prompt; relay forwards)
+//   ai    → AI completion (Gemini default; OpenAI selectable per-event)
 //   email → SMTP via nodemailer (scaffold; live once /smtp-* SSM params exist)
 //
 // GitHub issues moved back to the central mrhewbuc-issues service (browser-direct),
@@ -15,9 +15,9 @@
 //
 // Trust boundary: triggered only by objects the API wrote to the private outbox
 // bucket (the API already verified the Clerk JWT + role). No Function URL / API
-// event → unreachable from a browser. Secrets (Gemini key, SMTP creds) are read
-// from SSM under SSM_PREFIX at runtime, KMS-decrypted, and cached for the life of
-// the warm container — never placed in the function's environment configuration.
+// event → unreachable from a browser. Secrets are read from SSM under SSM_PREFIX
+// at runtime, KMS-decrypted, and cached for the life of the warm container —
+// never placed in the function's environment configuration.
 
 import nodemailer, { type Transporter } from "nodemailer";
 import { SSMClient, GetParameterCommand, GetParametersCommand } from "@aws-sdk/client-ssm";
@@ -28,15 +28,15 @@ import {
   DeleteObjectCommand,
 } from "@aws-sdk/client-s3";
 import type { S3Event } from "aws-lambda";
+import { geminiComplete, openaiComplete } from "./providers";
 
 const REGION = process.env.AWS_REGION ?? "sa-east-1";
 // Set by the SAM template to /lexflow/relay/${Environment}.
 const SSM_PREFIX = process.env.SSM_PREFIX ?? "/lexflow/relay/prod";
 
-const DEFAULT_AI_MODEL = "gemini-2.0-flash";
-// Bound the upstream LLM call below the Lambda timeout so a hung provider returns
-// a clean error rather than an opaque Lambda timeout.
-const AI_TIMEOUT_MS = 25_000;
+const DEFAULT_AI_PROVIDER = "gemini";
+const DEFAULT_GEMINI_MODEL = "gemini-2.0-flash";
+const DEFAULT_OPENAI_MODEL = "gpt-4o-mini";
 
 const ssm = new SSMClient({ region: REGION });
 const s3 = new S3Client({ region: REGION });
@@ -50,6 +50,9 @@ interface AiEvent {
   user: string;
   json?: boolean;
   maxOutputTokens?: number;
+  // Optional provider/model selection. Absent → SSM default (gemini).
+  provider?: "gemini" | "openai";
+  model?: string;
 }
 interface EmailEvent {
   channel: "email";
@@ -77,66 +80,54 @@ async function getSecret(leaf: string): Promise<string> {
   return value;
 }
 
-// ── ai channel (Google Gemini) ─────────────────────────────────────────────────
-// The model name is read live (uncached, non-secret String) so it can be swapped
-// with `aws ssm put-parameter --overwrite` — no redeploy.
-async function getModel(): Promise<string> {
+// ── ai channel ─────────────────────────────────────────────────────────────────
+// Provider and model are read live (uncached, non-secret String) so they can be
+// swapped with `aws ssm put-parameter --overwrite` — no redeploy required.
+
+async function getProvider(): Promise<string> {
   try {
-    const out = await ssm.send(new GetParameterCommand({ Name: `${SSM_PREFIX}/ai-model` }));
+    const out = await ssm.send(new GetParameterCommand({ Name: `${SSM_PREFIX}/ai-provider` }));
     const value = out.Parameter?.Value;
-    return value !== undefined && value.length > 0 ? value : DEFAULT_AI_MODEL;
+    return value !== undefined && value.length > 0 ? value : DEFAULT_AI_PROVIDER;
   } catch {
-    return DEFAULT_AI_MODEL;
+    return DEFAULT_AI_PROVIDER;
   }
 }
 
-async function geminiComplete(apiKey: string, model: string, payload: AiEvent): Promise<string> {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
-  const generationConfig: Record<string, unknown> = {
-    max_output_tokens: payload.maxOutputTokens ?? 1024,
-  };
-  if (payload.json === true) generationConfig["response_mime_type"] = "application/json";
-
-  const body: Record<string, unknown> = {
-    contents: [{ role: "user", parts: [{ text: payload.user }] }],
-    generation_config: generationConfig,
-  };
-  if (payload.system !== undefined && payload.system.length > 0) {
-    body["system_instruction"] = { parts: [{ text: payload.system }] };
-  }
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => {
-    controller.abort();
-  }, AI_TIMEOUT_MS);
-  let res: Response;
+async function getModel(provider: string): Promise<string> {
+  const defaultModel = provider === "openai" ? DEFAULT_OPENAI_MODEL : DEFAULT_GEMINI_MODEL;
+  const leaf = provider === "openai" ? "openai-model" : "ai-model";
   try {
-    res = await fetch(url, {
-      method: "POST",
-      headers: { "x-goog-api-key": apiKey, "content-type": "application/json" },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-  } finally {
-    clearTimeout(timer);
+    const out = await ssm.send(new GetParameterCommand({ Name: `${SSM_PREFIX}/${leaf}` }));
+    const value = out.Parameter?.Value;
+    return value !== undefined && value.length > 0 ? value : defaultModel;
+  } catch {
+    return defaultModel;
   }
+}
 
-  if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new Error(`Gemini API ${String(res.status)}: ${detail}`);
-  }
-  const data = (await res.json()) as {
-    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-  };
-  const text = (data.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? "").join("");
-  if (text.length === 0) throw new Error("Empty completion from model");
-  return text;
+// Secret leaf per provider. Missing openai-api-key only breaks OpenAI calls —
+// the deploy does not fail (no template.yaml SSM resolution for this key).
+function secretLeaf(provider: string): string {
+  return provider === "openai" ? "openai-api-key" : "ai-api-key";
 }
 
 async function aiChannel(e: AiEvent): Promise<string> {
-  const apiKey = await getSecret("ai-api-key");
-  const model = await getModel();
-  return geminiComplete(apiKey, model, e);
+  const provider = e.provider ?? (await getProvider());
+  const model = e.model ?? (await getModel(provider));
+  const apiKey = await getSecret(secretLeaf(provider));
+
+  const payload = {
+    ...(e.system !== undefined ? { system: e.system } : {}),
+    user: e.user,
+    ...(e.json !== undefined ? { json: e.json } : {}),
+    ...(e.maxOutputTokens !== undefined ? { maxOutputTokens: e.maxOutputTokens } : {}),
+  };
+
+  if (provider === "openai") {
+    return openaiComplete(apiKey, model, payload);
+  }
+  return geminiComplete(apiKey, model, payload);
 }
 
 // ── email channel (SMTP, scaffold) ──────────────────────────────────────────────

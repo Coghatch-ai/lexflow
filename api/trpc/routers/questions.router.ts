@@ -9,6 +9,9 @@ import { db } from "../../db/client";
 import { oabQuestions, spacedRepetitionConfig, userQuestionStates } from "../../../drizzle/schema";
 import { protectedProcedure, router } from "../procedures";
 import { DEFAULT_SM2_CONFIG } from "../../../shared/domain/spaced-repetition";
+import { buildExplainVariables } from "../../../shared/domain/ai-eval";
+import { enqueueRelayJob } from "../../lib/relay";
+import { resolveAiPrompt } from "../../lib/ai-prompts";
 
 const listInput = z.object({
   discipline: z.string().min(1).optional(),
@@ -109,4 +112,52 @@ export const questionsRouter = router({
       secondInterval: row.secondInterval,
     };
   }),
+
+  // Get-or-generate a 4-pillar AI explanation for any 1ª-fase question.
+  // Available to all signed-in students (protectedProcedure, not admin-only).
+  // Returns the cached global explanation immediately when present; otherwise
+  // enqueues generation via the relay — the result is written back to the global
+  // oab_questions.ai_explanation column (same global cache as admin generateExplanation,
+  // no per-user scope, no TABLE_SCOPE change needed).
+  getOrGenerateExplanation: protectedProcedure
+    .input(z.object({ id: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      const [row] = await db
+        .select({
+          id: oabQuestions.id,
+          questionText: oabQuestions.questionText,
+          options: oabQuestions.options,
+          correctAnswer: oabQuestions.correctAnswer,
+          legalBasis: oabQuestions.legalBasis,
+          aiExplanation: oabQuestions.aiExplanation,
+        })
+        .from(oabQuestions)
+        .where(eq(oabQuestions.id, input.id))
+        .limit(1);
+
+      if (row === undefined) {
+        const { TRPCError } = await import("@trpc/server");
+        throw new TRPCError({ code: "NOT_FOUND", message: "Questão não encontrada" });
+      }
+
+      // Cache hit — return immediately without enqueuing.
+      if (row.aiExplanation !== null) {
+        return { cached: true as const, explanation: row.aiExplanation, jobId: null };
+      }
+
+      // Cache miss — enqueue generation. The relay will write the result to S3;
+      // the client polls relay.job and, once done, calls admin.questions.saveAiExplanation
+      // (or a future saveExplanation protectedProcedure) to persist it globally.
+      const payload = resolveAiPrompt(
+        "oab-explain",
+        buildExplainVariables({
+          questionText: row.questionText,
+          options: row.options,
+          correctAnswer: row.correctAnswer,
+          legalBasis: row.legalBasis ?? null,
+        }),
+      );
+      const jobId = await enqueueRelayJob(ctx.userId, payload);
+      return { cached: false as const, explanation: null, jobId };
+    }),
 });

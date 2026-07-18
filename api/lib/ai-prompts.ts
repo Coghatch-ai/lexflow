@@ -35,12 +35,22 @@ export const AI_PROMPTS = {
 export type PromptId = keyof typeof AI_PROMPTS;
 
 // Resolved relay `ai`-channel payload (matches the relay handler's AiEvent).
+// `provider` and `model` are optional — absent means the relay uses its SSM
+// default (gemini). Pass them to target a specific provider per task.
 export interface AiRelayPayload {
   channel: "ai";
   system: string;
   user: string;
   json: true;
   maxOutputTokens: number;
+  provider?: "gemini" | "openai";
+  model?: string;
+}
+
+// Per-task provider override. Both fields optional; absent → relay SSM default.
+export interface AiProviderOptions {
+  provider?: "gemini" | "openai" | undefined;
+  model?: string | undefined;
 }
 
 // Single-pass {{var}} fill: only declared names are substituted and inserted
@@ -58,9 +68,12 @@ function interpolate(
 }
 
 // Resolve a server-owned prompt + caller variables into the relay `ai` payload.
+// Optional `providerOptions` threads a provider/model choice through to the relay
+// without changing prompt resolution (relay owns secrets, API owns prompts).
 export function resolveAiPrompt(
   promptId: PromptId,
   variables: Record<string, string>,
+  providerOptions?: AiProviderOptions,
 ): AiRelayPayload {
   const p = AI_PROMPTS[promptId];
   return {
@@ -69,5 +82,7 @@ export function resolveAiPrompt(
     user: interpolate(p.user, p.vars, variables),
     json: true,
     maxOutputTokens: p.maxOutputTokens,
+    ...(providerOptions?.provider !== undefined ? { provider: providerOptions.provider } : {}),
+    ...(providerOptions?.model !== undefined ? { model: providerOptions.model } : {}),
   };
 }

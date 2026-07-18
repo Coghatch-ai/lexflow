@@ -1,6 +1,6 @@
 // api/trpc/routers/ai.router.ts
 //
-// AI completions, routed through LexFlow's own relay (lexflow-relay → Gemini).
+// AI completions, routed through LexFlow's own relay (lexflow-relay → Gemini/OpenAI).
 // The prompt is server-owned (api/lib/ai-prompts.ts): the client sends domain
 // inputs, the API builds the variables (shared/domain/ai-eval.ts), resolves the
 // template, and ENQUEUES the job to the relay outbox. The relay runs async and
@@ -14,19 +14,31 @@ import { enqueueRelayJob } from "../../lib/relay";
 import { resolveAiPrompt } from "../../lib/ai-prompts";
 import { buildGradeVariables } from "../../../shared/domain/ai-eval";
 
+const providerSchema = z.enum(["gemini", "openai"]).optional();
+
 const gradeInput = z.object({
   statement: z.string().min(1),
   studentAnswer: z.string().min(1),
   modelAnswer: z.string().nullable(),
   legalBasis: z.string().nullable(),
   maxPoints: z.number().positive(),
+  // Optional per-task provider override; absent → relay SSM default (gemini).
+  provider: providerSchema,
+  model: z.string().min(1).optional(),
 });
 
 export const aiRouter = router({
   // 2ª-fase discursive grading. Verified user only (same gate as the self-score).
-  // Returns a jobId; the client polls relay.job for the Gemini result.
+  // Returns a jobId; the client polls relay.job for the result.
   grade: protectedProcedure.input(gradeInput).mutation(async ({ ctx, input }) => {
-    const payload = resolveAiPrompt("oab-grade", buildGradeVariables(input));
+    const providerOptions =
+      input.provider !== undefined
+        ? {
+            provider: input.provider,
+            ...(input.model !== undefined ? { model: input.model } : {}),
+          }
+        : undefined;
+    const payload = resolveAiPrompt("oab-grade", buildGradeVariables(input), providerOptions);
     const jobId = await enqueueRelayJob(ctx.userId, payload);
     return { jobId };
   }),
