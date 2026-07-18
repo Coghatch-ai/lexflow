@@ -82,6 +82,8 @@ export default function HomePage(): ReactElement {
         </p>
       </section>
 
+      <OabExamCalendar />
+
       {/* Ledger — one bordered block, hairlines drawn by a 1px grid gap. */}
       <section className="overflow-hidden rounded-xl border border-line">
         <div className="grid grid-cols-2 gap-px bg-line lg:grid-cols-4">
@@ -144,7 +146,6 @@ export default function HomePage(): ReactElement {
         </div>
       </section>
 
-      <OabExamCalendar />
     </div>
   );
 }

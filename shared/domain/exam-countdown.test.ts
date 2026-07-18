@@ -1,7 +1,12 @@
 // shared/domain/exam-countdown.test.ts
 
 import { describe, expect, it } from "vitest";
-import { daysUntil, nextUpcomingEvent, type CountdownEvent } from "./exam-countdown";
+import {
+  daysUntil,
+  nextUpcomingEvent,
+  timeUntilParts,
+  type CountdownEvent,
+} from "./exam-countdown";
 
 describe("daysUntil", () => {
   it("returns 3 for a date 3 days in the future (noon anchor)", () => {
@@ -58,5 +63,54 @@ describe("nextUpcomingEvent", () => {
     const future: CountdownEvent = { eventDate: "2026-08-01" };
     const events: CountdownEvent[] = [{ eventDate: null }, future, { eventDate: null }];
     expect(nextUpcomingEvent(events, new Date("2026-06-22T12:00:00"))).toBe(future);
+  });
+});
+
+describe("timeUntilParts", () => {
+  it("decomposes 2.5 days correctly (floor semantics)", () => {
+    // 2026-06-25T00:00:00 - 2026-06-22T12:00:00 = 2.5 days
+    // floor -> days=2, hours=12, minutes=0, seconds=0
+    const result = timeUntilParts("2026-06-25", new Date("2026-06-22T12:00:00"));
+    expect(result.days).toBe(2);
+    expect(result.hours).toBe(12);
+    expect(result.minutes).toBe(0);
+    expect(result.seconds).toBe(0);
+    expect(result.totalMs).toBe(2.5 * 86_400_000);
+  });
+
+  it("returns one second remaining at 2026-06-24T23:59:59", () => {
+    // target = 2026-06-25T00:00:00; diff = 1 s
+    const result = timeUntilParts("2026-06-25", new Date("2026-06-24T23:59:59"));
+    expect(result.days).toBe(0);
+    expect(result.hours).toBe(0);
+    expect(result.minutes).toBe(0);
+    expect(result.seconds).toBe(1);
+    expect(result.totalMs).toBe(1_000);
+  });
+
+  it("clamps to all-zero when event has passed", () => {
+    const result = timeUntilParts("2026-06-20", new Date("2026-06-22T12:00:00"));
+    expect(result.days).toBe(0);
+    expect(result.hours).toBe(0);
+    expect(result.minutes).toBe(0);
+    expect(result.seconds).toBe(0);
+    expect(result.totalMs).toBe(0);
+  });
+
+  it("returns zero at exactly local midnight of the event day", () => {
+    const result = timeUntilParts("2026-06-25", new Date("2026-06-25T00:00:00"));
+    expect(result.totalMs).toBe(0);
+    expect(result.days).toBe(0);
+    expect(result.seconds).toBe(0);
+  });
+
+  it("uses the same T00:00:00 local anchor as daysUntil (no anchor drift)", () => {
+    // At 23:00 local the day before: daysUntil gives 1, timeUntilParts gives 1h remaining
+    const now = new Date("2026-06-24T23:00:00");
+    const days = timeUntilParts("2026-06-25", now).days;
+    const hours = timeUntilParts("2026-06-25", now).hours;
+    expect(days).toBe(0);
+    expect(hours).toBe(1);
+    expect(timeUntilParts("2026-06-25", now).totalMs).toBe(3_600_000);
   });
 });
