@@ -10,7 +10,7 @@ import { accuracyPct } from '@shared/domain/scoring';
 import type { AiExplanation } from '@shared/domain/ai-eval';
 import { useNotesAndBookmarks, type NotesAndBookmarks } from '../shared/hooks/use-notes-bookmarks';
 import QuestionCard from '@/shared/components/QuestionCard';
-import AiExplanationView from '@/shared/components/AiExplanationView';
+import AiExplanationButton from '@/shared/components/AiExplanationButton';
 
 type Status = 'setup' | 'playing' | 'review' | 'finished';
 
@@ -290,7 +290,8 @@ function QuestionReviewRow({ question, idx, userAnswer, disciplineLov }: Questio
           )}
           {!isCorrect && expanded && (
             <div className="mt-2 bg-white rounded-lg p-3">
-              <AiExplanationView
+              <AiExplanationButton
+                questionId={question.id}
                 aiExplanation={question.aiExplanation}
                 explanation={question.explanation}
               />

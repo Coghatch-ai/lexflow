@@ -5,7 +5,7 @@ import { accuracyPct } from '@shared/domain/scoring';
 import type { AiExplanation } from '@shared/domain/ai-eval';
 import { type NotesAndBookmarks } from '../shared/hooks/use-notes-bookmarks';
 import QuestionCard from '@/shared/components/QuestionCard';
-import AiExplanationView from '@/shared/components/AiExplanationView';
+import AiExplanationButton from '@/shared/components/AiExplanationButton';
 
 export type Difficulty = 'easy' | 'medium' | 'hard';
 
@@ -238,7 +238,8 @@ export function AdaptiveFeedback({
 
         <div className="bg-white rounded-lg p-4">
           <p className="text-sm font-medium text-gray-700 mb-2">Explicação:</p>
-          <AiExplanationView
+          <AiExplanationButton
+            questionId={currentQuestion.id}
             aiExplanation={currentQuestion.aiExplanation}
             explanation={currentQuestion.explanation}
           />

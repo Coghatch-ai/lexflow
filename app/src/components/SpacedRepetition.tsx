@@ -8,7 +8,7 @@ import { accuracyPct } from '@shared/domain/scoring';
 import type { AiExplanation } from '@shared/domain/ai-eval';
 import { useNotesAndBookmarks } from '../shared/hooks/use-notes-bookmarks';
 import QuestionCard from '@/shared/components/QuestionCard';
-import AiExplanationView from '@/shared/components/AiExplanationView';
+import AiExplanationButton from '@/shared/components/AiExplanationButton';
 
 type Status = 'loading' | 'empty' | 'playing' | 'feedback' | 'done';
 
@@ -270,7 +270,8 @@ export default function SpacedRepetition(): ReactElement {
           )}
 
           <div className="bg-white rounded-lg p-4 mb-4">
-            <AiExplanationView
+            <AiExplanationButton
+              questionId={currentQuestion.id}
               aiExplanation={currentQuestion.aiExplanation}
               explanation={currentQuestion.explanation}
             />

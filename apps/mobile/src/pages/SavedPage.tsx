@@ -1,6 +1,8 @@
 import { useMemo, useState, type ReactElement } from "react";
 import { BookmarkX, ChevronDown } from "lucide-react";
+import type { AiExplanation } from "@shared/domain/ai-eval";
 import { trpc } from "../lib/trpc";
+import { AiExplanationButton } from "../components/AiExplanationButton";
 
 type SavedQuestion = {
   id: string;
@@ -8,6 +10,7 @@ type SavedQuestion = {
   options: string[];
   explanation: string;
   discipline: string;
+  aiExplanation?: AiExplanation | null;
 };
 
 // "Salvos": questions the user bookmarked (during practice/review or here).
@@ -107,6 +110,11 @@ function SavedCard({
           <div className="rounded-xl border border-line bg-paper p-3">
             <p className="eyebrow mb-1">Comentário</p>
             <p className="text-sm leading-relaxed text-ink-soft">{question.explanation}</p>
+            <AiExplanationButton
+              questionId={question.id}
+              aiExplanation={question.aiExplanation}
+              explanation={question.explanation}
+            />
           </div>
         </>
       ) : null}

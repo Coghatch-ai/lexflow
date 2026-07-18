@@ -5,12 +5,13 @@
 
 import { z } from "zod";
 import { and, eq, inArray, lte, sql, type SQL } from "drizzle-orm";
+import { TRPCError } from "@trpc/server";
 import { db } from "../../db/client";
 import { oabQuestions, spacedRepetitionConfig, userQuestionStates } from "../../../drizzle/schema";
 import { protectedProcedure, router } from "../procedures";
 import { DEFAULT_SM2_CONFIG } from "../../../shared/domain/spaced-repetition";
-import { buildExplainVariables } from "../../../shared/domain/ai-eval";
-import { enqueueRelayJob } from "../../lib/relay";
+import { buildExplainVariables, parseExplainResponse } from "../../../shared/domain/ai-eval";
+import { enqueueRelayJob, getRelayJob } from "../../lib/relay";
 import { resolveAiPrompt } from "../../lib/ai-prompts";
 
 const listInput = z.object({
@@ -145,9 +146,10 @@ export const questionsRouter = router({
         return { cached: true as const, explanation: row.aiExplanation, jobId: null };
       }
 
-      // Cache miss — enqueue generation. The relay will write the result to S3;
-      // the client polls relay.job and, once done, calls admin.questions.saveAiExplanation
-      // (or a future saveExplanation protectedProcedure) to persist it globally.
+      // Cache miss — enqueue generation. The relay writes the result to S3;
+      // the client polls relay.job and, once done, calls questions.finalizeExplanation
+      // (protectedProcedure) which re-reads the relay result server-side and persists
+      // it globally. Never accept explanation text from the client.
       const payload = resolveAiPrompt(
         "oab-explain",
         buildExplainVariables({
@@ -159,5 +161,39 @@ export const questionsRouter = router({
       );
       const jobId = await enqueueRelayJob(ctx.userId, payload);
       return { cached: false as const, explanation: null, jobId };
+    }),
+
+  // Persist an AI explanation generated via getOrGenerateExplanation.
+  // The explanation text is NEVER accepted from the client — this procedure
+  // re-reads the relay result server-side (keyed by ctx.userId + jobId) and
+  // validates it before writing to the global oab_questions.ai_explanation.
+  // Idempotent: re-running overwrites the same global cell with relay-authored text.
+  // NO TABLE_SCOPE change needed — oab_questions is the global catalog (not per-user).
+  finalizeExplanation: protectedProcedure
+    .input(z.object({ id: z.string().min(1), jobId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const job = await getRelayJob(ctx.userId, input.jobId);
+      if (job.status === "pending") {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "A geração ainda está em andamento" });
+      }
+      if (job.status === "error") {
+        throw new TRPCError({
+          code: "BAD_GATEWAY",
+          message: job.error,
+        });
+      }
+      const raw = job.data as { text: string };
+      const parsed = parseExplainResponse(raw.text);
+      if (parsed === null) {
+        throw new TRPCError({
+          code: "BAD_GATEWAY",
+          message: "A IA retornou um formato inesperado",
+        });
+      }
+      await db
+        .update(oabQuestions)
+        .set({ aiExplanation: parsed, lastUpdAt: new Date().toISOString() })
+        .where(eq(oabQuestions.id, input.id));
+      return { explanation: parsed };
     }),
 });
