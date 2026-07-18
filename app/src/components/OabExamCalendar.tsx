@@ -16,7 +16,7 @@ interface CountdownHeroProps {
   eventDate: string;
 }
 
-function CountdownHero({ eventDate }: CountdownHeroProps): ReactElement | null {
+export function CountdownHero({ eventDate }: CountdownHeroProps): ReactElement | null {
   const [parts, setParts] = useState<CountdownParts>(() => timeUntilParts(eventDate));
 
   useEffect(() => {

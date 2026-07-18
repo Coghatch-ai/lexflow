@@ -1,16 +1,8 @@
 import type { ReactElement } from 'react';
-import { useSession } from '../auth';
-import OabExamCalendar from '../components/OabExamCalendar';
-import { Target, AlertCircle, ArrowUpRight } from 'lucide-react';
+import WelcomePanel from '../components/WelcomePanel';
+import { Target, ArrowUpRight } from 'lucide-react';
 import { trpc } from '../shared/lib/trpc';
 import { accuracyPct } from '@shared/domain/scoring';
-
-const TIPS = [
-  'Realize simulados regularmente para familiarizar-se com o formato da prova.',
-  'Foque nas disciplinas onde tem menor acurácia.',
-  'Use o dashboard de Analytics para identificar padrões de erro.',
-  'Defina metas realistas em cada disciplina.',
-];
 
 const STEPS = [
   { n: '01', title: 'Começar um simulado', body: 'Vá para "Simulados" e escolha uma disciplina para treinar.' },
@@ -19,8 +11,6 @@ const STEPS = [
 ];
 
 export default function HomePage(): ReactElement {
-  const { user } = useSession();
-
   const summary = trpc.stats.summary.useQuery();
   const recent = trpc.sessions.listRecent.useQuery();
   const last = recent.data?.[0];
@@ -37,8 +27,6 @@ export default function HomePage(): ReactElement {
         }
       : undefined,
   };
-
-  const firstName = user?.name.split(' ')[0] ?? '';
 
   const ledger: Array<{ label: string; value: string; sub: string; flag?: boolean }> = [
     {
@@ -66,23 +54,7 @@ export default function HomePage(): ReactElement {
 
   return (
     <div className="space-y-6 stagger">
-      {/* Greeting strip */}
-      <section className="panel-ink px-7 py-7 md:px-9 md:py-8">
-        <div
-          aria-hidden
-          className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full"
-          style={{ background: 'radial-gradient(closest-side, rgba(217,171,83,0.16), transparent)' }}
-        />
-        {/* <p className="eyebrow !text-seal-bright">Painel</p> */}
-        <h1 className="mt-3 font-display text-[var(--fs-display)] font-bold leading-tight text-surface">
-          Bem-vindo de volta{firstName.length > 0 ? `, ${firstName}` : ''}.
-        </h1>
-        <p className="mt-2 max-w-xl text-sm leading-relaxed text-ink-mute">
-          Você está no caminho certo. Mantenha o ritmo e aproveite cada ferramenta do preparatório.
-        </p>
-      </section>
-
-      <OabExamCalendar />
+      <WelcomePanel />
 
       {/* Ledger — one bordered block, hairlines drawn by a 1px grid gap. */}
       <section className="overflow-hidden rounded-xl border border-line">
@@ -103,22 +75,7 @@ export default function HomePage(): ReactElement {
       </section>
 
       {/* Guidance */}
-      <section className="grid gap-6 lg:grid-cols-2">
-        <div className="card-default">
-          <div className="flex items-center gap-2">
-            <AlertCircle className="w-[18px] h-[18px] text-seal" />
-            <h3 className="font-display text-base font-bold">Dicas de estudo</h3>
-          </div>
-          <ul className="mt-5 space-y-3.5">
-            {TIPS.map((tip) => (
-              <li key={tip} className="flex items-start gap-3 text-sm text-ink-soft">
-                <span className="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full bg-seal" />
-                <span className="leading-relaxed">{tip}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-
+      <section className="grid gap-6">
         <div className="panel-ink p-6">
           <div className="flex items-center gap-2">
             <Target className="w-[18px] h-[18px] text-seal-bright" />
