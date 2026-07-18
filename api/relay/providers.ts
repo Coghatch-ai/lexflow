@@ -87,7 +87,8 @@ export async function openaiComplete(
   const body: Record<string, unknown> = {
     model,
     messages,
-    max_tokens: payload.maxOutputTokens ?? 1024,
+    // gpt-5.x models reject `max_tokens` — only `max_completion_tokens` is accepted.
+    max_completion_tokens: payload.maxOutputTokens ?? 1024,
   };
   if (payload.json === true) {
     body["response_format"] = { type: "json_object" };
