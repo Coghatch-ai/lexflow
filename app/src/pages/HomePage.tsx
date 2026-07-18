@@ -73,7 +73,7 @@ export default function HomePage(): ReactElement {
           className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full"
           style={{ background: 'radial-gradient(closest-side, rgba(217,171,83,0.16), transparent)' }}
         />
-        <p className="eyebrow !text-seal-bright">Painel</p>
+        {/* <p className="eyebrow !text-seal-bright">Painel</p> */}
         <h1 className="mt-3 font-display text-[var(--fs-display)] font-bold leading-tight text-surface">
           Bem-vindo de volta{firstName.length > 0 ? `, ${firstName}` : ''}.
         </h1>
