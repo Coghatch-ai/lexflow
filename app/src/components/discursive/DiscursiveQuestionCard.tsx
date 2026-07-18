@@ -9,6 +9,7 @@ import type { ReactElement } from "react";
 import { Clock, Sparkles, CheckCircle2, ChevronRight } from "lucide-react";
 import { clampScore } from "@shared/domain/discursive-attempt";
 import type { AiResult, AnswerKey, DiscursiveQuestion } from "./types";
+import { META_SEP } from "@shared/domain/ui-format";
 
 function RevealPanel({ answerKey }: { answerKey: AnswerKey }): ReactElement {
   return (
@@ -108,7 +109,7 @@ export default function DiscursiveQuestionCard(props: DiscursiveQuestionCardProp
       <div className="bg-white rounded-xl p-6 shadow">
         <div className="flex flex-wrap items-center gap-2 mb-3 text-xs">
           <span className="font-semibold text-[#16161a]">{question.examLabel}</span>
-          <span className="text-gray-300">·</span>
+          <span className="text-gray-300">{META_SEP}</span>
           <span className="text-gray-600">{props.areaLabel}</span>
           <span className="ml-auto bg-[#16161a]/[0.06] text-[#16161a] font-semibold px-2 py-1 rounded">{props.typeLabel}</span>
           <span className="bg-[#d9ab53]/15 text-[#b8893b] font-semibold px-2 py-1 rounded">{question.maxPoints.toFixed(2)} pts</span>

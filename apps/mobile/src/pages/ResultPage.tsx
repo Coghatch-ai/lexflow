@@ -4,6 +4,7 @@ import { Check, Home, X } from "lucide-react";
 import { accuracyPct } from "@shared/domain/scoring";
 import { trpc } from "../lib/trpc";
 import { usePracticeState } from "../state/practice-context";
+import { META_SEP } from "@shared/domain/ui-format";
 
 export function ResultPage(): ReactElement {
   const [, navigate] = useLocation();
@@ -41,7 +42,8 @@ export function ResultPage(): ReactElement {
           <p className="eyebrow !text-seal-bright">{heading}</p>
           <p className={`mt-3 font-display text-6xl font-bold tnum ${tone}`}>{pct}%</p>
           <p className="mt-2 text-sm text-ink-mute">
-            {result.correctAnswers} de {result.totalQuestions} corretas · {result.discipline}
+            {result.correctAnswers} de {result.totalQuestions} corretas {META_SEP}{" "}
+            {result.discipline}
           </p>
         </div>
 

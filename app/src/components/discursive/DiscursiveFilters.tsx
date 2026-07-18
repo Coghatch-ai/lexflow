@@ -7,6 +7,7 @@
 import type { ReactElement } from "react";
 import { PenLine, ScrollText } from "lucide-react";
 import type { Lov } from "./types";
+import { META_SEP } from "@shared/domain/ui-format";
 
 type Prova = { examLabel: string; area: string; year: number };
 export type ProvaMode = "single" | "prova";
@@ -161,7 +162,7 @@ export function DiscursiveProvaPicker({
           <option value="">Selecione…</option>
           {provas.map((p) => (
             <option key={provaKey(p)} value={provaKey(p)}>
-              {p.examLabel} · {areaLov.labelOf(p.area)} · {p.year}
+              {p.examLabel} {META_SEP} {areaLov.labelOf(p.area)} {META_SEP} {p.year}
             </option>
           ))}
         </select>

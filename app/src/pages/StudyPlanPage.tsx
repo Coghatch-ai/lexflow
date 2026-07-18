@@ -3,6 +3,7 @@ import { ClipboardList, Plus, Trash2, TrendingUp, SlidersHorizontal, CheckSquare
 import { useLov } from '../shared/hooks/use-lov';
 import { trpc, type TrpcOutput } from '../shared/lib/trpc';
 import { type DeadlineDays } from '@shared/domain/study-plan';
+import { META_SEP } from '@shared/domain/ui-format';
 
 type PlanData = TrpcOutput['studyPlans']['list'][number];
 
@@ -44,7 +45,7 @@ function PlanCard({ plan, disciplineLov, examBoardLov, phaseLov, onDelete }: Pla
             </h3>
             <p className="text-sm text-gray-600 truncate">{disciplineLabel}</p>
             <p className="text-xs text-gray-400 mt-0.5">
-              Banca: {examBoardLabel} · Fase: {phaseLabel} · Ano: {yearLabel}
+              Banca: {examBoardLabel} {META_SEP} Fase: {phaseLabel} {META_SEP} Ano: {yearLabel}
             </p>
           </div>
         </div>

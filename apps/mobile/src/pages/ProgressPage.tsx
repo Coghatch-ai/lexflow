@@ -1,6 +1,7 @@
 import { useMemo, type ReactElement } from "react";
 import { AlertTriangle, Clock, Play, Target, TrendingUp } from "lucide-react";
 import { trpc } from "../lib/trpc";
+import { META_SEP } from "@shared/domain/ui-format";
 
 // Read-only performance dashboard. Mirrors the web Analytics page but renders
 // plain CSS bars instead of pulling in a charting lib (lighter mobile bundle).
@@ -67,7 +68,7 @@ export function ProgressPage(): ReactElement {
                 <div className="mb-1 flex items-baseline justify-between gap-2">
                   <span className="truncate text-sm font-medium text-ink">{d.discipline}</span>
                   <span className="shrink-0 text-xs font-semibold tnum text-ink-mute">
-                    {d.accuracy}% · {d.totalAnswered}
+                    {d.accuracy}% {META_SEP} {d.totalAnswered}
                   </span>
                 </div>
                 <Bar pct={d.accuracy} />

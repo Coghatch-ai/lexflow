@@ -3,6 +3,7 @@ import { useSearchParams } from 'wouter';
 import { Bookmark, BookmarkX, ChevronDown, ChevronUp, StickyNote, Trash2 } from 'lucide-react';
 import { useLov } from '../shared/hooks/use-lov';
 import { trpc } from '../shared/lib/trpc';
+import { META_SEP } from '@shared/domain/ui-format';
 
 type SavedQuestionCardProps = {
   metaLine: string;
@@ -162,7 +163,7 @@ function BookmarkedTab(): ReactElement {
       {questions.map((q) => (
         <SavedQuestionCard
           key={q.id}
-          metaLine={`${disciplineLov.labelOf(q.discipline)} · ${examBoardLov.labelOf(q.examBoard)} · ${q.year}`}
+          metaLine={`${disciplineLov.labelOf(q.discipline)} ${META_SEP} ${examBoardLov.labelOf(q.examBoard)} ${META_SEP} ${q.year}`}
           questionText={q.questionText}
           options={q.options}
           note={notesMap.get(q.id)}
@@ -226,7 +227,7 @@ function NotesTab(): ReactElement {
         return (
           <SavedQuestionCard
             key={n.questionId}
-            metaLine={`${disciplineLov.labelOf(q.discipline)} · ${examBoardLov.labelOf(q.examBoard)} · ${q.year}`}
+            metaLine={`${disciplineLov.labelOf(q.discipline)} ${META_SEP} ${examBoardLov.labelOf(q.examBoard)} ${META_SEP} ${q.year}`}
             questionText={q.questionText}
             options={q.options}
             note={n.noteText}

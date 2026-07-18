@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ReactElement } from "react";
 import { Target, Trash2 } from "lucide-react";
 import { goalProgressPct } from "@shared/domain/scoring";
 import { trpc } from "../lib/trpc";
+import { META_SEP } from "@shared/domain/ui-format";
 
 const TARGET_OPTIONS = [50, 60, 70, 80, 90, 95];
 
@@ -173,7 +174,7 @@ function GoalCard({
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold text-ink">{discipline}</p>
           <p className="text-xs text-ink-mute">
-            Atual {current}% · Meta {target}%
+            Atual {current}% {META_SEP} Meta {target}%
           </p>
         </div>
         <button
