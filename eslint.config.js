@@ -77,6 +77,8 @@ export default [
       "node_modules/",
       ".aws-sam/",
       "drizzle/meta/",
+      // Eval harness (plain JS/YAML, own package, not part of the typed program).
+      "evals/",
       // Root tooling config (not part of the typed lint program).
       "*.config.js",
       "*.config.mjs",

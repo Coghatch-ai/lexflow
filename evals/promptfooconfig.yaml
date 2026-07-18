@@ -1,0 +1,308 @@
+# evals/promptfooconfig.yaml — LexFlow A/B eval harness
+#
+# Compares OpenAI vs Google Gemini on the two OAB AI tasks:
+#   1) oab-explain — 1ª fase objective question explanation
+#   2) oab-grade   — 2ª fase discursive answer grading
+#
+# Prompts are extracted LIVE from api/lib/ai-prompts.ts via evals/prompts.js
+# so the eval always reflects the real production prompt text.
+#
+# Providers: add/remove/swap in the `providers` block below.
+# Models: change `config.model` per provider entry.
+# Add Anthropic later: add `- id: anthropic:claude-3-5-sonnet-20241022` (needs ANTHROPIC_API_KEY).
+#
+# Run:   pnpm eval
+# View:  pnpm eval:view
+# Docs:  https://promptfoo.dev/docs
+description: LexFlow OAB AI tasks — OpenAI vs Gemini A/B eval (mini vs bigger matrix)
+
+# ── Providers ──────────────────────────────────────────────────────────────────
+# Model matrix: mini vs bigger, across providers. IDs verified against each
+# account's live /models listing on 2026-07-18.
+#
+# OpenAI models confirmed present:
+#   gpt-5.4-mini (2026-03-17) — MINI
+#   gpt-5.4      (2026-03-05) — BIGGER
+#   gpt-5.5      (2026-04-23) — FLAGSHIP
+#
+# Gemini models confirmed present (generateContent):
+#   gemini-3.1-flash-lite — MINI/LITE
+#   gemini-3.5-flash      — BIGGER
+#   (gemini-3.1-flash without -lite not available in this account)
+#
+# Each entry is tested against every prompt+test combination.
+# Models are intentionally editable here; change without touching any other file.
+providers:
+  # ── OpenAI ──────────────────────────────────────────────────────────────────
+  - id: openai:gpt-5.4-mini
+    label: openai-gpt-5.4-mini
+    config:
+      # MINI — gpt-5.4-mini-2026-03-17; reads OPENAI_API_KEY from env automatically
+      temperature: 0.3
+      response_format:
+        type: json_object
+
+  - id: openai:gpt-5.4
+    label: openai-gpt-5.4
+    config:
+      # BIGGER — gpt-5.4-2026-03-05
+      temperature: 0.3
+      response_format:
+        type: json_object
+
+  - id: openai:gpt-5.5
+    label: openai-gpt-5.5
+    config:
+      # FLAGSHIP — gpt-5.5-2026-04-23
+      temperature: 0.3
+      response_format:
+        type: json_object
+
+  - id: openai:gpt-5.6-luna
+    label: openai-gpt-5.6-luna
+    config:
+      # NANO-SUCCESSOR — 1.33x mini price; maggie-evals A/B'd it (see
+      # maggie-evals/GPT56-RESEARCH.md): lost to 5.4-mini on persona (79-83% vs
+      # 83.5%). Testing here because legal explain/grade is a different task.
+      temperature: 0.3
+      response_format:
+        type: json_object
+
+  # ── Gemini ───────────────────────────────────────────────────────────────────
+  - id: google:gemini-3.1-flash-lite
+    label: gemini-3.1-flash-lite
+    config:
+      # MINI/LITE — reads GOOGLE_API_KEY from env automatically
+      temperature: 0.3
+
+  - id: google:gemini-3.5-flash
+    label: gemini-3.5-flash
+    config:
+      # BIGGER — gemini-3.5-flash confirmed in account
+      temperature: 0.3
+
+  # ── Future providers (uncomment + add key to add Anthropic) ──────────────────
+  # - id: anthropic:claude-3-5-haiku-20241022
+  #   label: claude-3-5-haiku
+  #   config:
+  #     apiKey: ${ANTHROPIC_API_KEY}
+  #     temperature: 0.3
+
+# ── Concurrency ────────────────────────────────────────────────────────────────
+evaluateOptions:
+  maxConcurrency: 4
+
+# ── Default grading (LLM judge in pt-BR, pinned to a capable model) ───────────
+# Judge is pinned to the FLAGSHP OpenAI model at temp 0 — strongest available
+# grader in this account. Caveat: OpenAI models are also under test, so a
+# self-preference bias is possible on the llm-rubric metrics; the free
+# deterministic asserts (json shape, score range, pt-BR lock) are bias-free.
+# A neutral third-family judge (Anthropic) needs ANTHROPIC_API_KEY.
+defaultTest:
+  assert:
+    - type: javascript
+      value: file://asserts.js:isPtBr
+      metric: pt-br-lock
+  options:
+    provider:
+      id: openai:gpt-5.5
+      config:
+        temperature: 0
+        response_format:
+          type: json_object
+    rubricPrompt: file://rubric.json
+
+# ── Test suites ───────────────────────────────────────────────────────────────
+# promptfoo supports a flat `tests` list; we use `description` to group by task.
+# Vars per row must match the prompt template declared in prompts.js.
+
+# ONE prompt, routed on vars.task inside prompts.js (maggie-evals pattern:
+# route on the row, no flags/modes). Returns a [system, user] chat pair.
+# Do NOT list system/user fragments as separate prompts — promptfoo crosses
+# every test with every prompt, which is what zeroed out the previous run.
+prompts:
+  - id: oab-chat
+    raw: file://prompts.js:oabChat
+
+tests:
+  # ── Task 1: oab-explain (1ª fase) ──────────────────────────────────────────
+  # Real questions from issue #31 comments (arthur0n). Content is verbatim.
+
+  - description: "1a-fase | Direito Constitucional | petróleo e participação do proprietário"
+    vars:
+      task: explain
+      questionText: >-
+        Bento é proprietário de um imóvel rural no estado do Pará. Ao ler sobre
+        o modelo norte-americano de exploração de petróleo, no qual o proprietário
+        do solo detém também os direitos sobre os recursos do subsolo, Bento
+        consulta um advogado sobre seus direitos caso petróleo seja encontrado em
+        sua fazenda. O advogado informa que, no Brasil, Bento terá participação
+        assegurada nos resultados da exploração, nos termos estabelecidos pela
+        legislação. Assinale a opção que apresenta o fundamento constitucional
+        correto para a informação prestada pelo advogado.
+      options: |-
+        A) O proprietário do solo tem direito à exploração exclusiva dos recursos minerais encontrados em seu imóvel, conforme a Constituição Federal.
+        B) A descoberta de petróleo implica desapropriação automática do terreno pela União, com indenização ao proprietário.
+        C) O proprietário do solo pode explorar os recursos minerais do subsolo mediante autorização estadual, sem necessidade de concessão federal.
+        D) O art. 176 da CF/88 garante ao proprietário do solo participação nos resultados da lavra, embora as jazidas pertençam à União.
+      correctAnswer: "D"
+      legalBasis: "CF/88, Art. 176, caput e §2º; Lei 9.478/1997; Lei 12.351/2010, art. 49"
+    assert:
+      - type: javascript
+        value: file://asserts.js:isValidExplainJson
+        metric: json-shape-explain
+      - type: llm-rubric
+        metric: qualidade-explicacao
+        value: >-
+          A resposta explica corretamente: (1) por que D está correta citando
+          Art. 176 CF/88 e o direito de participação do proprietário; (2) por que
+          cada alternativa incorreta está errada com fundamento jurídico; (3)
+          inclui dica de memorização original; (4) aponta pegadinha da FGV
+          (contraste Brasil x EUA). Resposta em português (pt-BR). JSON válido
+          com chaves whyCorrect, whyWrong, memoryTip, commonTraps.
+
+  - description: "1a-fase | Direito Constitucional | busca e apreensão noturna"
+    vars:
+      task: explain
+      questionText: >-
+        Policiais federais obtiveram mandado judicial para busca e apreensão de
+        documentos na residência de Arnaldo, suspeito de crimes financeiros.
+        Temendo que Arnaldo destruísse provas ao saber da investigação, os
+        policiais cumpriram o mandado às 22h. Sobre a constitucionalidade da
+        medida, assinale a opção correta.
+      options: |-
+        A) A busca foi legal: o flagrante delito autoriza entrada domiciliar a qualquer hora, e o mandado judicial é nulo por ter sido expedido sem urgência comprovada.
+        B) A busca foi legal: a inviolabilidade de domicílio não é absoluta e cede diante de mandado judicial devidamente fundamentado, independentemente do horário.
+        C) A busca foi ilegal: a efetividade e imperatividade dos atos estatais não constam do rol de exceções constitucionais à inviolabilidade de domicílio noturno.
+        D) A busca foi ilegal: o cumprimento de mandado judicial somente pode ocorrer durante o dia, conforme o art. 5º, XI, da CF/88, sem exceção para eficiência policial.
+      correctAnswer: "D"
+      legalBasis: "CF/88, Art. 5º, XI; STF RHC 79.973/MG (rel. Min. Sepúlveda Pertence)"
+    assert:
+      - type: javascript
+        value: file://asserts.js:isValidExplainJson
+        metric: json-shape-explain
+      - type: llm-rubric
+        metric: qualidade-explicacao
+        value: >-
+          Resposta explica corretamente por que D está certa (restrição horária
+          constitucional absoluta para mandado), por que B é a alternativa-armadilha
+          (inviolabilidade não é absoluta mas exceção horária persiste), inclui
+          memorização e pegadinha da FGV. JSON válido em pt-BR.
+
+  - description: "1a-fase | Processo Civil | prazo contestação após cancelamento de audiência"
+    vars:
+      task: explain
+      questionText: >-
+        Martina ajuizou ação pelo procedimento comum contra Marcela, que foi
+        citada pelo correio. Após a juntada dos avisos de recebimento, ambas as
+        partes manifestaram desinteresse na realização da audiência de conciliação.
+        O juízo cancelou a audiência. A partir de quando começa o prazo para
+        Marcela apresentar contestação?
+      options: |-
+        A) Da data do protocolo do pedido de cancelamento apresentado por Marcela.
+        B) Da juntada do último aviso de recebimento de citação, tendo em vista que ambas as partes dispensaram a audiência de conciliação.
+        C) Da publicação da decisão judicial que cancelou a audiência de conciliação.
+        D) A audiência de conciliação não pode ser cancelada; portanto, o prazo só começa da realização da audiência ou de sua redesignação.
+      correctAnswer: "B"
+      legalBasis: "CPC/2015, Art. 335, I, §1º, I e §2º; Art. 334, §4º, I e II"
+    assert:
+      - type: javascript
+        value: file://asserts.js:isValidExplainJson
+        metric: json-shape-explain
+      - type: llm-rubric
+        metric: qualidade-explicacao
+        value: >-
+          Resposta cita Art. 335 §2º CPC/2015 como fundamento para B, explica
+          por que A (protocolo da parte) e C (publicação da decisão) não são
+          marcos processuais corretos, e por que D nega erroneamente o art. 334
+          §4º. JSON válido em pt-BR com os 4 pilares.
+
+  # ── Task 2: oab-grade (2ª fase discursiva) ─────────────────────────────────
+  # Realistic 2ª-fase scenario derived from constitutional law content above.
+
+  - description: "2a-fase | Direito Constitucional | petróleo e propriedade do subsolo"
+    vars:
+      task: grade
+      maxPoints: "10"
+      statement: >-
+        (2ª Fase OAB — Direito Constitucional) Pedro é proprietário de fazenda
+        no interior do Pará. Uma empresa de mineração descobre jazida de petróleo
+        sob o imóvel de Pedro e inicia tratativas com o governo federal para
+        obter concessão de exploração. Pedro consulta um advogado sobre seus
+        direitos. Elabore peça/texto dissertativo explicando: (a) a quem
+        pertencem as jazidas de petróleo no Brasil; (b) qual direito Pedro possui
+        em relação à exploração; (c) o fundamento constitucional e legal aplicável.
+      modelAnswer: >-
+        (a) As jazidas e demais recursos minerais pertencem à União, por força
+        do art. 176, caput, da CF/88, que estabelece que constituem propriedade
+        distinta da do solo. (b) Pedro tem direito à participação nos resultados
+        da lavra, garantida pelo art. 176, §2º, da CF/88, regulamentada pela Lei
+        9.478/1997 (Lei do Petróleo) e pela Lei 12.351/2010. Não tem direito à
+        exploração direta, que depende de autorização ou concessão da União
+        (art. 176, §1º). (c) Fundamento constitucional: art. 176, caput e §2º,
+        da CF/88. Fundamento legal: arts. 49 e seguintes da Lei 12.351/2010.
+      legalBasis: "CF/88, Art. 176, caput, §1º e §2º; Lei 9.478/1997; Lei 12.351/2010, art. 49"
+      studentAnswer: >-
+        No Brasil, as riquezas do subsolo pertencem à União, conforme a
+        Constituição Federal. O proprietário do terreno não tem direito de
+        explorar o petróleo, mas tem direito de receber uma participação nos
+        lucros da exploração, prevista na própria Constituição e na Lei do
+        Petróleo. Pedro deve exigir seu direito de participação junto à empresa
+        concessionária e ao governo federal.
+    assert:
+      - type: javascript
+        value: file://asserts.js:isValidGradeJson
+        metric: json-shape-grade
+      - type: javascript
+        value: file://asserts.js:scoreInRange
+        metric: score-range
+      - type: llm-rubric
+        metric: qualidade-correcao
+        value: >-
+          A correção atribui nota de 0 a 10 coerente com a resposta do aluno:
+          o aluno cobriu os pontos principais (subsolo da União, participação do
+          proprietário, fundamento constitucional) mas não citou artigos
+          específicos (art. 176 §1º/§2º, Leis 9.478 e 12.351). Nota esperada
+          entre 6 e 8. O feedback aponta o que foi acertado e o que faltou
+          (citações legais precisas, menção ao art. 176 §1º sobre concessão).
+          Resposta em pt-BR, JSON com chaves score e feedback.
+
+  - description: "2a-fase | Direito Processual Civil | prazo de contestação (resposta completa)"
+    vars:
+      task: grade
+      maxPoints: "5"
+      statement: >-
+        (2ª Fase OAB — Processo Civil) Em ação de procedimento comum, a ré
+        Beatriz foi citada pelo correio. Tanto a autora quanto Beatriz
+        manifestaram desinteresse na audiência de conciliação antes de sua
+        realização, e o juízo cancelou o ato. Em peça dissertativa, explique
+        qual é o termo inicial do prazo de contestação de Beatriz e qual o
+        dispositivo legal aplicável, justificando sua resposta.
+      modelAnswer: >-
+        O prazo de contestação de Beatriz começa da juntada do último aviso de
+        recebimento nos autos, por força do art. 335, §2º c/c §1º, I, do
+        CPC/2015. Quando ambas as partes manifestam desinteresse na conciliação
+        antes da audiência (art. 334, §4º, I e II), a audiência não se realiza
+        e o prazo de defesa flui a partir da juntada do AR — não da publicação
+        da decisão de cancelamento nem do protocolo do pedido da parte.
+      legalBasis: "CPC/2015, Art. 335, §2º c/c §1º, I; Art. 334, §4º, I e II"
+      studentAnswer: >-
+        O prazo começa quando o juiz publicar a decisão cancelando a audiência.
+        O fundamento é o art. 335 do CPC, que trata do prazo de contestação.
+        O cancelamento da audiência muda o termo inicial, que passa a ser a
+        decisão judicial.
+    assert:
+      - type: javascript
+        value: file://asserts.js:isValidGradeJson
+        metric: json-shape-grade
+      - type: javascript
+        value: file://asserts.js:scoreInRange
+        metric: score-range
+      - type: llm-rubric
+        metric: qualidade-correcao
+        value: >-
+          Aluno errou o termo inicial (disse "publicação da decisão" — incorreto;
+          correto é "juntada do AR"). Citou art. 335 genericamente sem §2º.
+          Nota esperada entre 1 e 3 (de 5). Feedback deve apontar o erro de
+          termo inicial e citar art. 335 §2º c/c §1º, I explicitamente.
+          JSON com chaves score e feedback em pt-BR.

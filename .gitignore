@@ -46,3 +46,8 @@ scripts/out/
 
 # Xenomoon autonomous-agent local state (machine-managed, churns constantly)
 .xenomoon/
+
+# Eval harness outputs (promptfoo cache + results)
+evals/.promptfoo/
+evals/results/latest.json
+evals/node_modules/

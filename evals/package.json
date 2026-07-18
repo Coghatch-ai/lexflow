@@ -1,0 +1,19 @@
+{
+  "name": "lexflow-evals",
+  "version": "0.1.0",
+  "private": true,
+  "description": "promptfoo A/B eval harness — OpenAI vs Gemini on OAB AI tasks (oab-explain, oab-grade)",
+  "scripts": {
+    "eval": "promptfoo eval --config promptfooconfig.yaml",
+    "eval:output": "promptfoo eval --config promptfooconfig.yaml --output results/latest.json",
+    "view": "promptfoo view"
+  },
+  "devDependencies": {
+    "promptfoo": "^0.118.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3"
+    ]
+  }
+}
