@@ -28,9 +28,9 @@ jobs:
     env:
       AWS_REGION: sa-east-1
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: "24"
           cache: "pnpm"
@@ -44,7 +44,7 @@ jobs:
           # origin allowlist, repo scoped server-side). Not a secret — same public
           # value maggie ships in its config.
           VITE_ISSUES_FUNCTION_URL: https://calvwcs2st3frn6qkfwj6rhdta0foavj.lambda-url.sa-east-1.on.aws/
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
