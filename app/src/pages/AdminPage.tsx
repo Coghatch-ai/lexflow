@@ -3,6 +3,7 @@ import { Plus, Pencil, Trash2, ChevronLeft, ChevronRight, X } from 'lucide-react
 import { trpc } from '../shared/lib/trpc';
 import { useLov } from '../shared/hooks/use-lov';
 import type { AdminQuestionInput } from '@shared/domain/admin-question';
+import type { AiExplanation } from '@shared/domain/ai-eval';
 import { AdminGate } from './admin-gate';
 import { QuestionForm } from './admin-question-form';
 import { CsvImport } from './admin-csv-import';
@@ -12,11 +13,13 @@ export { AdminCalendarPage } from './admin-calendar-page';
 
 type QuestionsTab = 'list' | 'form' | 'import';
 
+type AdminEditInput = AdminQuestionInput & { aiExplanation?: AiExplanation | null };
+
 function QuestionsList({
   onEdit,
   onCreate,
 }: {
-  onEdit: (q: AdminQuestionInput) => void;
+  onEdit: (q: AdminEditInput) => void;
   onCreate: () => void;
 }): ReactElement {
   const utils = trpc.useUtils();
@@ -170,6 +173,7 @@ function QuestionsList({
                             examBoard: row.examBoard,
                             year: row.year,
                             phase: row.phase as '1st' | '2nd',
+                            aiExplanation: row.aiExplanation,
                           });
                         }}
                         className="p-1.5 rounded hover:bg-[#d9ab53]/10 text-ink-mute hover:text-[#d9ab53] transition-colors"
@@ -224,9 +228,9 @@ function QuestionsList({
 
 function QuestionsPanel(): ReactElement {
   const [activeTab, setActiveTab] = useState<QuestionsTab>('list');
-  const [editingQuestion, setEditingQuestion] = useState<AdminQuestionInput | null>(null);
+  const [editingQuestion, setEditingQuestion] = useState<AdminEditInput | null>(null);
 
-  function openEdit(q: AdminQuestionInput) {
+  function openEdit(q: AdminEditInput) {
     setEditingQuestion(q);
     setActiveTab('form');
   }

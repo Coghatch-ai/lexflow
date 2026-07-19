@@ -54,6 +54,7 @@ interface AiExplanationPanelProps {
   options: string[];
   correctAnswer: string;
   legalBasis: string | null;
+  initialExplanation: AiExplanation | null;
   onSaved: () => void;
 }
 
@@ -63,9 +64,10 @@ function AiExplanationPanel({
   options,
   correctAnswer,
   legalBasis,
+  initialExplanation,
   onSaved,
 }: AiExplanationPanelProps): ReactElement {
-  const [preview, setPreview] = useState<AiExplanation | null>(null);
+  const [preview, setPreview] = useState<AiExplanation | null>(initialExplanation);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -93,6 +95,7 @@ function AiExplanationPanel({
       const parsed = parseExplainResponse((data as { text: string }).text);
       if (parsed === null) throw new Error('A IA retornou um formato inesperado. Tente novamente.');
       setPreview(parsed);
+      saveMutation.mutate({ id: questionId, explanation: parsed });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Falha ao gerar explicação');
     } finally {
@@ -120,34 +123,35 @@ function AiExplanationPanel({
           <div className="bg-paper-sink rounded-lg p-3">
             <AiExplanationView aiExplanation={preview} explanation="" />
           </div>
-          <button
-            type="button"
-            onClick={() => { saveMutation.mutate({ id: questionId, explanation: preview }); }}
-            disabled={saveMutation.isPending}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-green-600 text-white text-xs font-semibold rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors"
-          >
-            <Check className="w-3.5 h-3.5" />
-            {saveMutation.isPending ? 'Salvando...' : 'Confirmar e salvar explicação'}
-          </button>
+          {saveMutation.isPending && (
+            <p className="text-xs text-ink-mute">Salvando...</p>
+          )}
+          {saveMutation.isSuccess && (
+            <p className="text-xs text-green-600 flex items-center gap-1">
+              <Check className="w-3 h-3" /> Salvo
+            </p>
+          )}
         </div>
       )}
     </div>
   );
 }
 
+type AdminEditInput = AdminQuestionInput & { aiExplanation?: AiExplanation | null };
+
 export function QuestionForm({
   initial,
   onSuccess,
   onCancel,
 }: {
-  initial: AdminQuestionInput | null;
+  initial: AdminEditInput | null;
   onSuccess: () => void;
   onCancel: () => void;
 }): ReactElement {
   const utils = trpc.useUtils();
   const isEdit = initial !== null;
 
-  const [form, setForm] = useState<AdminQuestionInput>(initial ?? BLANK_FORM);
+  const [form, setForm] = useState<AdminEditInput>(initial ?? BLANK_FORM);
   const [errors, setErrors] = useState<string[]>([]);
 
   const invalidate = (): void => { void utils.admin.questions.list.invalidate(); };
@@ -365,6 +369,7 @@ export function QuestionForm({
           options={form.options}
           correctAnswer={form.correctAnswer}
           legalBasis={form.legalBasis ?? null}
+          initialExplanation={form.aiExplanation ?? null}
           onSaved={invalidate}
         />
       )}
