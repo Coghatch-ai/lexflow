@@ -241,6 +241,23 @@ export const handler = async (event: S3Event): Promise<void> => {
       await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: jobKey }));
     } catch (err) {
       console.error("[relay] result write failed", { resultKey, err });
+      // If the result write failed and the job itself also failed, retry the
+      // failure-marker write once so the poller gets an actionable `status:error`
+      // instead of timing out with no cause (never-written result → pending loop).
+      if (!result.success) {
+        try {
+          await s3.send(
+            new PutObjectCommand({
+              Bucket: bucket,
+              Key: resultKey,
+              Body: JSON.stringify(result),
+              ContentType: "application/json",
+            }),
+          );
+        } catch (retryErr) {
+          console.error("[relay] failure-marker retry also failed", { resultKey, retryErr });
+        }
+      }
     }
   }
 };

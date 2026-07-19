@@ -44,18 +44,26 @@ export async function enqueueRelayJob(userId: string, payload: object): Promise<
 }
 
 // Poll the result for a job owned by `userId`. A missing result object → pending.
-export async function getRelayJob(userId: string, jobId: string): Promise<RelayJobStatus> {
+export async function getRelayJob(
+  userId: string,
+  jobId: string,
+  s3Client: S3Client = s3,
+): Promise<RelayJobStatus> {
   let text: string;
   try {
-    const out = await s3.send(
+    const out = await s3Client.send(
       new GetObjectCommand({ Bucket: OUTBOX_BUCKET, Key: `results/${userId}/${jobId}.json` }),
     );
     if (out.Body === undefined) return { status: "pending" };
     text = await out.Body.transformToString();
   } catch (err) {
     if (isNotFound(err)) return { status: "pending" };
+    const label = s3ErrLabel(err);
     console.error("[relay] result read failed", err);
-    throw new TRPCError({ code: "BAD_GATEWAY", message: "Falha ao ler o resultado" });
+    throw new TRPCError({
+      code: "BAD_GATEWAY",
+      message: `Falha ao ler o resultado da IA (${label}). Tente gerar novamente.`,
+    });
   }
   const parsed = JSON.parse(text) as { success: boolean; data?: unknown; error?: string };
   if (parsed.success) return { status: "done", data: parsed.data ?? null };
@@ -66,4 +74,16 @@ function isNotFound(err: unknown): boolean {
   if (typeof err !== "object" || err === null) return false;
   const e = err as { name?: string; $metadata?: { httpStatusCode?: number } };
   return e.name === "NoSuchKey" || e.$metadata?.httpStatusCode === 404;
+}
+
+// Returns a short diagnostic label from an S3 SDK error (no `any`, no `!`).
+// Prefers a meaningful `.name` (not the JS default "Error") then falls back to
+// the HTTP status from `$metadata`, then "unknown".
+function s3ErrLabel(err: unknown): string {
+  if (typeof err !== "object" || err === null) return "unknown";
+  const e = err as { name?: unknown; $metadata?: { httpStatusCode?: unknown } };
+  const status = e.$metadata?.httpStatusCode;
+  if (typeof status === "number") return `HTTP ${String(status)}`;
+  if (typeof e.name === "string" && e.name.length > 0 && e.name !== "Error") return e.name;
+  return "unknown";
 }
