@@ -107,8 +107,12 @@ Resources:
               Resource: !Sub "arn:aws:s3:::lexflow-relay-outbox-${Environment}/jobs/*"
             - Sid: RelayReadResult
               Effect: Allow
-              Action: s3:GetObject
-              Resource: !Sub "arn:aws:s3:::lexflow-relay-outbox-${Environment}/results/*"
+              Action:
+                - s3:GetObject
+                - s3:ListBucket
+              Resource:
+                - !Sub "arn:aws:s3:::lexflow-relay-outbox-${Environment}/results/*"
+                - !Sub "arn:aws:s3:::lexflow-relay-outbox-${Environment}"
       Events:
         ApiEvent:
           Type: HttpApi
