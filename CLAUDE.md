@@ -26,11 +26,23 @@ text is Brazilian Portuguese (pt-BR). URLs/slugs are English kebab-case.
   local `users` row so signups auto-provision. Requires the `/lexflow/api/{env}/clerk-webhook-secret`
   SSM param (`whsec_…`) + the endpoint configured in the Clerk dashboard. `pnpm db:create-user
 <clerk-user-id>` remains as a manual fallback.
-- **Outbound relay:** `lexflow-relay-{env}` — a **non-VPC**, channel-routed Lambda the API invokes
-  over IAM (`api/lib/relay.ts` → `api/relay/relay-handler.ts`); the VPC API Lambda has no internet
-  egress (no NAT), so all outbound calls go through it. Channels: `ai` (Gemini), `github` (issue
-  ops), `email` (SMTP scaffold). Secrets under SSM `/lexflow/relay/{env}/*`. This replaced the
-  shared `mrhewbuc-issues` central Lambda. See `docs/relay_lambda.md` + `docs/smtp_notification_setup.md`.
+- **Outbound relay:** `lexflow-relay-{env}` — a **non-VPC**, channel-routed Lambda. The VPC API
+  Lambda has no internet egress (no NAT), so all outbound calls go through it via an **S3 async
+  job pattern**: the API writes a job to `jobs/{userId}/{jobId}.json` in the relay outbox S3 bucket
+  (free S3 gateway endpoint, no NAT); an S3 ObjectCreated event triggers the relay Lambda, which
+  processes the channel, writes the result to `results/{userId}/{jobId}.json`, and deletes the job;
+  the API polls `getRelayJob()` (`api/lib/relay.ts`) by reading the result key until it appears
+  (`status:pending`), contains a success payload (`status:done`), or contains a failure marker
+  (`status:error`). Code: `api/lib/relay.ts` (enqueue + poll) → `api/relay/relay-handler.ts`
+  (S3-triggered handler). Channels: `ai` (multi-provider: Gemini or OpenAI, selected by SSM
+  `ai-provider`; production currently runs OpenAI — see below), `email` (SMTP scaffold). GitHub
+  issues moved to the central `mrhewbuc-issues` service (browser-direct), not handled here.
+  **AI provider selection** (`api/relay/relay-handler.ts`): SSM `{prefix}/ai-provider` selects
+  `"gemini"` (default fallback in code) or `"openai"`. Model: `{prefix}/ai-model` (Gemini) or
+  `{prefix}/openai-model` (OpenAI; code default `gpt-4o-mini`). API keys: `{prefix}/ai-api-key`
+  (Gemini) or `{prefix}/openai-api-key` (OpenAI). Provider/model params are read live (uncached,
+  non-secret) so they can be swapped via SSM without a redeploy. Secrets under SSM
+  `/lexflow/relay/{env}/*`. See `docs/relay_lambda.md` + `docs/smtp_notification_setup.md`.
 - **Package manager:** pnpm 10. **Node:** 24 (Lambda runtime + CI).
 
 ## Data model — single-user B2C (NOT multi-tenant)
