@@ -6,7 +6,7 @@
 // not user-scoped.
 
 import { z } from "zod";
-import { and, asc, eq, inArray, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, sql, type SQL } from "drizzle-orm";
 import { db } from "../../db/client";
 import {
   examCalendarEvents,
@@ -55,13 +55,31 @@ const sm2ConfigInput = z.object({
   secondInterval: z.number().int().min(2).max(60),
 });
 
-const listInput = z.object({
+export const listInput = z.object({
   discipline: z.string().min(1).optional(),
   examBoard: z.string().min(1).optional(),
   difficulty: z.enum(["easy", "medium", "hard"]).optional(),
+  hasAiExplanation: z.enum(["all", "yes", "no"]).default("all"),
   offset: z.number().int().min(0).default(0),
   limit: z.number().int().min(1).max(100).default(50),
 });
+
+/**
+ * Returns the Drizzle SQL condition for the hasAiExplanation filter:
+ *   "yes"  → isNotNull(oabQuestions.aiExplanation)
+ *   "no"   → isNull(oabQuestions.aiExplanation)
+ *   "all"  → undefined (no condition added)
+ *
+ * Exported for unit testing — the test imports this real function so any
+ * swap of isNull↔isNotNull or removal of the condition is caught immediately.
+ */
+export function aiExplanationFilter(
+  value: "all" | "yes" | "no",
+): ReturnType<typeof isNotNull> | ReturnType<typeof isNull> | undefined {
+  if (value === "yes") return isNotNull(oabQuestions.aiExplanation);
+  if (value === "no") return isNull(oabQuestions.aiExplanation);
+  return undefined;
+}
 
 function generateId(): string {
   return `qi${Date.now()}`;
@@ -227,6 +245,8 @@ export const adminRouter = router({
       if (input.discipline !== undefined) conds.push(eq(oabQuestions.discipline, input.discipline));
       if (input.examBoard !== undefined) conds.push(eq(oabQuestions.examBoard, input.examBoard));
       if (input.difficulty !== undefined) conds.push(eq(oabQuestions.difficulty, input.difficulty));
+      const aiCond = aiExplanationFilter(input.hasAiExplanation);
+      if (aiCond !== undefined) conds.push(aiCond);
 
       const where = conds.length > 0 ? and(...conds) : undefined;
 

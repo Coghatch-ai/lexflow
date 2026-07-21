@@ -26,6 +26,7 @@ function QuestionsList({
   const [filterDiscipline, setFilterDiscipline] = useState('');
   const [filterBoard, setFilterBoard] = useState('');
   const [filterDifficulty, setFilterDifficulty] = useState('');
+  const [filterAi, setFilterAi] = useState<'all' | 'yes' | 'no'>('all');
   const [offset, setOffset] = useState(0);
   const LIMIT = 50;
 
@@ -37,6 +38,7 @@ function QuestionsList({
     discipline: filterDiscipline !== '' ? filterDiscipline : undefined,
     examBoard: filterBoard !== '' ? filterBoard : undefined,
     difficulty: filterDifficulty !== '' ? (filterDifficulty as 'easy' | 'medium' | 'hard') : undefined,
+    hasAiExplanation: filterAi,
     offset,
     limit: LIMIT,
   });
@@ -52,6 +54,7 @@ function QuestionsList({
     setFilterDiscipline('');
     setFilterBoard('');
     setFilterDifficulty('');
+    setFilterAi('all');
     setOffset(0);
   }
 
@@ -103,7 +106,19 @@ function QuestionsList({
             ))}
           </select>
         </div>
-        {(filterDiscipline.length > 0 || filterBoard.length > 0 || filterDifficulty.length > 0) && (
+        <div>
+          <label className="block text-xs text-ink-mute mb-1">Explicação IA</label>
+          <select
+            value={filterAi}
+            onChange={(e) => { setFilterAi(e.target.value as 'all' | 'yes' | 'no'); setOffset(0); }}
+            className="text-sm border border-line rounded-md px-3 py-1.5 bg-surface text-ink focus:outline-none focus:ring-1 focus:ring-[#d9ab53]"
+          >
+            <option value="all">Todas</option>
+            <option value="yes">Com explicação IA</option>
+            <option value="no">Sem explicação IA</option>
+          </select>
+        </div>
+        {(filterDiscipline.length > 0 || filterBoard.length > 0 || filterDifficulty.length > 0 || filterAi !== 'all') && (
           <button
             onClick={resetFilters}
             className="text-sm text-ink-mute hover:text-ink flex items-center gap-1 pb-0.5"
@@ -134,6 +149,7 @@ function QuestionsList({
                 <th className="px-3 py-2.5 font-medium">Banca</th>
                 <th className="px-3 py-2.5 font-medium">Ano</th>
                 <th className="px-3 py-2.5 font-medium">Dificuldade</th>
+                <th className="px-3 py-2.5 font-medium w-12">IA</th>
                 <th className="px-3 py-2.5 font-medium w-20">Ações</th>
               </tr>
             </thead>
@@ -153,6 +169,11 @@ function QuestionsList({
                     <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${diffBadge[row.difficulty] ?? ''}`}>
                       {difficultyLov.labelOf(row.difficulty)}
                     </span>
+                  </td>
+                  <td className="px-3 py-2.5">
+                    {row.aiExplanation !== null
+                      ? <span className="px-1.5 py-0.5 rounded text-xs font-medium text-emerald-700 bg-emerald-50">IA ✓</span>
+                      : <span className="text-xs text-ink-mute">—</span>}
                   </td>
                   <td className="px-3 py-2.5">
                     <div className="flex items-center gap-1">
