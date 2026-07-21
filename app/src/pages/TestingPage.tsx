@@ -11,6 +11,7 @@ import { moveToEnd } from '../shared/lib/exam-queue';
 import { accuracyPct } from '@shared/domain/scoring';
 import { useNotesAndBookmarks, type NotesAndBookmarks } from '../shared/hooks/use-notes-bookmarks';
 import QuestionCard from '@/shared/components/QuestionCard';
+import AiExplanationButton from '@/shared/components/AiExplanationButton';
 
 type Mode = 'standard' | 'adaptive' | 'spaced' | 'real';
 type QuestionStatus = 'not-started' | 'in-progress' | 'completed';
@@ -233,6 +234,25 @@ function InProgress({
           onToggleBookmark={() => { handleToggleBookmark(currentQuestion.id); }}
         />
 
+        {selectedAnswer.length > 0 && (
+          <div className={`p-3 rounded-lg text-sm font-medium mb-2 ${
+            selectedAnswer === currentQuestion.correctAnswer
+              ? 'bg-green-50 text-green-700 border border-green-200'
+              : 'bg-red-50 text-red-700 border border-red-200'
+          }`}>
+            {selectedAnswer === currentQuestion.correctAnswer
+              ? 'Correto!'
+              : `Incorreto. Resposta certa: ${currentQuestion.correctAnswer}`}
+          </div>
+        )}
+        {selectedAnswer.length > 0 && (
+          <AiExplanationButton
+            questionId={currentQuestion.id}
+            explanation={currentQuestion.explanation}
+            aiExplanation={null}
+          />
+        )}
+
         <div className="flex gap-3">
           <button
             onClick={onPostpone}
@@ -318,6 +338,11 @@ function Completed({ questions, answers, disciplineLov, onSwitchMode, onRestart 
                     <XCircle className="w-5 h-5 text-red-600 flex-shrink-0" />
                   )}
                 </div>
+                <AiExplanationButton
+                  questionId={q.id}
+                  explanation={q.explanation}
+                  aiExplanation={null}
+                />
               </div>
             );
           })}
