@@ -146,23 +146,75 @@ export function stripCorrectLetterFromWhyWrong(
   return canonicalized;
 }
 
+// Pillar keys the model sometimes nests inside whyWrong instead of hoisting to the top level.
+// These are never valid alternative letters, so recovering them is safe and unambiguous.
+const NESTED_PILLAR_KEYS = ["memoryTip", "commonTraps"] as const;
+
+// Attempt to recover an AiExplanation when the model nested `memoryTip`/`commonTraps`
+// as keys inside `whyWrong` instead of hoisting them to the top level (observed drift
+// with gpt-5.4-mini: whyWrong:{A,B,C,memoryTip,commonTraps} with no top-level pillars).
+// Returns a patched object ready for re-validation, or null if recovery is not possible.
+function recoverNestedPillars(raw: Record<string, unknown>): Record<string, unknown> | null {
+  const whyWrong = raw["whyWrong"];
+  if (typeof whyWrong !== "object" || whyWrong === null || Array.isArray(whyWrong)) return null;
+  const wrongMap = whyWrong as Record<string, unknown>;
+
+  // Check whether at least one pillar is present inside whyWrong.
+  const hasPillarInside = NESTED_PILLAR_KEYS.some((k) => typeof wrongMap[k] === "string");
+  if (!hasPillarInside) return null;
+
+  // Lift pillars to top level; rebuild whyWrong without them.
+  const recovered: Record<string, unknown> = { ...raw };
+  const cleanedWrong: Record<string, string> = {};
+  for (const [k, v] of Object.entries(wrongMap)) {
+    if ((NESTED_PILLAR_KEYS as readonly string[]).includes(k)) {
+      // Lift to top level only if the top-level key is absent or empty.
+      const existing = recovered[k];
+      if (typeof existing !== "string" || existing.length === 0) {
+        recovered[k] = v;
+      }
+    } else if (typeof v === "string") {
+      cleanedWrong[k] = v;
+    }
+  }
+  recovered["whyWrong"] = cleanedWrong;
+  return recovered;
+}
+
 // Parse the relay's raw text into an AiExplanation. Tolerant of stray prose or
 // code fences around the JSON. Returns null if the response is invalid.
 // Optional `correctLetter` (A–E): when provided, strips that letter from whyWrong
 // (case-insensitive, drift-tolerant via canonicalization) so the correct alternative
 // never leaks into the "wrong alternatives" map. Existing single-arg callers unchanged.
+//
+// Recovery layer: when the initial safeParse fails because `memoryTip`/`commonTraps`
+// are missing at the top level, attempts to lift them out of whyWrong (model drift
+// observed with gpt-5.4-mini) and re-validates before returning null.
 export function parseExplainResponse(text: string, correctLetter?: string): AiExplanation | null {
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
   if (start === -1 || end <= start) return null;
   try {
     const raw = JSON.parse(text.slice(start, end + 1)) as Record<string, unknown>;
-    const result = aiExplanationSchema.safeParse(raw);
-    if (!result.success) return null;
+
+    // First attempt: normal parse.
+    const first = aiExplanationSchema.safeParse(raw);
+    if (first.success) {
+      return {
+        ...first.data,
+        whyWrong: stripCorrectLetterFromWhyWrong(first.data.whyWrong, correctLetter),
+      };
+    }
+
+    // Second attempt: recover nested pillars and re-validate.
+    const patched = recoverNestedPillars(raw);
+    if (patched === null) return null;
+    const second = aiExplanationSchema.safeParse(patched);
+    if (!second.success) return null;
 
     return {
-      ...result.data,
-      whyWrong: stripCorrectLetterFromWhyWrong(result.data.whyWrong, correctLetter),
+      ...second.data,
+      whyWrong: stripCorrectLetterFromWhyWrong(second.data.whyWrong, correctLetter),
     };
   } catch {
     return null;

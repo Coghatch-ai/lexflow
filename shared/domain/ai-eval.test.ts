@@ -333,3 +333,63 @@ describe("stripCorrectLetterFromWhyWrong", () => {
     expect(result).toEqual({ A: "errada A", B: "errada B", C: "errada C" });
   });
 });
+
+// Regression: gpt-5.4-mini nested memoryTip+commonTraps inside whyWrong instead
+// of hoisting them to the top level → aiExplanationSchema.safeParse failed →
+// parseExplainResponse returned null → 502 "A IA retornou um formato inesperado".
+// Shape taken verbatim from the real S3 relay result for job fd32ecce-… (issue #47).
+describe("parseExplainResponse — nested-pillars recovery (issue #47 regression)", () => {
+  const nestedShape = JSON.stringify({
+    whyCorrect:
+      "A alternativa correta é a letra D — nas compras realizadas fora do estabelecimento comercial, especialmente em ambiente virtual, o consumidor tem direito de arrependimento no prazo de 7 dias a contar do recebimento do produto, nos termos do art. 49 do CDC.",
+    whyWrong: {
+      A: "Errada. O direito de arrependimento não exige motivação e não está condicionado ao decurso de 48 horas da transação.",
+      B: "Errada. O fornecedor não pode impor ao consumidor a apresentação de justificativa como condição para exercer o arrependimento.",
+      C: "Errada. A boa-fé objetiva não autoriza o fornecedor a criar requisito não previsto em lei.",
+      memoryTip:
+        "Lembre da regra: compra fora da loja = 7 dias para voltar atrás, sem dar explicação.",
+      commonTraps:
+        "1) Confundir o prazo legal de 7 dias com 48 horas. 2) Achar que o fornecedor pode exigir justificativa.",
+    },
+  });
+
+  it("recovers nested memoryTip+commonTraps and returns a valid AiExplanation", () => {
+    const result = parseExplainResponse(nestedShape);
+    expect(result).not.toBeNull();
+    expect(result?.memoryTip).toContain("7 dias");
+    expect(result?.commonTraps).toContain("48 horas");
+  });
+
+  it("whyWrong contains only letter keys after recovery", () => {
+    const result = parseExplainResponse(nestedShape);
+    expect(result).not.toBeNull();
+    const keys = Object.keys(result?.whyWrong ?? {});
+    expect(keys).toEqual(expect.arrayContaining(["A", "B", "C"]));
+    expect(keys).not.toContain("memoryTip");
+    expect(keys).not.toContain("commonTraps");
+  });
+
+  it("strips correct letter from whyWrong after recovery", () => {
+    const result = parseExplainResponse(nestedShape, "D");
+    expect(result).not.toBeNull();
+    expect(result?.whyWrong).not.toHaveProperty("D");
+    expect(Object.keys(result?.whyWrong ?? {})).toEqual(expect.arrayContaining(["A", "B", "C"]));
+  });
+
+  it("top-level memoryTip wins over nested when both present and non-empty", () => {
+    const mixedShape = JSON.stringify({
+      whyCorrect: "A alternativa correta é a letra D — explicação.",
+      whyWrong: {
+        A: "Errada A.",
+        memoryTip: "nested tip (should be ignored)",
+        commonTraps: "nested traps (used because top-level empty).",
+      },
+      memoryTip: "top-level tip (should win)",
+      commonTraps: "",
+    });
+    // top-level commonTraps is "" → fails min(1) → recovery lifts nested one.
+    const result = parseExplainResponse(mixedShape);
+    expect(result?.memoryTip).toBe("top-level tip (should win)");
+    expect(result?.commonTraps).toContain("nested traps");
+  });
+});
