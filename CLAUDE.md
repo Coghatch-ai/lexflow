@@ -160,3 +160,6 @@ with `gh issue view <n> --json labels` before reporting the issue done.
 - Deploy manually or run `db:push`.
 - Use `console.log` (only `warn`/`error`), `any`, or non-null `!`.
 - Create a git branch without user approval.
+- Add or remove a dependency (`pnpm add`/`remove`/`install <pkg>`) without explicit approval —
+  tests use the existing plain-vitest setup (no jsdom, no React Testing Library). A dirtied
+  `pnpm-lock.yaml` with a clean `package.json` means restore it: `git restore pnpm-lock.yaml`.
