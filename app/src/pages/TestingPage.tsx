@@ -12,6 +12,7 @@ import { accuracyPct } from '@shared/domain/scoring';
 import { useNotesAndBookmarks, type NotesAndBookmarks } from '../shared/hooks/use-notes-bookmarks';
 import QuestionCard from '@/shared/components/QuestionCard';
 import AiExplanationButton from '@/shared/components/AiExplanationButton';
+import { primaryLabel, primaryDisabled, canPostponeGuard } from './testing-flow-guards';
 
 type Mode = 'standard' | 'adaptive' | 'spaced' | 'real';
 type QuestionStatus = 'not-started' | 'in-progress' | 'completed';
@@ -177,6 +178,8 @@ interface InProgressProps {
   totalQuestions: number;
   timer: number;
   selectedAnswer: string;
+  checked: boolean;
+  onCheck: () => void;
   notesAndBookmarks: NotesAndBookmarks;
   disciplineLov: Lov;
   examBoardLov: Lov;
@@ -189,10 +192,14 @@ interface InProgressProps {
 
 function InProgress({
   currentQuestion, currentIndex, totalAnswered, totalQuestions, timer, selectedAnswer,
+  checked, onCheck,
   notesAndBookmarks, disciplineLov, examBoardLov, onBack, onSelect, onNext, canPostpone, onPostpone,
 }: InProgressProps): ReactElement {
   const { localNotes, bookmarkedIds, handleNoteChange, handleToggleBookmark } = notesAndBookmarks;
   const progress = (totalAnswered / (totalQuestions > 0 ? totalQuestions : 1)) * 100;
+  const isLast = currentIndex + 1 === totalQuestions;
+  const btnLabel = primaryLabel({ checked, isLast });
+  const btnDisabled = primaryDisabled({ checked, selected: selectedAnswer });
 
   return (
     <div className="space-y-6">
@@ -232,43 +239,34 @@ function InProgress({
           onNoteChange={(text) => { handleNoteChange(currentQuestion.id, text); }}
           isBookmarked={bookmarkedIds.has(currentQuestion.id)}
           onToggleBookmark={() => { handleToggleBookmark(currentQuestion.id); }}
+          locked={checked}
+          correctAnswer={currentQuestion.correctAnswer}
         />
 
-        {selectedAnswer.length > 0 && (
-          <div className={`p-3 rounded-lg text-sm font-medium mb-2 ${
-            selectedAnswer === currentQuestion.correctAnswer
-              ? 'bg-green-50 text-green-700 border border-green-200'
-              : 'bg-red-50 text-red-700 border border-red-200'
-          }`}>
-            {selectedAnswer === currentQuestion.correctAnswer
-              ? 'Correto!'
-              : `Incorreto. Resposta certa: ${currentQuestion.correctAnswer}`}
+        {checked && (<>
+          <div className={`p-3 rounded-lg text-sm font-medium mb-2 ${selectedAnswer === currentQuestion.correctAnswer ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
+            {selectedAnswer === currentQuestion.correctAnswer ? 'Correto!' : `Incorreto. Resposta certa: ${currentQuestion.correctAnswer}`}
           </div>
-        )}
-        {selectedAnswer.length > 0 && (
-          <AiExplanationButton
-            questionId={currentQuestion.id}
-            explanation={currentQuestion.explanation}
-            aiExplanation={null}
-          />
-        )}
+          <AiExplanationButton questionId={currentQuestion.id} explanation={currentQuestion.explanation} aiExplanation={null} />
+        </>)}
 
         <div className="flex gap-3">
+          {canPostpone && (
+            <button
+              onClick={onPostpone}
+              title="Mover esta questão para o fim do simulado"
+              className="flex-1 bg-gray-200 text-gray-700 py-3 rounded-lg font-semibold hover:bg-gray-300 transition flex items-center justify-center gap-2"
+            >
+              <ArrowRightToLine className="w-5 h-5" />
+              Responder depois
+            </button>
+          )}
           <button
-            onClick={onPostpone}
-            disabled={!canPostpone}
-            title={canPostpone ? 'Mover esta questão para o fim do simulado' : 'Última questão pendente — responda para finalizar'}
-            className="flex-1 bg-gray-200 text-gray-700 py-3 rounded-lg font-semibold hover:bg-gray-300 transition disabled:opacity-50 flex items-center justify-center gap-2"
-          >
-            <ArrowRightToLine className="w-5 h-5" />
-            Responder depois
-          </button>
-          <button
-            onClick={onNext}
-            disabled={selectedAnswer.length === 0}
+            onClick={checked ? onNext : onCheck}
+            disabled={btnDisabled}
             className="flex-1 bg-gradient-to-r from-[#26262c] to-[#26262c] text-white py-3 rounded-lg font-semibold hover:shadow-lg transition disabled:opacity-50 flex items-center justify-center gap-2"
           >
-            {currentIndex + 1 === totalQuestions ? 'Finalizar' : 'Próxima'}
+            {btnLabel}
             <ChevronRight className="w-5 h-5" />
           </button>
         </div>
@@ -332,17 +330,9 @@ function Completed({ questions, answers, disciplineLov, onSwitchMode, onRestart 
                     <p className="font-medium text-gray-800">Questão {idx + 1}</p>
                     <p className="text-sm text-gray-600">{disciplineLov.labelOf(q.discipline)}</p>
                   </div>
-                  {answer.correct ? (
-                    <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" />
-                  ) : (
-                    <XCircle className="w-5 h-5 text-red-600 flex-shrink-0" />
-                  )}
+                  {answer.correct ? <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" /> : <XCircle className="w-5 h-5 text-red-600 flex-shrink-0" />}
                 </div>
-                <AiExplanationButton
-                  questionId={q.id}
-                  explanation={q.explanation}
-                  aiExplanation={null}
-                />
+                <AiExplanationButton questionId={q.id} explanation={q.explanation} aiExplanation={null} />
               </div>
             );
           })}
@@ -387,6 +377,7 @@ export default function TestingPage(): ReactElement {
   const [questions, setQuestions] = useState<TestQuestion[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [selectedAnswer, setSelectedAnswer] = useState('');
+  const [checked, setChecked] = useState(false);
   const [answers, setAnswers] = useState<Answer[]>([]);
   const [loading, setLoading] = useState(false);
   const [timeSpent, setTimeSpent] = useState(0);
@@ -443,6 +434,7 @@ export default function TestingPage(): ReactElement {
       setCurrentIndex(0);
       setAnswers([]);
       setSelectedAnswer('');
+      setChecked(false);
       setTimeSpent(0);
       setTimer(0);
       carriedTimeRef.current = new Map();
@@ -473,6 +465,7 @@ export default function TestingPage(): ReactElement {
     } else {
       setCurrentIndex(currentIndex + 1);
       setSelectedAnswer('');
+      setChecked(false);
       setTimeSpent(0);
     }
   };
@@ -488,6 +481,7 @@ export default function TestingPage(): ReactElement {
     );
     setQuestions((prev) => moveToEnd(prev, currentIndex));
     setSelectedAnswer('');
+    setChecked(false);
     setTimeSpent(0);
   };
 
@@ -519,13 +513,15 @@ export default function TestingPage(): ReactElement {
         totalQuestions={questions.length}
         timer={timer}
         selectedAnswer={selectedAnswer}
+        checked={checked}
+        onCheck={() => { setChecked(true); }}
         notesAndBookmarks={notesAndBookmarks}
         disciplineLov={disciplineLov}
         examBoardLov={examBoardLov}
         onBack={() => { setMode(null); setStatus('not-started'); }}
         onSelect={setSelectedAnswer}
         onNext={handleNext}
-        canPostpone={currentIndex < questions.length - 1}
+        canPostpone={canPostponeGuard({ checked, hasMoreQuestions: currentIndex < questions.length - 1 })}
         onPostpone={handlePostpone}
       />
     );

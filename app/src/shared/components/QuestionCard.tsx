@@ -18,6 +18,10 @@ type QuestionCardProps = {
   onNoteChange?: (text: string) => void;
   isBookmarked?: boolean;
   onToggleBookmark?: () => void;
+  /** When true, option buttons are disabled (no re-selection after Conferir). */
+  locked?: boolean;
+  /** Highlight the correct option when locked (green = correct, red = wrong selection). */
+  correctAnswer?: string;
 };
 
 export default function QuestionCard({
@@ -31,6 +35,8 @@ export default function QuestionCard({
   onNoteChange,
   isBookmarked,
   onToggleBookmark,
+  locked = false,
+  correctAnswer,
 }: QuestionCardProps): React.JSX.Element {
   return (
     <>
@@ -43,32 +49,48 @@ export default function QuestionCard({
       </div>
 
       <div className="space-y-3 mb-6">
-        {options.map((option, idx) => (
-          <button
-            key={idx}
-            onClick={() => {
-              onSelect(option);
-            }}
-            className={`w-full text-left p-4 border-2 rounded-lg transition ${
-              selectedAnswer === option
+        {options.map((option, idx) => {
+          const isSelected = selectedAnswer === option;
+          const isCorrect = locked && correctAnswer === option;
+          const isWrong = locked && isSelected && option !== correctAnswer;
+
+          const borderClass = isCorrect
+            ? "border-green-500 bg-green-50"
+            : isWrong
+              ? "border-red-500 bg-red-50"
+              : isSelected
                 ? "border-[#16161a] bg-[#16161a]/5"
-                : "border-gray-200 hover:border-[#16161a]/50"
-            }`}
-          >
-            <div className="flex items-start gap-3">
-              <div
-                className={`w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 mt-0.5 text-xs font-semibold ${
-                  selectedAnswer === option
-                    ? "border-[#16161a] bg-[#16161a] text-white"
-                    : "border-gray-300 text-gray-500"
-                }`}
-              >
-                {String.fromCharCode(65 + idx)}
+                : "border-gray-200 hover:border-[#16161a]/50";
+
+          const circleClass = isCorrect
+            ? "border-green-500 bg-green-500 text-white"
+            : isWrong
+              ? "border-red-500 bg-red-500 text-white"
+              : isSelected
+                ? "border-[#16161a] bg-[#16161a] text-white"
+                : "border-gray-300 text-gray-500";
+
+          return (
+            <button
+              key={idx}
+              onClick={() => {
+                if (locked) return;
+                onSelect(option);
+              }}
+              disabled={locked}
+              className={`w-full text-left p-4 border-2 rounded-lg transition ${borderClass}`}
+            >
+              <div className="flex items-start gap-3">
+                <div
+                  className={`w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 mt-0.5 text-xs font-semibold ${circleClass}`}
+                >
+                  {String.fromCharCode(65 + idx)}
+                </div>
+                <span className="text-gray-800">{option}</span>
               </div>
-              <span className="text-gray-800">{option}</span>
-            </div>
-          </button>
-        ))}
+            </button>
+          );
+        })}
       </div>
 
       {(onToggleBookmark !== undefined || onNoteChange !== undefined) && (
