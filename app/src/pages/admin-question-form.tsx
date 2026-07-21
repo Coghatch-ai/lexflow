@@ -4,7 +4,7 @@ import { trpc } from '../shared/lib/trpc';
 import { useLov } from '../shared/hooks/use-lov';
 import { adminQuestionInputSchema, type AdminQuestionInput } from '@shared/domain/admin-question';
 import { BLANK_FORM } from './admin-csv-helpers';
-import { type AiExplanation, parseExplainResponse } from '@shared/domain/ai-eval';
+import { type AiExplanation, optionLetter, parseExplainResponse } from '@shared/domain/ai-eval';
 import { pollRelayJob } from '../shared/lib/relay-poll';
 import AiExplanationView from '../shared/components/AiExplanationView';
 import { extractWhyCorrect } from './admin-question-form-helpers';
@@ -96,7 +96,7 @@ function AiExplanationPanel({
       });
       const data = await pollRelayJob(() => utils.relay.job.fetch({ jobId }, { staleTime: 0 }));
       const rawText = (data as { text: string }).text;
-      const parsed = parseExplainResponse(rawText);
+      const parsed = parseExplainResponse(rawText, optionLetter(options, correctAnswer));
       if (parsed === null) throw new Error('A IA retornou um formato inesperado. Tente novamente.');
       setPreview(parsed);
       const whyCorrect = extractWhyCorrect(rawText);

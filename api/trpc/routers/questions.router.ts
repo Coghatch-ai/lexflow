@@ -10,7 +10,11 @@ import { db } from "../../db/client";
 import { oabQuestions, spacedRepetitionConfig, userQuestionStates } from "../../../drizzle/schema";
 import { protectedProcedure, router } from "../procedures";
 import { DEFAULT_SM2_CONFIG } from "../../../shared/domain/spaced-repetition";
-import { buildExplainVariables, parseExplainResponse } from "../../../shared/domain/ai-eval";
+import {
+  buildExplainVariables,
+  optionLetter,
+  parseExplainResponse,
+} from "../../../shared/domain/ai-eval";
 import { enqueueRelayJob, getRelayJob } from "../../lib/relay";
 import { resolveAiPrompt } from "../../lib/ai-prompts";
 
@@ -183,7 +187,17 @@ export const questionsRouter = router({
         });
       }
       const raw = job.data as { text: string };
-      const parsed = parseExplainResponse(raw.text);
+
+      // Fetch options + correctAnswer to derive the correct letter for stripping.
+      const [qRow] = await db
+        .select({ options: oabQuestions.options, correctAnswer: oabQuestions.correctAnswer })
+        .from(oabQuestions)
+        .where(eq(oabQuestions.id, input.id))
+        .limit(1);
+      const letter =
+        qRow !== undefined ? optionLetter(qRow.options, qRow.correctAnswer) : undefined;
+
+      const parsed = parseExplainResponse(raw.text, letter);
       if (parsed === null) {
         throw new TRPCError({
           code: "BAD_GATEWAY",

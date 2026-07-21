@@ -18,7 +18,12 @@ import { adminProcedure, router } from "../procedures";
 import { adminQuestionInputSchema } from "../../../shared/domain/admin-question";
 import { deriveEventDate } from "../../../shared/domain/exam-calendar";
 import { DEFAULT_SM2_CONFIG } from "../../../shared/domain/spaced-repetition";
-import { aiExplanationSchema, buildExplainVariables } from "../../../shared/domain/ai-eval";
+import {
+  aiExplanationSchema,
+  buildExplainVariables,
+  optionLetter,
+  stripCorrectLetterFromWhyWrong,
+} from "../../../shared/domain/ai-eval";
 import { enqueueRelayJob } from "../../lib/relay";
 import { resolveAiPrompt } from "../../lib/ai-prompts";
 
@@ -386,12 +391,26 @@ export const adminRouter = router({
     // Persist an admin-reviewed AI explanation for a question. The explanation is
     // generated via generateExplanation and sent here already parsed —
     // client-asserted, Clerk-gated to admin role. Mirrors discursive saveAnswer.
+    // Defense-in-depth: re-strip the correct letter server-side in case the client
+    // preview did not (or an older client sent the payload before the fix).
     saveAiExplanation: adminProcedure
       .input(z.object({ id: z.string().min(1), explanation: aiExplanationSchema }))
       .mutation(async ({ input }) => {
+        // Fetch options + correctAnswer to derive the correct letter for stripping.
+        const [qRow] = await db
+          .select({ options: oabQuestions.options, correctAnswer: oabQuestions.correctAnswer })
+          .from(oabQuestions)
+          .where(eq(oabQuestions.id, input.id))
+          .limit(1);
+        const letter =
+          qRow !== undefined ? optionLetter(qRow.options, qRow.correctAnswer) : undefined;
+        const explanation = {
+          ...input.explanation,
+          whyWrong: stripCorrectLetterFromWhyWrong(input.explanation.whyWrong, letter),
+        };
         await db
           .update(oabQuestions)
-          .set({ aiExplanation: input.explanation, lastUpdAt: new Date().toISOString() })
+          .set({ aiExplanation: explanation, lastUpdAt: new Date().toISOString() })
           .where(eq(oabQuestions.id, input.id));
         return { ok: true as const };
       }),

@@ -103,9 +103,55 @@ export function buildExplainVariables(input: ExplainInput): Record<string, strin
   };
 }
 
+// Map an option text to its letter (A–E) by index in the options array.
+// Returns undefined when correctAnswer is not found in options (safe no-op for callers).
+export function optionLetter(options: string[], correctAnswer: string): string | undefined {
+  const idx = options.indexOf(correctAnswer);
+  return idx === -1 ? undefined : ["A", "B", "C", "D", "E"][idx];
+}
+
+// Canonicalize a whyWrong key: trim → uppercase → strip leading "LETRA " → first [A-E] char.
+// Returns undefined when the result is not a valid letter.
+export function canonicalizeKey(raw: string): string | undefined {
+  const up = raw
+    .trim()
+    .toUpperCase()
+    .replace(/^LETRA\s+/, "");
+  const match = /^([A-E])/.exec(up);
+  return match?.[1];
+}
+
+// Rebuild a whyWrong map with canonicalized keys, then strip the correct letter.
+// Handles drifted keys from older/pre-fix clients (e.g. "letra D", " d ").
+// Used by both parseExplainResponse (parse path) and saveAiExplanation (admin
+// defense-in-depth path) so both share the same single source of truth.
+// When correctLetter is undefined the function still canonicalizes keys (safe).
+export function stripCorrectLetterFromWhyWrong(
+  whyWrong: Record<string, string>,
+  correctLetter: string | undefined,
+): Record<string, string> {
+  const canonicalized: Record<string, string> = {};
+  for (const [k, v] of Object.entries(whyWrong)) {
+    const ck = canonicalizeKey(k);
+    if (ck !== undefined) {
+      canonicalized[ck] = v;
+    }
+  }
+  if (correctLetter !== undefined) {
+    const ck = canonicalizeKey(correctLetter);
+    if (ck !== undefined) {
+      delete canonicalized[ck];
+    }
+  }
+  return canonicalized;
+}
+
 // Parse the relay's raw text into an AiExplanation. Tolerant of stray prose or
 // code fences around the JSON. Returns null if the response is invalid.
-export function parseExplainResponse(text: string): AiExplanation | null {
+// Optional `correctLetter` (A–E): when provided, strips that letter from whyWrong
+// (case-insensitive, drift-tolerant via canonicalization) so the correct alternative
+// never leaks into the "wrong alternatives" map. Existing single-arg callers unchanged.
+export function parseExplainResponse(text: string, correctLetter?: string): AiExplanation | null {
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
   if (start === -1 || end <= start) return null;
@@ -113,7 +159,11 @@ export function parseExplainResponse(text: string): AiExplanation | null {
     const raw = JSON.parse(text.slice(start, end + 1)) as Record<string, unknown>;
     const result = aiExplanationSchema.safeParse(raw);
     if (!result.success) return null;
-    return result.data;
+
+    return {
+      ...result.data,
+      whyWrong: stripCorrectLetterFromWhyWrong(result.data.whyWrong, correctLetter),
+    };
   } catch {
     return null;
   }
