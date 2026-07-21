@@ -7,6 +7,7 @@ import { BLANK_FORM } from './admin-csv-helpers';
 import { type AiExplanation, parseExplainResponse } from '@shared/domain/ai-eval';
 import { pollRelayJob } from '../shared/lib/relay-poll';
 import AiExplanationView from '../shared/components/AiExplanationView';
+import { extractWhyCorrect } from './admin-question-form-helpers';
 
 interface LegislationFieldsProps {
   legislationTitle?: string | null;
@@ -56,6 +57,7 @@ interface AiExplanationPanelProps {
   legalBasis: string | null;
   initialExplanation: AiExplanation | null;
   onSaved: () => void;
+  onWhyCorrect: (text: string) => void;
 }
 
 function AiExplanationPanel({
@@ -66,6 +68,7 @@ function AiExplanationPanel({
   legalBasis,
   initialExplanation,
   onSaved,
+  onWhyCorrect,
 }: AiExplanationPanelProps): ReactElement {
   const [preview, setPreview] = useState<AiExplanation | null>(initialExplanation);
   const [loading, setLoading] = useState(false);
@@ -92,9 +95,12 @@ function AiExplanationPanel({
         legalBasis,
       });
       const data = await pollRelayJob(() => utils.relay.job.fetch({ jobId }, { staleTime: 0 }));
-      const parsed = parseExplainResponse((data as { text: string }).text);
+      const rawText = (data as { text: string }).text;
+      const parsed = parseExplainResponse(rawText);
       if (parsed === null) throw new Error('A IA retornou um formato inesperado. Tente novamente.');
       setPreview(parsed);
+      const whyCorrect = extractWhyCorrect(rawText);
+      if (whyCorrect !== null) onWhyCorrect(whyCorrect);
       saveMutation.mutate({ id: questionId, explanation: parsed });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Falha ao gerar explicação');
@@ -371,6 +377,7 @@ export function QuestionForm({
           legalBasis={form.legalBasis ?? null}
           initialExplanation={form.aiExplanation ?? null}
           onSaved={invalidate}
+          onWhyCorrect={(text) => { setField('explanation', text); }}
         />
       )}
 
