@@ -56,3 +56,22 @@ describe("resolveAiPrompt — provider threading", () => {
     expect(p.json).toBe(true);
   });
 });
+
+describe("oab-explain system prompt — whyCorrect opening mandate", () => {
+  // Regression for #40: whyCorrect must be instructed to open with the correct letter.
+  // Model output is non-deterministic; this test guards the prompt contract, not model behaviour.
+  it("mandates whyCorrect opens with correct-letter sentence", () => {
+    const p = resolveAiPrompt("oab-explain", explainVars);
+    expect(p.system).toMatch(
+      /whyCorrect.*DEVE começar obrigatoriamente com "A alternativa correta é a letra/,
+    );
+  });
+
+  it("mandate appears before whyWrong instruction", () => {
+    const p = resolveAiPrompt("oab-explain", explainVars);
+    const mandateIdx = p.system.indexOf("DEVE começar obrigatoriamente");
+    const whyWrongIdx = p.system.indexOf("whyWrong");
+    expect(mandateIdx).toBeGreaterThan(-1);
+    expect(mandateIdx).toBeLessThan(whyWrongIdx);
+  });
+});
