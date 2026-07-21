@@ -11,6 +11,7 @@ import type { AiExplanation } from '@shared/domain/ai-eval';
 import { useNotesAndBookmarks, type NotesAndBookmarks } from '../shared/hooks/use-notes-bookmarks';
 import QuestionCard from '@/shared/components/QuestionCard';
 import AiExplanationButton from '@/shared/components/AiExplanationButton';
+import { shouldShowExplanationToggle } from './real-exam-review-guards';
 
 type Status = 'setup' | 'playing' | 'review' | 'finished';
 
@@ -263,12 +264,10 @@ interface QuestionReviewRowProps {
 function QuestionReviewRow({ question, idx, userAnswer, disciplineLov }: QuestionReviewRowProps): ReactElement {
   const isCorrect = userAnswer === question.correctAnswer;
   const [expanded, setExpanded] = useState(false);
+  const showToggle = shouldShowExplanationToggle(isCorrect);
+  const rowCls = isCorrect ? 'bg-green-50 border-green-500' : userAnswer !== undefined ? 'bg-red-50 border-red-500' : 'bg-gray-50 border-gray-400';
   return (
-    <div
-      className={`p-3 rounded-lg border-l-4 ${
-        isCorrect ? 'bg-green-50 border-green-500' : userAnswer !== undefined ? 'bg-red-50 border-red-500' : 'bg-gray-50 border-gray-400'
-      }`}
-    >
+    <div className={`p-3 rounded-lg border-l-4 ${rowCls}`}>
       <div className="flex items-start justify-between">
         <div className="flex-1">
           <p className="font-medium text-gray-800 text-sm">
@@ -280,29 +279,20 @@ function QuestionReviewRow({ question, idx, userAnswer, disciplineLov }: Questio
               <p className="text-green-600">Correta: {question.correctAnswer}</p>
             </div>
           )}
-          {!isCorrect && (
-            <button
-              onClick={() => { setExpanded((v) => !v); }}
-              className="mt-2 text-xs text-[#16161a] font-medium underline"
-            >
-              {expanded ? 'Ocultar explicação' : 'Ver explicação'}
-            </button>
-          )}
-          {!isCorrect && expanded && (
-            <div className="mt-2 bg-white rounded-lg p-3">
-              <AiExplanationButton
-                questionId={question.id}
-                aiExplanation={question.aiExplanation}
-                explanation={question.explanation}
-              />
-            </div>
+          {showToggle && (
+            <>
+              <button onClick={() => { setExpanded((v) => !v); }} className="mt-2 text-xs text-[#16161a] font-medium underline">
+                {expanded ? 'Ocultar explicação' : 'Ver explicação'}
+              </button>
+              {expanded && (
+                <div className="mt-2 bg-white rounded-lg p-3">
+                  <AiExplanationButton questionId={question.id} aiExplanation={question.aiExplanation} explanation={question.explanation} />
+                </div>
+              )}
+            </>
           )}
         </div>
-        {isCorrect ? (
-          <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" />
-        ) : (
-          <XCircle className="w-5 h-5 text-red-600 flex-shrink-0" />
-        )}
+        {isCorrect ? <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" /> : <XCircle className="w-5 h-5 text-red-600 flex-shrink-0" />}
       </div>
     </div>
   );
