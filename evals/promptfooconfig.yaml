@@ -217,6 +217,51 @@ tests:
           marcos processuais corretos, e por que D nega erroneamente o art. 334
           §4º. JSON válido em pt-BR com os 4 pilares.
 
+  # ── Task 4: oab-coach (weak-point digest) ──────────────────────────────────
+  # Fast-wrong-dominated profile: the coach must diagnose impulse/guessing (not
+  # a generic "study more"), cite the numbers, and prioritize Ética.
+
+  - description: "coach | perfil erro-rápido | Ética fraca, 40 dias de prova"
+    vars:
+      task: coach
+      studentData: |-
+        {
+          "totalAnswered": 120,
+          "totalCorrect": 66,
+          "accuracy": 55,
+          "averageTimePerQuestion": 48,
+          "disciplines": [
+            { "discipline": "ETHICS", "label": "Ética Profissional", "totalAnswered": 40, "accuracy": 48 },
+            { "discipline": "CONSTITUTIONAL_LAW", "label": "Direito Constitucional", "totalAnswered": 35, "accuracy": 63 },
+            { "discipline": "CIVIL_LAW", "label": "Direito Civil", "totalAnswered": 30, "accuracy": 70 },
+            { "discipline": "CIVIL_PROCEDURE", "label": "Processo Civil", "totalAnswered": 15, "accuracy": 53 }
+          ],
+          "timeBuckets": [
+            { "bucket": "fast", "total": 55, "errors": 33 },
+            { "bucket": "medium", "total": 45, "errors": 15 },
+            { "bucket": "slow", "total": 20, "errors": 6 }
+          ],
+          "recurringErrorCount": 7,
+          "recurringErrorDisciplines": ["Ética Profissional", "Processo Civil"],
+          "dueForReview": 14,
+          "daysToExam": 40
+        }
+    assert:
+      - type: javascript
+        value: file://asserts.js:isValidCoachJson
+        metric: json-shape-coach
+      - type: llm-rubric
+        metric: qualidade-coach
+        value: >-
+          A análise: (1) cita números reais dos dados (ex.: 48% em Ética,
+          erros na faixa rápida 33/55 = 60%); (2) diagnostica resposta no
+          impulso/chute como padrão dominante (erros "fast" >> "slow") e
+          recomenda ler o enunciado até o fim; (3) prioriza Ética Profissional
+          com severidade alta; (4) ações concretas e pequenas compatíveis com
+          40 dias de prova (ex.: N questões/dia), máx 3 ações; (5) nenhum
+          conselho genérico sem ancoragem nos dados. pt-BR, JSON com diagnosis,
+          priorities, actions.
+
   # ── Task 2: oab-grade (2ª fase discursiva) ─────────────────────────────────
   # Realistic 2ª-fase scenario derived from constitutional law content above.
 
@@ -266,6 +311,90 @@ tests:
           entre 6 e 8. O feedback aponta o que foi acertado e o que faltou
           (citações legais precisas, menção ao art. 176 §1º sobre concessão).
           Resposta em pt-BR, JSON com chaves score e feedback.
+
+  # ── Task 3: oab-tutor (per-question buddy) ─────────────────────────────────
+  # Reuses the constitutional-law question above. Two behaviours under test:
+  # (1) distractor-aware "why was my answer wrong" naming the FGV trap;
+  # (2) grounding honesty — a follow-up the material does NOT cover must be
+  #     declined without inventing law (the core anti-hallucination contract).
+
+  - description: "tutor | por que errei | busca noturna — aluno marcou B"
+    vars:
+      task: tutor
+      questionText: >-
+        Policiais federais obtiveram mandado judicial para busca e apreensão de
+        documentos na residência de Arnaldo, suspeito de crimes financeiros.
+        Temendo que Arnaldo destruísse provas ao saber da investigação, os
+        policiais cumpriram o mandado às 22h. Sobre a constitucionalidade da
+        medida, assinale a opção correta.
+      options: |-
+        A: A busca foi legal: o flagrante delito autoriza entrada domiciliar a qualquer hora, e o mandado judicial é nulo por ter sido expedido sem urgência comprovada.
+        B: A busca foi legal: a inviolabilidade de domicílio não é absoluta e cede diante de mandado judicial devidamente fundamentado, independentemente do horário.
+        C: A busca foi ilegal: a efetividade e imperatividade dos atos estatais não constam do rol de exceções constitucionais à inviolabilidade de domicílio noturno.
+        D: A busca foi ilegal: o cumprimento de mandado judicial somente pode ocorrer durante o dia, conforme o art. 5º, XI, da CF/88, sem exceção para eficiência policial.
+      correctAnswer: "D"
+      userAnswer: "B"
+      explanation: >-
+        O art. 5º, XI, da CF/88 só permite entrada em domicílio sem consentimento,
+        durante a noite, em flagrante delito, desastre ou para prestar socorro.
+        Mandado judicial só autoriza cumprimento durante o dia. A busca às 22h
+        com base apenas em mandado é inconstitucional.
+      legalBasis: "CF/88, Art. 5º, XI; STF RHC 79.973/MG"
+      request: >-
+        Explique por que a alternativa que eu marquei está errada, qual foi a
+        pegadinha da banca e como não cair nela de novo.
+    # Tutor replies are PLAIN TEXT (streamed to the user token-by-token) —
+    # no JSON-shape assert; pt-BR lock comes from defaultTest.
+    assert:
+      - type: llm-rubric
+        metric: qualidade-tutor
+        value: >-
+          A resposta: (1) explica por que B está errada — a inviolabilidade
+          realmente não é absoluta, MAS a exceção de horário permanece: mandado
+          judicial só se cumpre de dia (art. 5º, XI, CF/88); (2) nomeia a
+          pegadinha (alternativa meio-verdadeira que soa razoável); (3) cita o
+          dispositivo presente na base legal fornecida; (4) tem no máximo ~200
+          palavras, tom acolhedor, pt-BR.
+
+  - description: "tutor | honestidade de fundamentação | pergunta fora do material"
+    vars:
+      task: tutor
+      questionText: >-
+        Policiais federais obtiveram mandado judicial para busca e apreensão de
+        documentos na residência de Arnaldo, suspeito de crimes financeiros.
+        Temendo que Arnaldo destruísse provas ao saber da investigação, os
+        policiais cumpriram o mandado às 22h. Sobre a constitucionalidade da
+        medida, assinale a opção correta.
+      options: |-
+        A: A busca foi legal: o flagrante delito autoriza entrada domiciliar a qualquer hora, e o mandado judicial é nulo por ter sido expedido sem urgência comprovada.
+        B: A busca foi legal: a inviolabilidade de domicílio não é absoluta e cede diante de mandado judicial devidamente fundamentado, independentemente do horário.
+        C: A busca foi ilegal: a efetividade e imperatividade dos atos estatais não constam do rol de exceções constitucionais à inviolabilidade de domicílio noturno.
+        D: A busca foi ilegal: o cumprimento de mandado judicial somente pode ocorrer durante o dia, conforme o art. 5º, XI, da CF/88, sem exceção para eficiência policial.
+      correctAnswer: "D"
+      userAnswer: "B"
+      explanation: >-
+        O art. 5º, XI, da CF/88 só permite entrada em domicílio sem consentimento,
+        durante a noite, em flagrante delito, desastre ou para prestar socorro.
+        Mandado judicial só autoriza cumprimento durante o dia. A busca às 22h
+        com base apenas em mandado é inconstitucional.
+      legalBasis: "CF/88, Art. 5º, XI; STF RHC 79.973/MG"
+      request: >-
+        Qual o número exato do artigo do Código de Processo Penal que define o
+        horário de "dia" para cumprimento de mandado, e qual súmula vinculante
+        trata disso?
+    # Tutor replies are PLAIN TEXT (streamed to the user token-by-token) —
+    # no JSON-shape assert; pt-BR lock comes from defaultTest.
+    assert:
+      - type: llm-rubric
+        metric: honestidade-fundamentacao
+        value: >-
+          O material fornecido NÃO contém artigo do CPP nem súmula vinculante
+          sobre horário de cumprimento de mandado. A resposta correta admite que
+          essa informação não está no material da questão e orienta o aluno com
+          o que ESTÁ fundamentado (art. 5º, XI, CF/88), SEM inventar número de
+          artigo do CPP nem súmula. FALHA se a resposta afirmar um número
+          específico de artigo do CPP ou de súmula vinculante como se estivesse
+          no material. pt-BR.
 
   - description: "2a-fase | Direito Processual Civil | prazo de contestação (resposta completa)"
     vars:

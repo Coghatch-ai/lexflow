@@ -5,6 +5,7 @@
 // that selects provider, maps secret leaf, and resolves defaults is covered.
 
 import { describe, expect, it } from "vitest";
+import { extractResponsesText } from "./providers";
 
 // Re-export the secret-leaf and default-model helpers inline so we can test
 // the same logic without spinning up SSM. The actual mapping is in
@@ -45,6 +46,31 @@ describe("defaultModel", () => {
   });
   it("openai default is gpt-4o-mini", () => {
     expect(defaultModel("openai")).toBe("gpt-4o-mini");
+  });
+});
+
+describe("extractResponsesText (/v1/responses reply parsing)", () => {
+  it("prefers the aggregated output_text field", () => {
+    expect(extractResponsesText({ output_text: "olá" })).toBe("olá");
+  });
+
+  it("joins message items' output_text parts when output_text is absent", () => {
+    expect(
+      extractResponsesText({
+        output: [
+          { type: "reasoning" },
+          { type: "message", content: [{ type: "output_text", text: '{"answer":' }] },
+          { type: "message", content: [{ type: "output_text", text: '"ok"}' }] },
+        ],
+      }),
+    ).toBe('{"answer":"ok"}');
+  });
+
+  it("ignores non-text parts and returns empty for no output", () => {
+    expect(extractResponsesText({})).toBe("");
+    expect(
+      extractResponsesText({ output: [{ type: "message", content: [{ type: "refusal" }] }] }),
+    ).toBe("");
   });
 });
 

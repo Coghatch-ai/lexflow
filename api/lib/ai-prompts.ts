@@ -13,6 +13,8 @@ interface PromptTemplate {
   user: string;
   vars: readonly string[];
   maxOutputTokens: number;
+  /** JSON response mode (default true). Plain-text prompts (streamed to the user) set false. */
+  json?: boolean;
 }
 
 export const AI_PROMPTS = {
@@ -30,6 +32,34 @@ export const AI_PROMPTS = {
     vars: ["questionText", "options", "correctAnswer", "legalBasis"],
     maxOutputTokens: 2048,
   },
+  // Per-question tutor ("buddy") follow-up → { answer }. Grounded strictly in the
+  // question's own material (comentário + base legal) — instructed to admit gaps
+  // rather than invent law (hallucinated citations are the #1 reason students
+  // distrust generic chatbots for OAB).
+  "oab-tutor": {
+    system: `Você é um tutor particular do Exame de Ordem (OAB), conversando com um aluno logo após ele responder uma questão objetiva. Regras obrigatórias: 1) Responda em português (pt-BR), de forma direta e acolhedora, em no máximo 200 palavras; 2) Fundamente TODA afirmação jurídica no comentário oficial e na base legal fornecidos — cite o dispositivo (artigo, lei, súmula) sempre que ele constar do material; 3) Se a informação necessária NÃO estiver no material fornecido, diga isso claramente e NÃO invente lei, artigo ou jurisprudência; 4) Quando o aluno errou, aponte a pegadinha da banca (o que a alternativa errada tinha de sedutor) e como reconhecê-la numa próxima questão. Responda APENAS com o texto da resposta ao aluno — sem JSON, sem cercas de código, sem preâmbulo.`,
+    user: "Questão:\n{{questionText}}\nAlternativas:\n{{options}}\nAlternativa correta: {{correctAnswer}}\nAlternativa marcada pelo aluno: {{userAnswer}}\nComentário oficial: {{explanation}}\nBase legal: {{legalBasis}}\nPedido do aluno: {{request}}",
+    vars: [
+      "questionText",
+      "options",
+      "correctAnswer",
+      "userAnswer",
+      "explanation",
+      "legalBasis",
+      "request",
+    ],
+    maxOutputTokens: 900,
+    json: false,
+  },
+  // Weak-point coach digest → { diagnosis, priorities, actions }. Input is the
+  // student's own aggregates as JSON; the coach must ONLY state what the data
+  // supports — no generic study advice ungrounded in the numbers.
+  "oab-coach": {
+    system: `Você é o coach de estudos de um aluno que se prepara para a 1ª fase do Exame de Ordem (OAB). Você receberá um JSON com os dados reais de desempenho do aluno: acerto geral, acerto por disciplina (com rótulo em português no campo "label"), erros por faixa de tempo de resposta ("fast" < 30s = resposta no impulso; "slow" >= 90s = provável lacuna de conhecimento), erros recorrentes, questões pendentes de revisão e dias até a prova. Regras obrigatórias: 1) Baseie CADA afirmação nos números fornecidos — cite os números (ex.: "48% de acerto em Ética em 40 questões"); nunca dê conselho genérico que não decorra dos dados; 2) Se erros rápidos (fast) dominarem, diagnostique impulso/chute e recomende ler o enunciado até o fim; se erros lentos (slow) dominarem, diagnostique lacuna de conteúdo na(s) disciplina(s) fraca(s); 3) Priorize no máximo 3 disciplinas (use o rótulo em português do campo "label"), com severidade "alta" | "media" | "baixa"; 4) Ações concretas e pequenas (ex.: "10 questões de Ética por dia"), no máximo 3, considerando os dias até a prova quando informados; 5) Tom direto e encorajador, pt-BR, sem jargão. Responda SOMENTE com um objeto JSON no formato {"diagnosis":"...","priorities":[{"discipline":"...","reason":"...","severity":"alta"}],"actions":[{"title":"...","detail":"..."}]} — sem cercas de código e sem comentários.`,
+    user: "Dados do aluno (JSON):\n{{studentData}}\nGere a análise do coach em JSON.",
+    vars: ["studentData"],
+    maxOutputTokens: 1200,
+  },
 } as const satisfies Record<string, PromptTemplate>;
 
 export type PromptId = keyof typeof AI_PROMPTS;
@@ -41,7 +71,7 @@ export interface AiRelayPayload {
   channel: "ai";
   system: string;
   user: string;
-  json: true;
+  json: boolean;
   maxOutputTokens: number;
   provider?: "gemini" | "openai";
   model?: string;
@@ -75,12 +105,12 @@ export function resolveAiPrompt(
   variables: Record<string, string>,
   providerOptions?: AiProviderOptions,
 ): AiRelayPayload {
-  const p = AI_PROMPTS[promptId];
+  const p: PromptTemplate = AI_PROMPTS[promptId];
   return {
     channel: "ai",
     system: p.system,
     user: interpolate(p.user, p.vars, variables),
-    json: true,
+    json: p.json ?? true,
     maxOutputTokens: p.maxOutputTokens,
     ...(providerOptions?.provider !== undefined ? { provider: providerOptions.provider } : {}),
     ...(providerOptions?.model !== undefined ? { model: providerOptions.model } : {}),

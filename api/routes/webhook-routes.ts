@@ -49,6 +49,9 @@ function primaryEmail(data: ClerkUserEvent["data"]): string | null {
   return data.email_addresses?.[0]?.email_address ?? null;
 }
 
+// NO automatic signup credit grant here — it would be farmable (delete account
+// → re-register → fresh users.id → another grant, unbounded; maggie #126).
+// Credits come only from coupon redemption or an admin grant (credits.router).
 async function handleUserCreated(data: ClerkUserEvent["data"]): Promise<void> {
   await adminDb
     .insert(users)

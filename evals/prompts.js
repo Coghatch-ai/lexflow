@@ -63,6 +63,35 @@ function oabGradeUser(context) {
     .replace("{{studentAnswer}}", String(vars.studentAnswer ?? ""));
 }
 
+/** System prompt for oab-tutor (per-question buddy) */
+function oabTutorSystem(_context) {
+  return getPrompts()["oab-tutor"].system;
+}
+
+/** User prompt for oab-tutor — interpolate vars from the test case. */
+function oabTutorUser(context) {
+  const vars = context.vars;
+  return getPrompts()["oab-tutor"].user
+    .replace("{{questionText}}", String(vars.questionText ?? ""))
+    .replace("{{options}}", String(vars.options ?? ""))
+    .replace("{{correctAnswer}}", String(vars.correctAnswer ?? ""))
+    .replace("{{userAnswer}}", String(vars.userAnswer ?? ""))
+    .replace("{{explanation}}", String(vars.explanation ?? ""))
+    .replace("{{legalBasis}}", String(vars.legalBasis ?? ""))
+    .replace("{{request}}", String(vars.request ?? ""));
+}
+
+/** System prompt for oab-coach (weak-point digest) */
+function oabCoachSystem(_context) {
+  return getPrompts()["oab-coach"].system;
+}
+
+/** User prompt for oab-coach — interpolate vars from the test case. */
+function oabCoachUser(context) {
+  const vars = context.vars;
+  return getPrompts()["oab-coach"].user.replace("{{studentData}}", String(vars.studentData ?? ""));
+}
+
 /**
  * Single chat prompt routed on vars.task — the ONLY prompt the eval should use.
  * Returns a [system, user] message pair so every test row gets the full
@@ -84,7 +113,19 @@ function oabChat(context) {
       { role: "user", content: oabGradeUser(context) },
     ];
   }
-  throw new Error(`Unknown task var: "${task}" (expected "explain" or "grade")`);
+  if (task === "tutor") {
+    return [
+      { role: "system", content: oabTutorSystem(context) },
+      { role: "user", content: oabTutorUser(context) },
+    ];
+  }
+  if (task === "coach") {
+    return [
+      { role: "system", content: oabCoachSystem(context) },
+      { role: "user", content: oabCoachUser(context) },
+    ];
+  }
+  throw new Error(`Unknown task var: "${task}" (expected "explain", "grade", "tutor" or "coach")`);
 }
 
 module.exports = {
@@ -93,4 +134,8 @@ module.exports = {
   oabExplainUser,
   oabGradeSystem,
   oabGradeUser,
+  oabTutorSystem,
+  oabTutorUser,
+  oabCoachSystem,
+  oabCoachUser,
 };

@@ -1,11 +1,12 @@
 import { useEffect, useMemo, type ReactElement } from "react";
 import { Link, useLocation } from "wouter";
-import { ChevronRight, Flame, Play, Target, TrendingUp } from "lucide-react";
+import { ChevronRight, Crosshair, Flame, Play, Target, TrendingUp } from "lucide-react";
 import { goalProgressPct } from "@shared/domain/scoring";
 import { useSession } from "../auth";
 import { trpc } from "../lib/trpc";
 import { usePracticeState } from "../state/practice-context";
 import { ExamCountdown } from "../components/ExamCountdown";
+import { CreditsChip } from "../components/CreditsChip";
 
 export function HomePage(): ReactElement {
   const [, navigate] = useLocation();
@@ -17,6 +18,7 @@ export function HomePage(): ReactElement {
   const dueQ = trpc.questions.dueCount.useQuery();
   const goalsQ = trpc.goals.list.useQuery();
   const byDisciplineQ = trpc.stats.byDiscipline.useQuery();
+  const drillQ = trpc.questions.focusedDrill.useQuery(undefined, { refetchOnWindowFocus: false });
 
   const disciplines = disciplinesQ.data;
 
@@ -48,7 +50,10 @@ export function HomePage(): ReactElement {
   return (
     <div className="stagger flex flex-col gap-5 px-4 py-6 pb-24">
       <header>
-        <p className="eyebrow !text-seal">Prática diária</p>
+        <div className="flex items-start justify-between gap-2">
+          <p className="eyebrow !text-seal">Prática diária</p>
+          <CreditsChip />
+        </div>
         <h1 className="mt-1 font-display text-3xl font-bold tracking-tightish text-ink">
           Olá{firstName.length > 0 ? `, ${firstName}` : ""}
         </h1>
@@ -74,6 +79,33 @@ export function HomePage(): ReactElement {
         </div>
         <ChevronRight className="h-5 w-5 text-ink-mute" />
       </button>
+
+      {/* Focused drill -> weakness-targeted practice */}
+      {drillQ.data?.available === true ? (
+        <button
+          type="button"
+          onClick={() => {
+            navigate("/drill");
+          }}
+          className="card-default flex items-center justify-between px-5 py-4 text-left"
+        >
+          <div className="flex items-center gap-3">
+            <Crosshair className="h-6 w-6 text-seal" strokeWidth={1.75} />
+            <div>
+              <p className="text-sm font-semibold text-ink">Treino focado</p>
+              <p className="mt-0.5 text-xs text-ink-mute">
+                {drillQ.data.recurringCount > 0
+                  ? `${drillQ.data.recurringCount} erros recorrentes`
+                  : "Seus pontos fracos"}
+                {drillQ.data.weakestDiscipline !== null
+                  ? ` · ${drillQ.data.weakestDiscipline} (${drillQ.data.weakestAccuracy ?? 0}%)`
+                  : ""}
+              </p>
+            </div>
+          </div>
+          <ChevronRight className="h-5 w-5 text-ink-mute" />
+        </button>
+      ) : null}
 
       {/* Quick stats */}
       <div className="grid grid-cols-3 gap-3">

@@ -17,6 +17,8 @@ import { calendarsRouter } from "./routers/calendars.router";
 import { notesRouter } from "./routers/notes.router";
 import { bookmarksRouter } from "./routers/bookmarks.router";
 import { aiRouter } from "./routers/ai.router";
+import { coachRouter } from "./routers/coach.router";
+import { creditsRouter } from "./routers/credits.router";
 import { relayRouter } from "./routers/relay.router";
 import { flashcardsRouter } from "./routers/flashcards.router";
 
@@ -35,6 +37,8 @@ export const appRouter = router({
   notes: notesRouter,
   bookmarks: bookmarksRouter,
   ai: aiRouter,
+  coach: coachRouter,
+  credits: creditsRouter,
   relay: relayRouter,
   flashcards: flashcardsRouter,
 });

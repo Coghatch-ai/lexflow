@@ -22,6 +22,7 @@ const TABLE_SCOPE: Record<string, ScopeType> = {
   spaced_repetition_config: { type: "global" },
   exam_calendars: { type: "global" },
   exam_calendar_events: { type: "global" },
+  coupons: { type: "global" },
 
   // Per-user owned tables
   user_answers: { type: "user" },
@@ -37,6 +38,10 @@ const TABLE_SCOPE: Record<string, ScopeType> = {
   user_question_states: { type: "user" },
   user_question_notes: { type: "user" },
   user_bookmarks: { type: "user" },
+  ai_usage_daily: { type: "user" },
+  ai_tutor_messages: { type: "user" },
+  ai_coach_digests: { type: "user" },
+  credit_ledger: { type: "user" },
 };
 
 function tableName(table: PgTable): string {

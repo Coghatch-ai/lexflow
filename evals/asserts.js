@@ -112,6 +112,50 @@ function scoreInRange(output, context) {
 }
 
 /**
+ * Validates that the model output is valid JSON with the oab-coach shape:
+ *   { diagnosis: string, priorities: [{discipline, reason, severity}], actions: [{title, detail}] }
+ *
+ * @param {string} output
+ * @returns {{ pass: boolean, score: number, reason: string }}
+ */
+function isValidCoachJson(output) {
+  let parsed;
+  try {
+    parsed = JSON.parse(typeof output === "string" ? output : JSON.stringify(output));
+  } catch {
+    return { pass: false, score: 0, reason: "Output is not valid JSON" };
+  }
+
+  const missing = [];
+  if (typeof parsed.diagnosis !== "string" || parsed.diagnosis.trim() === "") {
+    missing.push("diagnosis (string)");
+  }
+  const validSeverity = new Set(["alta", "media", "baixa"]);
+  if (
+    !Array.isArray(parsed.priorities) ||
+    parsed.priorities.some(
+      (p) =>
+        typeof p?.discipline !== "string" ||
+        typeof p?.reason !== "string" ||
+        !validSeverity.has(p?.severity),
+    )
+  ) {
+    missing.push("priorities (array of {discipline, reason, severity: alta|media|baixa})");
+  }
+  if (
+    !Array.isArray(parsed.actions) ||
+    parsed.actions.some((a) => typeof a?.title !== "string" || typeof a?.detail !== "string")
+  ) {
+    missing.push("actions (array of {title, detail})");
+  }
+
+  if (missing.length > 0) {
+    return { pass: false, score: 0, reason: `Missing or invalid fields: ${missing.join(", ")}` };
+  }
+  return { pass: true, score: 1, reason: "Valid oab-coach JSON shape" };
+}
+
+/**
  * pt-BR language lock (borrowed from maggie-evals #145). Cheap negative check,
  * not a classifier: pt text reliably carries accents/ç or pt-only function
  * words; a reply with none of them but with English function words is the
@@ -132,4 +176,11 @@ function isPtBr(output) {
   return { pass: true, score: 1, reason: "sem marcadores de inglês" };
 }
 
-module.exports = { isValidExplainJson, isValidGradeJson, scoreInRange, isPtBr };
+// Note: the tutor task is PLAIN TEXT (streamed) — no JSON-shape assert for it.
+module.exports = {
+  isValidExplainJson,
+  isValidGradeJson,
+  isValidCoachJson,
+  scoreInRange,
+  isPtBr,
+};

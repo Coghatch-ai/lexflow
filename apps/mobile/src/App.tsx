@@ -5,6 +5,7 @@ import { MobileLayout } from "./components/MobileLayout";
 import { PracticeStateProvider } from "./state/practice-state";
 import { HomePage } from "./pages/HomePage";
 import { PracticePage } from "./pages/PracticePage";
+import { DrillPage } from "./pages/DrillPage";
 import { ReviewPage } from "./pages/ReviewPage";
 import { ResultPage } from "./pages/ResultPage";
 import { ProgressPage } from "./pages/ProgressPage";
@@ -27,6 +28,9 @@ export default function App(): ReactElement {
               </Route>
               <Route path="/practice">
                 <PracticePage />
+              </Route>
+              <Route path="/drill">
+                <DrillPage />
               </Route>
               <Route path="/review">
                 <ReviewPage />

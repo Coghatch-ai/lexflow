@@ -22,6 +22,7 @@ export function MobileLayout({ children }: { children: ReactNode }): ReactElemen
   const { signOut } = useSession();
   const immersive =
     location === "/practice" ||
+    location === "/drill" ||
     location === "/review" ||
     location === "/result" ||
     location === "/flashcards";

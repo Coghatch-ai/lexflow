@@ -33,6 +33,11 @@ export function setTokenGetter(getter: () => Promise<string | null>): void {
   getToken = getter;
 }
 
+// Raw Clerk token for non-tRPC calls (the streaming Lambda's Bearer auth).
+export async function getAuthToken(): Promise<string | null> {
+  return getToken !== null ? getToken() : null;
+}
+
 const apiUrl = import.meta.env.VITE_API_URL;
 if (apiUrl.length === 0) {
   throw new Error("VITE_API_URL is required");

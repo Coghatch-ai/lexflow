@@ -4,10 +4,15 @@
 // (questions the signed-in user has gotten wrong). Gated behind auth.
 
 import { z } from "zod";
-import { and, eq, inArray, lte, sql, type SQL } from "drizzle-orm";
+import { and, eq, inArray, lte, notInArray, sql, type SQL } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db } from "../../db/client";
-import { oabQuestions, spacedRepetitionConfig, userQuestionStates } from "../../../drizzle/schema";
+import {
+  oabQuestions,
+  spacedRepetitionConfig,
+  userAnswers,
+  userQuestionStates,
+} from "../../../drizzle/schema";
 import { protectedProcedure, router } from "../procedures";
 import { DEFAULT_SM2_CONFIG } from "../../../shared/domain/spaced-repetition";
 import {
@@ -17,6 +22,16 @@ import {
 } from "../../../shared/domain/ai-eval";
 import { enqueueRelayJob, getRelayJob } from "../../lib/relay";
 import { resolveAiPrompt } from "../../lib/ai-prompts";
+
+// Output contract for focusedDrill — kept a single explicit shape (see note on
+// the procedure).
+type FocusedDrill = {
+  available: boolean;
+  weakestDiscipline: string | null;
+  weakestAccuracy: number | null;
+  recurringCount: number;
+  questions: (typeof oabQuestions.$inferSelect)[];
+};
 
 const listInput = z.object({
   discipline: z.string().min(1).optional(),
@@ -94,6 +109,76 @@ export const questionsRouter = router({
         ),
       );
     return { count: row?.count ?? 0 };
+  }),
+
+  // "Treino focado": a weakness-targeted drill assembled deterministically from
+  // the REAL bank (no LLM) — recurring-error questions first, topped up with
+  // random questions from the student's weakest discipline. This is the
+  // "helps those who fail" remediation loop: error data → targeted practice.
+  // Explicit return type: a single shape (no union) so the client keeps the
+  // nullable fields (union inference through tRPC stripped the nulls).
+  focusedDrill: protectedProcedure.query(async ({ ctx }): Promise<FocusedDrill> => {
+    // Weakest discipline with a meaningful sample (≥5 answered).
+    const [weakest] = await db
+      .select({
+        discipline: oabQuestions.discipline,
+        accuracy: sql<number>`round(100.0 * sum(case when ${userAnswers.correct} then 1 else 0 end) / count(*))::int`,
+      })
+      .from(userAnswers)
+      .innerJoin(oabQuestions, eq(userAnswers.questionId, oabQuestions.id))
+      .where(eq(userAnswers.userId, ctx.userId))
+      .groupBy(oabQuestions.discipline)
+      .having(sql`count(*) >= 5`)
+      .orderBy(sql`2 asc`)
+      .limit(1);
+
+    // Questions the student keeps getting wrong (≥2 answered, ≥2 wrong).
+    const recurringIds = await db
+      .select({ questionId: userAnswers.questionId })
+      .from(userAnswers)
+      .where(eq(userAnswers.userId, ctx.userId))
+      .groupBy(userAnswers.questionId)
+      .having(sql`count(*) >= 2 and sum(case when ${userAnswers.correct} then 0 else 1 end) >= 2`)
+      .orderBy(sql`max(${userAnswers.createdAt}) desc`)
+      .limit(6);
+    const ids = recurringIds.map((r) => r.questionId);
+    const recurring =
+      ids.length > 0
+        ? await db.select().from(oabQuestions).where(inArray(oabQuestions.id, ids))
+        : [];
+
+    const weakestDiscipline: string | null = weakest?.discipline ?? null;
+    const weakestAccuracy: number | null = weakest?.accuracy ?? null;
+
+    if (weakest === undefined && recurring.length === 0) {
+      return {
+        available: false,
+        weakestDiscipline,
+        weakestAccuracy,
+        recurringCount: 0,
+        questions: [],
+      };
+    }
+
+    // Top up to 10 from the weakest discipline (falling back to any discipline).
+    const fillConds: SQL[] = [];
+    if (weakest !== undefined) fillConds.push(eq(oabQuestions.discipline, weakest.discipline));
+    const picked = recurring.map((q) => q.id);
+    if (picked.length > 0) fillConds.push(notInArray(oabQuestions.id, picked));
+    const filler = await db
+      .select()
+      .from(oabQuestions)
+      .where(fillConds.length > 0 ? and(...fillConds) : undefined)
+      .orderBy(sql`random()`)
+      .limit(Math.max(0, 10 - recurring.length));
+
+    return {
+      available: true,
+      weakestDiscipline,
+      weakestAccuracy,
+      recurringCount: recurring.length,
+      questions: [...recurring, ...filler],
+    };
   }),
 
   // Fetch a specific set of questions by ID — used by the "Questões Salvas" page.

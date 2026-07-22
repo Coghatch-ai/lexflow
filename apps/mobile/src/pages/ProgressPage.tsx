@@ -2,6 +2,7 @@ import { useMemo, type ReactElement } from "react";
 import { AlertTriangle, Clock, Play, Target, TrendingUp } from "lucide-react";
 import { trpc } from "../lib/trpc";
 import { META_SEP } from "@shared/domain/ui-format";
+import { CoachCard } from "../components/CoachCard";
 
 // Read-only performance dashboard. Mirrors the web Analytics page but renders
 // plain CSS bars instead of pulling in a charting lib (lighter mobile bundle).
@@ -51,6 +52,8 @@ export function ProgressPage(): ReactElement {
           value={`${summary?.averageTimePerQuestion ?? 0}s`}
         />
       </div>
+
+      <CoachCard />
 
       {/* Accuracy by discipline */}
       <section className="flex flex-col gap-3">

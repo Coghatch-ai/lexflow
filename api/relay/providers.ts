@@ -73,25 +73,52 @@ export async function geminiComplete(
 
 // ── OpenAI ────────────────────────────────────────────────────────────────────
 
+// Responses API item shape (the subset we read back).
+interface ResponsesOutputItem {
+  type?: string;
+  content?: Array<{ type?: string; text?: string }>;
+}
+
+// Extract the assistant text from a /v1/responses reply: prefer the aggregated
+// `output_text` convenience field when present, else join the message items'
+// output_text parts.
+export function extractResponsesText(data: {
+  output_text?: string;
+  output?: ResponsesOutputItem[];
+}): string {
+  if (typeof data.output_text === "string" && data.output_text.length > 0) {
+    return data.output_text;
+  }
+  return (data.output ?? [])
+    .filter((item) => item.type === "message")
+    .flatMap((item) => item.content ?? [])
+    .filter((part) => part.type === "output_text")
+    .map((part) => part.text ?? "")
+    .join("");
+}
+
+// Uses the Responses API (/v1/responses) — NOT chat completions. gpt-5.x are
+// reasoning-capable; `effort: "none"` keeps them in the fast non-thinking path
+// (latency-sensitive mobile flows). Non-5.x models reject the reasoning param,
+// so it is only sent for gpt-5* model ids.
 export async function openaiComplete(
   apiKey: string,
   model: string,
   payload: AiPayload,
 ): Promise<string> {
-  const messages: Array<{ role: string; content: string }> = [];
-  if (payload.system !== undefined && payload.system.length > 0) {
-    messages.push({ role: "system", content: payload.system });
-  }
-  messages.push({ role: "user", content: payload.user });
-
   const body: Record<string, unknown> = {
     model,
-    messages,
-    // gpt-5.x models reject `max_tokens` — only `max_completion_tokens` is accepted.
-    max_completion_tokens: payload.maxOutputTokens ?? 1024,
+    input: payload.user,
+    max_output_tokens: payload.maxOutputTokens ?? 1024,
   };
+  if (payload.system !== undefined && payload.system.length > 0) {
+    body["instructions"] = payload.system;
+  }
   if (payload.json === true) {
-    body["response_format"] = { type: "json_object" };
+    body["text"] = { format: { type: "json_object" } };
+  }
+  if (model.startsWith("gpt-5")) {
+    body["reasoning"] = { effort: "none" };
   }
 
   const controller = new AbortController();
@@ -100,7 +127,7 @@ export async function openaiComplete(
   }, AI_TIMEOUT_MS);
   let res: Response;
   try {
-    res = await fetch("https://api.openai.com/v1/chat/completions", {
+    res = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -118,9 +145,10 @@ export async function openaiComplete(
     throw new Error(`OpenAI API ${String(res.status)}: ${detail}`);
   }
   const data = (await res.json()) as {
-    choices?: Array<{ message?: { content?: string } }>;
+    output_text?: string;
+    output?: ResponsesOutputItem[];
   };
-  const text = data.choices?.[0]?.message?.content ?? "";
+  const text = extractResponsesText(data);
   if (text.length === 0) throw new Error("Empty completion from OpenAI");
   return text;
 }

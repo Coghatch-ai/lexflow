@@ -484,6 +484,10 @@ export const listOfValues = pgTable(
   (t) => [unique("uq_lov_type_code").on(t.type, t.code), index("idx_lov_type").on(t.type)],
 );
 
+// ── AI buddy + billing tables ─────────────────────────────────────────────────
+// Split into schema-ai.ts (max-lines); re-exported so import paths are stable.
+export * from "./schema-ai";
+
 // ── Relations ─────────────────────────────────────────────────────────────────
 
 export const usersRelations = relations(users, ({ many, one }) => ({

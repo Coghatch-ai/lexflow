@@ -10,6 +10,7 @@ import {
   type PracticeMode,
 } from "../state/practice-context";
 import { AiExplanationButton } from "./AiExplanationButton";
+import { AiTutorPanel } from "./AiTutorPanel";
 import { Centered } from "./Centered";
 
 // The minimal question shape the runner needs. Both questions.list rows (mapped
@@ -229,6 +230,11 @@ export function QuestionRunner({
               questionId={current.id}
               aiExplanation={current.aiExplanation}
               explanation={current.explanation}
+            />
+            <AiTutorPanel
+              questionId={current.id}
+              userAnswer={selected}
+              wasWrong={selected !== current.correctAnswer}
             />
           </div>
         ) : null}

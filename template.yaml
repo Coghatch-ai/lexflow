@@ -104,7 +104,11 @@ Resources:
             - Sid: RelayEnqueue
               Effect: Allow
               Action: s3:PutObject
-              Resource: !Sub "arn:aws:s3:::lexflow-relay-outbox-${Environment}/jobs/*"
+              Resource:
+                - !Sub "arn:aws:s3:::lexflow-relay-outbox-${Environment}/jobs/*"
+                # Stream tickets (browser-direct streaming Lambda; no S3 event on
+                # tickets/, so the relay never double-processes streamed jobs).
+                - !Sub "arn:aws:s3:::lexflow-relay-outbox-${Environment}/tickets/*"
             - Sid: RelayReadResult
               Effect: Allow
               Action:
@@ -188,6 +192,70 @@ Resources:
               Action: s3:PutObject
               Resource: !Sub "arn:aws:s3:::lexflow-relay-outbox-${Environment}/results/*"
 
+  LexFlowStreamLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/lexflow-stream-${Environment}"
+      RetentionInDays: 7
+
+  # Browser-direct STREAMING Lambda — NON-VPC (needs internet for the LLM),
+  # Function URL with RESPONSE_STREAM so tokens reach the browser as they are
+  # generated (the S3-relay path stays as the non-streaming fallback). Trust
+  # boundary: the tRPC API writes a ticket (tickets/{jobId}.json — a prefix with
+  # NO S3 event) carrying the resolved prompt + the owner's Clerk sub; this
+  # function verifies the caller's Clerk JWT offline and only streams when
+  # sub matches. Result text is written to results/{userId}/{jobId}.json so the
+  # existing finalize + credit-refund rails work unchanged. No RDS access.
+  LexFlowStreamFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: LexFlowStreamLogGroup
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints:
+          - api/stream/stream-handler.ts
+        Minify: true
+        Target: es2022
+        Sourcemap: true
+    Properties:
+      FunctionName: !Sub lexflow-stream-${Environment}
+      CodeUri: .
+      Handler: api/stream/stream-handler.handler
+      MemorySize: 256
+      Tracing: PassThrough
+      # NO VpcConfig — must reach the public internet.
+      FunctionUrlConfig:
+        AuthType: NONE
+        InvokeMode: RESPONSE_STREAM
+        Cors:
+          AllowOrigins: ["*"]
+          AllowHeaders: [Content-Type, Authorization]
+          AllowMethods: [POST]
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+          SSM_PREFIX: !Sub "/lexflow/relay/${Environment}"
+          CLERK_JWT_KEY: !Sub "{{resolve:ssm:/lexflow/api/${Environment}/clerk-jwt-key}}"
+          OUTBOX_BUCKET: !Sub "lexflow-relay-outbox-${Environment}"
+      Policies:
+        - SSMParameterReadPolicy:
+            ParameterName: !Sub "lexflow/relay/${Environment}/*"
+        - Statement:
+            - Effect: Allow
+              Action: kms:Decrypt
+              Resource: "*"
+              Condition:
+                StringEquals:
+                  kms:ViaService: !Sub "ssm.${AWS::Region}.amazonaws.com"
+            - Sid: StreamConsumeTicket
+              Effect: Allow
+              Action: [s3:GetObject, s3:DeleteObject]
+              Resource: !Sub "arn:aws:s3:::lexflow-relay-outbox-${Environment}/tickets/*"
+            - Sid: StreamWriteResult
+              Effect: Allow
+              Action: s3:PutObject
+              Resource: !Sub "arn:aws:s3:::lexflow-relay-outbox-${Environment}/results/*"
+
   # Relay outbox bucket for the async job pattern (jobs/ in → relay → results/ out).
   # Private; a 1-day lifecycle clears stale jobs + results. The free S3 gateway
   # endpoint in the VPC lets the API Lambda reach it with no NAT.
@@ -221,3 +289,6 @@ Outputs:
   RelayFunctionArn:
     Description: Outbound relay Lambda ARN (invoked by the API for ai/github/email)
     Value: !GetAtt LexFlowRelayFunction.Arn
+  StreamFunctionUrl:
+    Description: Streaming Lambda Function URL (use as VITE_AI_STREAM_URL)
+    Value: !GetAtt LexFlowStreamFunctionUrl.FunctionUrl
