@@ -6,10 +6,10 @@
 // up its sessions + answers). Run after `pnpm db:seed`. Invoked by `pnpm smoke`.
 
 import "dotenv/config";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
-import { users } from "../drizzle/schema";
+import { oabQuestions, users } from "../drizzle/schema";
 import { appRouter } from "../api/trpc/router";
 
 const SMOKE_EXTERNAL_ID = "smoke-test-user";
@@ -85,6 +85,25 @@ async function main(): Promise<void> {
     await caller.goals.update({ id: goal.id, targetAccuracy: 80 });
     await caller.goals.delete({ id: goal.id });
     console.warn("[smoke] goals.update + delete OK");
+
+    // Invariant: every oab_questions.discipline must be a valid DISCIPLINE LOV code.
+    // This assertion catches any future CSV import that wrote a raw pt-BR label
+    // instead of a code (the exact bug fixed in #46).
+    const badDisciplineResult = await db.execute<{ bad_count: number }>(
+      sql`SELECT count(*)::int AS bad_count
+          FROM ${oabQuestions}
+          WHERE discipline NOT IN (
+            SELECT code FROM list_of_values WHERE type = 'DISCIPLINE'
+          )`,
+    );
+    const badDisciplineCount = badDisciplineResult.rows[0]?.bad_count ?? 1;
+    if (badDisciplineCount !== 0) {
+      throw new Error(
+        `[smoke] discipline invariant FAILED: ${String(badDisciplineCount)} oab_questions row(s) ` +
+          `store a pt-BR label instead of a LOV code. Run the backfill migration (#46).`,
+      );
+    }
+    console.warn("[smoke] discipline-code invariant ✓ (0 rows with raw label)");
 
     console.warn("[smoke] ✓ all protected procedures OK");
   } finally {

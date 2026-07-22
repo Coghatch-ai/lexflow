@@ -9,8 +9,8 @@ import { LOV_SEED } from "./lov";
 describe("LOV_SEED DISCIPLINE entries", () => {
   const disciplines = LOV_SEED.filter((r) => r.type === "DISCIPLINE");
 
-  it("has exactly 20 entries", () => {
-    expect(disciplines).toHaveLength(20);
+  it("has exactly 31 entries (20 original + 11 added in #46)", () => {
+    expect(disciplines).toHaveLength(31);
   });
 
   it("codes are unique", () => {
@@ -18,9 +18,9 @@ describe("LOV_SEED DISCIPLINE entries", () => {
     expect(new Set(codes).size).toBe(codes.length);
   });
 
-  it("sortOrder is contiguous 1..20", () => {
+  it("sortOrder is contiguous 1..31", () => {
     const orders = disciplines.map((r) => r.sortOrder).sort((a, b) => a - b);
-    expect(orders).toEqual(Array.from({ length: 20 }, (_, i) => i + 1));
+    expect(orders).toEqual(Array.from({ length: 31 }, (_, i) => i + 1));
   });
 
   it("sortOrder reflects pt-BR alphabetical order by value", () => {

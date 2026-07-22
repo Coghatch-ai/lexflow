@@ -152,6 +152,17 @@ carries a `Closes #N` line (non-gated work). An implemented issue left on `solut
 with no close mechanism will silently never close — this is what happened to #22/#24. Verify
 with `gh issue view <n> --json labels` before reporting the issue done.
 
+## Business rules / product facts
+
+Authoritative product intent every agent must honor (analyst, builder, tester read this as
+the contract). Add durable, standing facts here — not slice-specific notes.
+
+- `oab_questions.{discipline,exam_board,difficulty,phase}` MUST store the English LOV code,
+  never the pt-BR label. Any importer (`scripts/seed-from-csv.ts`, `scripts/seed.ts`) MUST
+  map label→code before insert and throw on an unmapped label — never write a raw scraper
+  label. (History: the CSV seed wrote raw pt-BR discipline labels → the code-keyed filter
+  matched 0 rows; issue #46.)
+
 ## NEVER
 
 - Bypass `createScopedDb` for user-owned tables, or add a table without a `TABLE_SCOPE` entry.

@@ -12,6 +12,7 @@ import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { oabQuestions } from "../drizzle/schema";
+import { resolveDisciplineCode } from "../shared/data/discipline-map";
 
 interface CsvRow {
   question_id: string;
@@ -71,7 +72,7 @@ function toInsertRow(r: CsvRow) {
     legislationLink: null,
     legislationTitle: null,
     difficulty: "medium" as const,
-    discipline: r.discipline,
+    discipline: resolveDisciplineCode(r.discipline),
     topic: r.topic,
     examBoard: r.banca,
     year: parseInt(r.year, 10),

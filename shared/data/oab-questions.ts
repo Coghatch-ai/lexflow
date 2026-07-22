@@ -6,12 +6,13 @@
 // generator expands a handful of templates per discipline across exam boards,
 // years and difficulties to produce a stable (re-runnable) set of questions.
 
-import { LOV_SEED } from "./lov";
+import { FULL_DISCIPLINE_LABEL_TO_CODE } from "./discipline-map";
 
 // Maps a discipline's pt-BR value (used internally in the templates below) to
-// its English LOV code, which is what we emit + store in oab_questions.
+// its English LOV code. Delegates to the shared map so there is one source of
+// truth for value→code across the generator, seed-from-csv, and migrations.
 const DISCIPLINE_CODE_BY_VALUE: Record<string, string> = Object.fromEntries(
-  LOV_SEED.filter((r) => r.type === "DISCIPLINE").map((r) => [r.value, r.code]),
+  FULL_DISCIPLINE_LABEL_TO_CODE,
 );
 
 export type QuestionTemplate = {
