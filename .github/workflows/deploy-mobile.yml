@@ -42,6 +42,8 @@ jobs:
         env:
           VITE_CLERK_PUBLISHABLE_KEY: ${{ secrets.VITE_CLERK_PUBLISHABLE_KEY }}
           VITE_API_URL: ${{ secrets.VITE_API_URL }}
+          # Streaming Lambda Function URL — absent/empty → tutor falls back to polling.
+          VITE_AI_STREAM_URL: ${{ secrets.VITE_AI_STREAM_URL }}
       - uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
