@@ -78,6 +78,7 @@ export const questionsRouter = router({
         discipline: oabQuestions.discipline,
         examBoard: oabQuestions.examBoard,
         difficulty: oabQuestions.difficulty,
+        legalBasis: oabQuestions.legalBasis,
         legislationTitle: oabQuestions.legislationTitle,
         interval: userQuestionStates.interval,
         repetitions: userQuestionStates.repetitions,

@@ -11,6 +11,7 @@ import {
 } from "../state/practice-context";
 import { AiExplanationButton } from "./AiExplanationButton";
 import { AiTutorPanel } from "./AiTutorPanel";
+import { LegalRefs } from "./LegalRefs";
 import { Centered } from "./Centered";
 
 // The minimal question shape the runner needs. Both questions.list rows (mapped
@@ -24,6 +25,7 @@ export type RunnerQuestion = {
   discipline: string;
   explanation: string;
   aiExplanation?: AiExplanation | null;
+  legalBasis?: string | null;
 };
 
 // Difficulty isn't surfaced in the POC; every session carries a neutral tag.
@@ -226,6 +228,7 @@ export function QuestionRunner({
           <div className="mt-5 rounded-xl border border-line bg-surface p-4">
             <p className="eyebrow mb-1.5">Comentário</p>
             <p className="text-sm leading-relaxed text-ink-soft">{current.explanation}</p>
+            <LegalRefs legalBasis={current.legalBasis ?? null} />
             <AiExplanationButton
               questionId={current.id}
               aiExplanation={current.aiExplanation}
