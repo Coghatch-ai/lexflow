@@ -18,10 +18,6 @@ export const TUTOR_MODES = [
 
 export type TutorMode = (typeof TUTOR_MODES)[number];
 
-// Daily cap on tutor calls per user — enforced by api/lib/ai-quota.ts at
-// enqueue time. Not a cost decision: the abuse guard for free-input AI.
-export const TUTOR_DAILY_LIMIT = 30;
-
 export const TUTOR_FOLLOW_UP_MAX_CHARS = 500;
 
 export type TutorInput = {

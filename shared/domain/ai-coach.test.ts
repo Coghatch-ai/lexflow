@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import * as aiCoach from "./ai-coach";
 import { buildCoachVariables, parseCoachResponse, type CoachStudentData } from "./ai-coach";
 
 const data: CoachStudentData = {
@@ -56,5 +57,13 @@ describe("parseCoachResponse", () => {
     expect(parseCoachResponse(JSON.stringify(badSeverity))).toBeNull();
     expect(parseCoachResponse('{"diagnosis":"só isso"}')).toBeNull();
     expect(parseCoachResponse("sem json")).toBeNull();
+  });
+});
+
+// Quota retirement regression — issue #49 S1
+// Proves the daily-limit constant was removed; credits are the only gate now.
+describe("quota retirement (S1)", () => {
+  it("COACH_DAILY_LIMIT is no longer exported from ai-coach", () => {
+    expect("COACH_DAILY_LIMIT" in aiCoach).toBe(false);
   });
 });

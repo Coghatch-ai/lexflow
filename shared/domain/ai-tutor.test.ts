@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import * as aiTutor from "./ai-tutor";
 import {
   buildTutorVariables,
   parseTutorResponse,
@@ -81,5 +82,13 @@ describe("parseTutorResponse (plain text, JSON-tolerant)", () => {
     expect(parseTutorResponse('{"resposta":"x"}')).toEqual({ answer: '{"resposta":"x"}' });
     expect(parseTutorResponse("   ")).toBeNull();
     expect(parseTutorResponse("")).toBeNull();
+  });
+});
+
+// Quota retirement regression — issue #49 S1
+// Proves the daily-limit constant was removed; credits are the only gate now.
+describe("quota retirement (S1)", () => {
+  it("TUTOR_DAILY_LIMIT is no longer exported from ai-tutor", () => {
+    expect("TUTOR_DAILY_LIMIT" in aiTutor).toBe(false);
   });
 });

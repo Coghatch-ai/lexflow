@@ -21,11 +21,9 @@ import { aiTutorMessages, oabQuestions, users } from "../../../drizzle/schema";
 import { enqueueRelayJob, getRelayJob } from "../../lib/relay";
 import { enqueueStreamTicket } from "../../lib/stream-ticket";
 import { resolveAiPrompt } from "../../lib/ai-prompts";
-import { assertAndIncrementQuota } from "../../lib/ai-quota";
 import { assertCredits, debitCredits } from "../../lib/credits";
 import { buildGradeVariables } from "../../../shared/domain/ai-eval";
 import {
-  TUTOR_DAILY_LIMIT,
   TUTOR_FOLLOW_UP_MAX_CHARS,
   TUTOR_MODES,
   buildTutorVariables,
@@ -96,7 +94,6 @@ export const aiRouter = router({
       throw new TRPCError({ code: "NOT_FOUND", message: "Questão não encontrada" });
     }
 
-    await assertAndIncrementQuota(ctx.userId, "tutor", TUTOR_DAILY_LIMIT);
     await assertCredits(ctx.userId, "tutor");
 
     const followUp = input.followUp ?? null;

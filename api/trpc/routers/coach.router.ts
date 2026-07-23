@@ -2,7 +2,7 @@
 //
 // Weak-point coach ("Análise do Coach"). generate assembles the student's real
 // aggregates server-side (same SQL family as stats.router), enqueues one relay
-// job, and is both cooldown- and quota-gated; finalize re-reads the relay result
+// job, and is cooldown-gated; finalize re-reads the relay result
 // (never trusts client text), validates, and persists the digest row. latest
 // serves the cached digest — the cache is the main cost/abuse control.
 
@@ -20,13 +20,11 @@ import {
 } from "../../../drizzle/schema";
 import { enqueueRelayJob, getRelayJob } from "../../lib/relay";
 import { resolveAiPrompt } from "../../lib/ai-prompts";
-import { assertAndIncrementQuota } from "../../lib/ai-quota";
 import { assertCredits, debitCredits } from "../../lib/credits";
 import { accuracyPct } from "../../../shared/domain/scoring";
 import { LOV_SEED } from "../../../shared/data/lov";
 import {
   COACH_COOLDOWN_HOURS,
-  COACH_DAILY_LIMIT,
   COACH_MIN_ANSWERED,
   buildCoachVariables,
   parseCoachResponse,
@@ -174,7 +172,6 @@ export const coachRouter = router({
         });
       }
 
-      await assertAndIncrementQuota(ctx.userId, "coach", COACH_DAILY_LIMIT);
       await assertCredits(ctx.userId, "coach");
       const payload = resolveAiPrompt("oab-coach", buildCoachVariables(data));
       const jobId = await enqueueRelayJob(ctx.userId, payload);

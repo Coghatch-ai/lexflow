@@ -10,12 +10,8 @@
 import { z } from "zod";
 
 // A fresh digest is served from cache for this long; "Atualizar análise"
-// bypasses the cooldown but still burns daily quota.
+// bypasses the cooldown.
 export const COACH_COOLDOWN_HOURS = 24;
-
-// Daily cap on coach generations per user (shared ai_usage_daily counter with
-// the tutor — the coach is heavier per call, so its own tighter limit).
-export const COACH_DAILY_LIMIT = 3;
 
 // The aggregates the digest is built from — assembled server-side, also stored
 // as stats_snapshot on the digest row.
