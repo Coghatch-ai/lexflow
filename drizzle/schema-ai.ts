@@ -30,22 +30,80 @@ const systemFields = {
   lastUpdBy: uuid("last_upd_by"),
 };
 
-// Per-user daily AI-call counter — abuse guard gating AI procedures. One row
-// per (user, day, kind); incremented atomically at enqueue by api/lib/ai-quota.ts.
-export const aiUsageDaily = pgTable(
-  "ai_usage_daily",
+// ─── Monetization — S1 + S2 ────────────────────────────────────────────────
+
+// Active subscription per user. One row per user; status tracks the lifecycle.
+// provider_ref / provider_sub_id are nullable placeholders for a future gateway.
+// Plan and period dates enable the anniversary-based allowance reset in S3.
+export const subscriptions = pgTable(
+  "subscriptions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .unique()
+      .references(() => users.id, { onDelete: "cascade" }),
+    plan: text("plan").notNull(), // LOV code: 'free' | 'paid' (admin-editable)
+    status: text("status").notNull(), // 'active' | 'canceled' | 'past_due'
+    currentPeriodStart: timestamp("current_period_start", {
+      withTimezone: true,
+      mode: "string",
+    }).notNull(),
+    currentPeriodEnd: timestamp("current_period_end", {
+      withTimezone: true,
+      mode: "string",
+    }).notNull(),
+    // Gateway placeholders — nullable until payment integration (S-later).
+    providerRef: text("provider_ref"),
+    providerSubId: text("provider_sub_id"),
+    ...systemFields,
+  },
+  (t) => [index("idx_subscriptions_user").on(t.userId)],
+);
+
+// Month-grained allowance ledger for CORE AI (phase-1 explanation + phase-2
+// grading). Mirrors credit_ledger money invariants:
+//   balance = SUM(delta); unique ref_id bars double-spend/double-refund.
+// periodStart anchors the subscription anniversary window so S3 can expire
+// stale carry-over (rollover cap = one month's worth of allowance).
+// AllowanceAction values: 'monthly_grant' | 'top_up' | 'spend' | 'refund' |
+//   'rollover' | 'expire' — extended by S3/S4 without schema change.
+export const allowanceLedger = pgTable(
+  "allowance_ledger",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    day: date("day").notNull(),
-    kind: text("kind").notNull().default("tutor"), // 'tutor' | 'coach' — independent counters per feature
+    delta: integer("delta").notNull(), // signed units (positive = grant, negative = spend)
+    action: text("action").notNull(), // AllowanceAction
+    refId: text("ref_id").unique(), // idempotency key (jobId / refund:<jobId> / grant:<coupon>:<userId>)
+    periodStart: timestamp("period_start", { withTimezone: true, mode: "string" }), // subscription period this row belongs to
+    note: text("note"),
+    ...systemFields,
+  },
+  (t) => [index("idx_allowance_ledger_user_created").on(t.userId, t.createdAt)],
+);
+
+// Free-tier daily counter — 1 core AI use per calendar day (America/Sao_Paulo).
+// One row per (user, day); upsert increments count atomically. Day stored as
+// ISO date in São Paulo timezone (computed server-side, never from the client).
+// Replaces the retired ai_usage_daily — this counter is entitlement, not abuse cap.
+export const freeDailyCounter = pgTable(
+  "free_daily_counter",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    day: date("day").notNull(), // ISO date in America/Sao_Paulo
     count: integer("count").notNull().default(0),
     ...systemFields,
   },
-  (t) => [unique("uq_ai_usage_user_day_kind").on(t.userId, t.day, t.kind)],
+  (t) => [unique("uq_free_daily_counter_user_day").on(t.userId, t.day)],
 );
+
+// ───────────────────────────────────────────────────────────────────────────
 
 // Per-question AI tutor thread. Stateless one-shots server-side; rows exist so
 // the conversation renders as a thread and survives navigation. Assistant text

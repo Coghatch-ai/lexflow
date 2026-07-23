@@ -38,10 +38,13 @@ const TABLE_SCOPE: Record<string, ScopeType> = {
   user_question_states: { type: "user" },
   user_question_notes: { type: "user" },
   user_bookmarks: { type: "user" },
-  ai_usage_daily: { type: "user" },
   ai_tutor_messages: { type: "user" },
   ai_coach_digests: { type: "user" },
   credit_ledger: { type: "user" },
+  // Monetization — S1 + S2 (issue #51)
+  subscriptions: { type: "user" },
+  allowance_ledger: { type: "user" },
+  free_daily_counter: { type: "user" },
 };
 
 function tableName(table: PgTable): string {
