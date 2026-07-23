@@ -86,8 +86,10 @@ export const allowanceLedger = pgTable(
 );
 
 // Free-tier daily counter — 1 core AI use per calendar day (America/Sao_Paulo).
-// One row per (user, day); upsert increments count atomically. Day stored as
-// ISO date in São Paulo timezone (computed server-side, never from the client).
+// One row per (user, day); atomic claim via INSERT … ON CONFLICT DO UPDATE WHERE
+// count < LIMIT. last_job_id tracks which job holds the current claim so the
+// reverse (on relay error) is idempotent: UPDATE WHERE last_job_id = jobId.
+// Day stored as ISO date in São Paulo timezone (computed server-side, never client).
 // Replaces the retired ai_usage_daily — this counter is entitlement, not abuse cap.
 export const freeDailyCounter = pgTable(
   "free_daily_counter",
@@ -98,6 +100,7 @@ export const freeDailyCounter = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     day: date("day").notNull(), // ISO date in America/Sao_Paulo
     count: integer("count").notNull().default(0),
+    lastJobId: uuid("last_job_id"), // jobId that claimed today's use (nullable; cleared on reverse)
     ...systemFields,
   },
   (t) => [unique("uq_free_daily_counter_user_day").on(t.userId, t.day)],

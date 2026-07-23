@@ -20,8 +20,14 @@ import {
   optionLetter,
   parseExplainResponse,
 } from "../../../shared/domain/ai-eval";
-import { enqueueRelayJob, getRelayJob } from "../../lib/relay";
+import { enqueueRelayJob, getRelayJob, mintJobId } from "../../lib/relay";
 import { resolveAiPrompt } from "../../lib/ai-prompts";
+import {
+  assertCoreAction,
+  debitAllowance,
+  refundAllowance,
+  reverseFreeTierCounter,
+} from "../../lib/allowance";
 
 // Output contract for focusedDrill — kept a single explicit shape (see note on
 // the procedure).
@@ -231,15 +237,18 @@ export const questionsRouter = router({
         throw new TRPCError({ code: "NOT_FOUND", message: "Questão não encontrada" });
       }
 
-      // Cache hit — return immediately without enqueuing.
+      // Cache hit — CORE action is FREE when cached (no LLM call → no allowance debit).
       if (row.aiExplanation !== null) {
         return { cached: true as const, explanation: row.aiExplanation, jobId: null };
       }
 
-      // Cache miss — enqueue generation. The relay writes the result to S3;
-      // the client polls relay.job and, once done, calls questions.finalizeExplanation
-      // (protectedProcedure) which re-reads the relay result server-side and persists
-      // it globally. Never accept explanation text from the client.
+      // Cache miss — live LLM call → CORE action → debit allowance (S3 #52).
+      // Spend order (Codex 5th-pass):
+      //   mintJobId → assertCoreAction(jobId) → debitAllowance (PAID, BEFORE enqueue)
+      //   → enqueueRelayJob → [on throw: refundAllowance (paid) | reverseFreeTierCounter (free)]
+      // A paid relay job is NEVER dispatched without a prior durable debit row.
+      // If enqueue fails, the pre-committed debit is reversed (symmetric with free path).
+      // F3: only PAID path writes allowance_ledger rows — free path touches counter only.
       const payload = resolveAiPrompt(
         "oab-explain",
         buildExplainVariables({
@@ -249,7 +258,30 @@ export const questionsRouter = router({
           legalBasis: row.legalBasis ?? null,
         }),
       );
-      const jobId = await enqueueRelayJob(ctx.userId, payload);
+      // Step 1: reserve jobId — no relay work started yet.
+      const jobId = mintJobId();
+      // Step 2: assert entitlement BEFORE any spend or enqueue.
+      // On FORBIDDEN nothing is debited or enqueued.
+      const tier = await assertCoreAction(ctx.userId, jobId);
+      // Step 3 (PAID only): commit spend BEFORE dispatch. If the ledger write fails,
+      // no S3 job is enqueued — no partial window. The minted jobId is used as ref_id
+      // so the relay-error refundAllowance path still matches (same id, same row).
+      if (tier === "paid") {
+        await debitAllowance(ctx.userId, jobId);
+      }
+      // Step 4: dispatch relay job. On failure, reverse whichever rail was claimed.
+      try {
+        await enqueueRelayJob(ctx.userId, payload, jobId);
+      } catch (enqueueErr) {
+        if (tier === "free") {
+          await reverseFreeTierCounter(ctx.userId, jobId);
+        } else {
+          // Paid debit already committed — reverse it so the user isn't charged for
+          // an undelivered job. Idempotent via refund:<jobId> unique ref_id.
+          await refundAllowance(ctx.userId, jobId);
+        }
+        throw enqueueErr;
+      }
       return { cached: false as const, explanation: null, jobId };
     }),
 

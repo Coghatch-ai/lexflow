@@ -1,0 +1,1 @@
+ALTER TABLE "free_daily_counter" ADD COLUMN "last_job_id" uuid;
