@@ -145,15 +145,15 @@ R$/credit is a pack-pricing decision, deliberately not in code.
 
 **Blocked on owner decisions:**
 
-1. ~~Quota values~~ **RESOLVED 2026-07-23 — owner reframed the model (issue #49, PRD
-   `design/ai-monetization-subscription-credits.md`).** Owner does NOT want a daily
-   anti-abuse quota. The 30 tutor / 3 coach `ai_usage_daily` caps are to be **retired**.
-   Real model: **subscription** (monthly AI allowance, per-turn entitlement) + **credits as a
-   paid add-on** above the allowance, priced **consume × 2**. `grade` gets no daily counter
-   (confirmed). `COACH_MIN_ANSWERED=20` left as-is (out of scope). Owner wants the rules as a
-   real convention/doc **in the code**, NOT in CLAUDE.md agent info. Build S1 (remove quota
-   enforcement) is planned on #49 and pending owner sign-off; the subscription build is a
-   separate parked PRD. So slice-5's "PROVISIONAL 30/3 quota" is now WRONG — it's being removed.
+1. ~~Quota values~~ **RESOLVED — owner reframed the model (#50, single doc
+   `docs/monetization.md`).** Owner does NOT want a daily anti-abuse quota. The 30 tutor / 3
+   coach `ai_usage_daily` caps are to be **retired**. Real model (authoritative in
+   `docs/monetization.md`): **two separate currencies** — an **allowance** covering CORE only
+   (AI explanation phases 1 & 2, incl. `grade`) via the subscription, and **credits** covering
+   everything else (buddy, coach, future). Free tier gets 1 core AI use/day. No payment gateway
+   this build (coupons only). No hardcoded numbers — admin-editable table. `COACH_MIN_ANSWERED=20`
+   left as-is (out of scope). Owner wants the rule as a real doc **in the code**, NOT in CLAUDE.md
+   agent info. So slice-5's "PROVISIONAL 30/3 quota" is now WRONG — it's being removed.
 2. Model choice — run `pnpm eval` (paid) and pick by quality; swap live via SSM
    `/lexflow/relay/prod/ai-provider` + model params, no redeploy.
 3. Credit pack pricing + coupon/onboarding strategy (new users have 0 credits — distribute a welcome
