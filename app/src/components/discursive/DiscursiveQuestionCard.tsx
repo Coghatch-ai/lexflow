@@ -10,6 +10,7 @@ import { Clock, Sparkles, CheckCircle2, ChevronRight } from "lucide-react";
 import { clampScore } from "@shared/domain/discursive-attempt";
 import type { AiResult, AnswerKey, DiscursiveQuestion } from "./types";
 import { META_SEP } from "@shared/domain/ui-format";
+import AllowanceChip from "../../shared/components/AllowanceChip";
 
 function RevealPanel({ answerKey }: { answerKey: AnswerKey }): ReactElement {
   return (
@@ -42,6 +43,9 @@ interface AiPanelProps {
 function AiPanel({ enabled, result, loading, error, maxPoints, onRequest }: AiPanelProps): ReactElement {
   return (
     <div className="mt-4 border-t border-gray-100 pt-4">
+      <div className="flex flex-wrap items-center gap-3 mb-3">
+        <AllowanceChip compact />
+      </div>
       <button
         onClick={onRequest}
         disabled={!enabled || loading}

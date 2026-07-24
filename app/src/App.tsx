@@ -12,6 +12,7 @@ import { AdminQuestionsPage, AdminAlgorithmPage, AdminCalendarPage } from "./pag
 import { AdminIssuesPage } from "./pages/AdminIssuesPage";
 import SavedQuestionsPage from "./pages/SavedQuestionsPage";
 import StudyPlanPage from "./pages/StudyPlanPage";
+import BillingPage from "./pages/BillingPage";
 
 export default function App(): ReactElement {
   return (
@@ -35,6 +36,7 @@ export default function App(): ReactElement {
               <Route path="/admin/algorithm" component={AdminAlgorithmPage} />
               <Route path="/admin/calendar" component={AdminCalendarPage} />
               <Route path="/admin/issues" component={AdminIssuesPage} />
+              <Route path="/billing" component={BillingPage} />
               <Route>
                 <Redirect to="/" />
               </Route>

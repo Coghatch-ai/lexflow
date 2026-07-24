@@ -19,6 +19,7 @@ import {
   Bookmark,
   ClipboardList,
   Bug,
+  CreditCard,
 } from 'lucide-react';
 
 interface LayoutProps {
@@ -34,6 +35,7 @@ const navItems = [
   { path: '/study-plans', label: 'Planos de Estudo', icon: <ClipboardList className="w-[18px] h-[18px]" /> },
   { path: '/saved', label: 'Salvas e Anotações', icon: <Bookmark className="w-[18px] h-[18px]" /> },
   { path: '/profile', label: 'Perfil', icon: <User className="w-[18px] h-[18px]" /> },
+  { path: '/billing', label: 'Conta', icon: <CreditCard className="w-[18px] h-[18px]" /> },
 ];
 
 const adminNavItems = [

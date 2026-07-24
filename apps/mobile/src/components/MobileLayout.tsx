@@ -1,6 +1,15 @@
 import type { ReactElement, ReactNode } from "react";
 import { Link, useLocation } from "wouter";
-import { BarChart3, Bookmark, Home, LogOut, RefreshCw, Scale, Layers } from "lucide-react";
+import {
+  BarChart3,
+  Bookmark,
+  CreditCard,
+  Home,
+  LogOut,
+  RefreshCw,
+  Scale,
+  Layers,
+} from "lucide-react";
 import { useSession } from "../auth";
 
 type Tab = { href: string; label: string; icon: typeof Home };
@@ -11,6 +20,7 @@ const TABS: Tab[] = [
   { href: "/flashcards", label: "Flashcards", icon: Layers },
   { href: "/progress", label: "Progresso", icon: BarChart3 },
   { href: "/saved", label: "Salvos", icon: Bookmark },
+  { href: "/billing", label: "Conta", icon: CreditCard },
 ];
 
 // App shell: phone-width column, sticky brand header (with sign-out), sticky
@@ -25,7 +35,8 @@ export function MobileLayout({ children }: { children: ReactNode }): ReactElemen
     location === "/drill" ||
     location === "/review" ||
     location === "/result" ||
-    location === "/flashcards";
+    location === "/flashcards" ||
+    location === "/billing";
 
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-md flex-col bg-paper">
@@ -55,7 +66,7 @@ export function MobileLayout({ children }: { children: ReactNode }): ReactElemen
 
       {!immersive && (
         <nav
-          className="sticky bottom-0 z-10 grid grid-cols-5 border-t border-line bg-surface"
+          className="sticky bottom-0 z-10 grid grid-cols-6 border-t border-line bg-surface"
           style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
         >
           {TABS.map(({ href, label, icon: Icon }) => {

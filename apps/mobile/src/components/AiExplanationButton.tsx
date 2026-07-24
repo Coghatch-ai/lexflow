@@ -15,6 +15,7 @@ import type { AiExplanation } from "@shared/domain/ai-eval";
 import { runExplanationFlow } from "@shared/lib/run-explanation-flow";
 import { trpc } from "../lib/trpc";
 import { AiExplanationView } from "./AiExplanationView";
+import { AllowanceChip } from "./AllowanceChip";
 
 interface AiExplanationButtonProps {
   questionId: string;
@@ -60,6 +61,7 @@ export function AiExplanationButton({
 
   return (
     <div className="mt-2 space-y-1.5">
+      <AllowanceChip />
       {error !== null && <p className="text-xs text-neg">{error}</p>}
       <button
         type="button"

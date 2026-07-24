@@ -2,12 +2,25 @@
 //
 // Balance chip + coupon redemption. Coupons are the only user-facing top-up
 // until a purchase flow exists. Tap the chip → inline code input → redeem →
-// balance refresh. Errors come pt-BR from the server (invalid/exhausted/
-// expired/already-redeemed).
+// balance refresh. Handles all three coupon kinds (credits | allowance | subscription)
+// with per-kind pt-BR success messages. Errors come pt-BR from the server
+// (invalid/exhausted/expired/already-redeemed).
 
 import { useState, type ReactElement } from "react";
 import { Coins } from "lucide-react";
 import { trpc } from "../lib/trpc";
+import type { CouponKind } from "@shared/domain/coupons";
+
+function kindMessage(kind: CouponKind, granted: number): string {
+  if (kind === "credits") {
+    return `+${String(granted)} crédito${granted === 1 ? "" : "s"}!`;
+  }
+  if (kind === "allowance") {
+    return `+${String(granted)} uso${granted === 1 ? "" : "s"} de IA principal!`;
+  }
+  // subscription
+  return `Assinatura ativada por ${String(granted)} ${granted === 1 ? "mês" : "meses"}!`;
+}
 
 export function CreditsChip(): ReactElement | null {
   const [open, setOpen] = useState(false);
@@ -27,10 +40,11 @@ export function CreditsChip(): ReactElement | null {
     redeemMut.mutate(
       { code: trimmed },
       {
-        onSuccess: ({ granted }) => {
+        onSuccess: ({ kind, granted }) => {
           setCode("");
-          setMessage({ tone: "pos", text: `+${String(granted)} créditos!` });
+          setMessage({ tone: "pos", text: kindMessage(kind, granted) });
           void utils.credits.balance.invalidate();
+          void utils.credits.ledger.invalidate();
         },
         onError: (err) => {
           setMessage({ tone: "neg", text: err.message });
