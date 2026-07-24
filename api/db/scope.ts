@@ -23,6 +23,7 @@ const TABLE_SCOPE: Record<string, ScopeType> = {
   exam_calendars: { type: "global" },
   exam_calendar_events: { type: "global" },
   coupons: { type: "global" },
+  pricing_config: { type: "global" },
 
   // Per-user owned tables
   user_answers: { type: "user" },

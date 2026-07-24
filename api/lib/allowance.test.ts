@@ -68,7 +68,7 @@ describe("F1 — free-tier claim is atomic (no check-then-increment race)", () =
   });
 
   it("assertCoreAction signature accepts jobId parameter", () => {
-    expect(src).toContain("assertCoreAction(\n  userId: string,\n  jobId: string,\n)");
+    expect(src).toContain("assertCoreAction(userId: string, jobId: string)");
   });
 });
 

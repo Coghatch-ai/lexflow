@@ -27,6 +27,12 @@ import { and, eq, sql, lt } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db } from "../db/client";
 import { allowanceLedger, freeDailyCounter, subscriptions } from "../../drizzle/schema";
+
+// Minimal executor type accepted by grantAllowance when called inside a
+// transaction. drizzle node-postgres transactions expose the same .insert()
+// interface as the global db — we only need the subset used here.
+type DbOrTx = Pick<typeof db, "insert" | "select" | "update">;
+
 import { ALLOWANCE_COST, FREE_TIER_DAILY_LIMIT, PLAN_PAID } from "../../shared/domain/allowance";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -235,15 +241,24 @@ export async function refundAllowance(userId: string, jobId: string): Promise<vo
     .onConflictDoNothing({ target: allowanceLedger.refId });
 }
 
-/** Idempotent positive allowance grant (admin / coupon / monthly). refId dedupes replays. */
+/**
+ * Idempotent positive allowance grant (admin / coupon / monthly). refId dedupes replays.
+ *
+ * @param tx - optional transaction executor. When redeeming a coupon, pass the
+ *   active drizzle transaction so the insert joins the same atomic unit as the
+ *   coupon cap increment and replay-guard sentinel. Standalone callers (admin
+ *   grant, subscription activation) omit this and use the module-level db.
+ */
 export async function grantAllowance(
   userId: string,
   units: number,
   action: "monthly_grant" | "top_up" | "rollover" | "admin_grant",
   refId: string,
   note?: string,
+  tx?: DbOrTx,
 ): Promise<void> {
-  await db
+  const executor = tx ?? db;
+  await executor
     .insert(allowanceLedger)
     .values({
       userId,

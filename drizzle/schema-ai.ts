@@ -6,9 +6,11 @@
 // (arrow callbacks), so the circular import with schema.ts is safe.
 
 import {
+  check,
   index,
   integer,
   jsonb,
+  numeric,
   pgTable,
   text,
   timestamp,
@@ -16,6 +18,7 @@ import {
   uuid,
   date,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import type { CoachDigest, CoachStudentData } from "../shared/domain/ai-coach";
 import { users, oabQuestions } from "./schema";
 
@@ -146,20 +149,39 @@ export const aiCoachDigests = pgTable(
   (t) => [index("idx_ai_coach_user_created").on(t.userId, t.createdAt)],
 );
 
-// Coupon-based credit grants — the ONLY way a user gains credits until a real
-// purchase flow exists (auto signup grants are farmable; maggie #126). Global
-// table; `redeemedCount` is the lockable row for the atomic per-coupon cap
+// Coupon-based grants — the ONLY way a user gains allowance/credits/subscription
+// until a real purchase flow exists (auto signup grants are farmable; maggie #126).
+// Global table; `redeemedCount` is the lockable row for the atomic per-coupon cap
 // (conditional UPDATE ... WHERE redeemed_count < max_redemptions RETURNING) —
 // never derive it by counting ledger rows.
-export const coupons = pgTable("coupons", {
-  code: text("code").primaryKey(), // XXXX-XXXX, uppercase
-  valueCredits: integer("value_credits").notNull(),
-  maxRedemptions: integer("max_redemptions").notNull().default(1),
-  redeemedCount: integer("redeemed_count").notNull().default(0),
-  expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }),
-  note: text("note"),
-  ...systemFields,
-});
+//
+// kind: 'credits'      — grants valueCredits to credit_ledger (legacy default)
+//       'allowance'    — grants valueUnits to allowance_ledger via grantAllowance
+//       'subscription' — activates a subscription period via grantSubscription
+//
+// valueCredits: used for kind='credits' (credits granted).
+// valueUnits:   used for kind='allowance' (allowance units granted).
+// valuePeriodMonths: used for kind='subscription' (months granted).
+// Only the relevant value field is required per kind; others may be 0/null.
+export const coupons = pgTable(
+  "coupons",
+  {
+    code: text("code").primaryKey(), // XXXX-XXXX, uppercase
+    kind: text("kind").notNull().default("credits"), // 'credits' | 'allowance' | 'subscription'
+    valueCredits: integer("value_credits").notNull().default(0),
+    valueUnits: integer("value_units").notNull().default(0), // allowance units (kind='allowance')
+    valuePeriodMonths: integer("value_period_months").notNull().default(0), // months (kind='subscription')
+    maxRedemptions: integer("max_redemptions").notNull().default(1),
+    redeemedCount: integer("redeemed_count").notNull().default(0),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }),
+    note: text("note"),
+    ...systemFields,
+  },
+  (t) => [
+    // DB-level guard: only the three known kind values are accepted (F2, issue #53).
+    check("coupons_kind_check", sql`${t.kind} IN ('credits', 'allowance', 'subscription')`),
+  ],
+);
 
 // Pay-as-you-go credit ledger — balance = SUM(delta). ref_id = idempotency key
 // (jobId spend / refund:<jobId> / coupon:<code>:<userId>); unique index bars doubles.
@@ -178,3 +200,29 @@ export const creditLedger = pgTable(
   },
   (t) => [index("idx_credit_ledger_user_created").on(t.userId, t.createdAt)],
 );
+
+// ─── Admin-editable pricing / config table — S5 ────────────────────────────
+//
+// Every number that governs pricing, allowance sizes, and pack sizes lives HERE
+// as a DB row — never hardcoded in source. Rows are editable by an admin with
+// NO redeploy. The system MUST refuse to serve a live price while `realCostPerUnit`
+// is null (unset-real-cost guard in api/lib/pricing-config.ts).
+//
+// key examples (seed rows in db:seed-pricing-config when eval is done):
+//   'plan_price_brl'         — monthly subscription price in BRL (centavos)
+//   'monthly_allowance_units'— allowance units granted per subscription period
+//   'free_daily_limit'       — free-tier core AI uses per day (overrides constant)
+//   'allowance_pack_units'   — units in a top-up allowance pack
+//   'credit_pack_size'       — credits in a standard credit pack
+//   'real_cost_per_unit'     — actual cost (BRL, 4dp) per allowance unit from eval
+//
+// realCostPerUnit is the eval-seeded anchor. Until it is set, pricing endpoints
+// must return an error rather than a stale/zero value (see unset guard).
+// numericValue uses NUMERIC(18,4) for BRL-scale precision.
+export const pricingConfig = pgTable("pricing_config", {
+  key: text("key").primaryKey(), // config key (see examples above)
+  numericValue: numeric("numeric_value", { precision: 18, scale: 4 }), // nullable until seeded
+  textValue: text("text_value"), // for non-numeric config (e.g. feature flags)
+  description: text("description"), // human-readable; admin UI tooltip
+  ...systemFields,
+});

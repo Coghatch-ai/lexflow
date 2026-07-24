@@ -162,6 +162,20 @@
       "when": 1784847916360,
       "tag": "0022_familiar_sabretooth",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1784851450448,
+      "tag": "0023_flimsy_quasar",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1753315200000,
+      "tag": "0024_coupon_kind_check",
+      "breakpoints": true
     }
   ]
 }

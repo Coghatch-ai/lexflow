@@ -6,6 +6,7 @@
 // not user-scoped.
 
 import { z } from "zod";
+import { randomUUID } from "node:crypto";
 import { and, asc, eq, inArray, isNotNull, isNull, sql, type SQL } from "drizzle-orm";
 import { db } from "../../db/client";
 import {
@@ -26,6 +27,9 @@ import {
 } from "../../../shared/domain/ai-eval";
 import { enqueueRelayJob } from "../../lib/relay";
 import { resolveAiPrompt } from "../../lib/ai-prompts";
+import { getAllConfigRows, upsertConfigRow } from "../../lib/pricing-config";
+import { grantSubscription } from "../../lib/subscription";
+import { grantAllowance } from "../../lib/allowance";
 
 const calendarEventInput = z.object({
   label: z.string().min(1),
@@ -85,7 +89,79 @@ function generateId(): string {
   return `qi${Date.now()}`;
 }
 
+// ─── S5: Admin-editable pricing/config ────────────────────────────────────────
+
+const pricingConfigUpsertInput = z.object({
+  key: z.string().min(1).max(100),
+  numericValue: z
+    .string()
+    .regex(/^-?\d+(\.\d+)?$/)
+    .nullable()
+    .optional(),
+  textValue: z.string().max(500).nullable().optional(),
+  description: z.string().max(500).nullable().optional(),
+});
+
+// ─── S6: Subscription grant paths ─────────────────────────────────────────────
+
+const subscriptionGrantInput = z.object({
+  userId: z.string().uuid(),
+  periodMonths: z.number().int().min(1).max(120),
+  note: z.string().max(200).optional(),
+});
+
+const allowanceGrantInput = z.object({
+  userId: z.string().uuid(),
+  units: z.number().int().positive().max(1_000_000),
+  note: z.string().max(200).optional(),
+});
+
 export const adminRouter = router({
+  // S5 — admin-editable pricing/config table.
+  pricing: router({
+    // List all config rows.
+    list: adminProcedure.query(async () => {
+      return getAllConfigRows();
+    }),
+
+    // Upsert a config row. Changing a row takes effect immediately — no redeploy.
+    upsert: adminProcedure.input(pricingConfigUpsertInput).mutation(async ({ ctx, input }) => {
+      await upsertConfigRow(
+        input.key,
+        input.numericValue ?? null,
+        input.textValue ?? null,
+        input.description ?? null,
+        ctx.userId,
+      );
+      return { ok: true as const };
+    }),
+  }),
+
+  // S6 — subscription grant paths (no gateway; admin action only here).
+  subscriptions: router({
+    // Grant a paid subscription period to a user (admin action).
+    // idempotencyKey = sub:admin:<userId>:<uuid> — caller-generated UUID ensures
+    // each distinct admin action gets a fresh key; a UI retry with the same key
+    // is a no-op on the allowance grant (F3, issue #53).
+    grant: adminProcedure.input(subscriptionGrantInput).mutation(async ({ input }) => {
+      const idempotencyKey = `sub:admin:${input.userId}:${randomUUID()}`;
+      await grantSubscription(input.userId, input.periodMonths, idempotencyKey, input.note);
+      return { ok: true as const };
+    }),
+
+    // Grant allowance units directly to a user (admin top-up, no coupon needed).
+    grantAllowance: adminProcedure.input(allowanceGrantInput).mutation(async ({ input }) => {
+      await grantAllowance(
+        input.userId,
+        input.units,
+        "admin_grant",
+        `allowance:admin:${randomUUID()}`,
+        input.note,
+      );
+      return { ok: true as const };
+    }),
+  }),
+
   calendars: router({
     list: adminProcedure.query(async () => {
       const cals = await db
