@@ -173,7 +173,7 @@
     {
       "idx": 24,
       "version": "7",
-      "when": 1753315200000,
+      "when": 1784851450449,
       "tag": "0024_coupon_kind_check",
       "breakpoints": true
     }
