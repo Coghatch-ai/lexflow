@@ -172,3 +172,115 @@ describe("K7 — [F2] kind validation + non-positive value rejection (Codex find
     expect(src).not.toContain("valuePeriodMonths > 0 ? won.valuePeriodMonths : 1");
   });
 });
+
+// ── Issue #56 read procedures ────────────────────────────────────────────────
+
+describe("R1 — allowanceBalance procedure (issue #56)", () => {
+  it("procedure named allowanceBalance exists on creditsRouter", () => {
+    expect(src).toContain("allowanceBalance: protectedProcedure");
+  });
+
+  it("calls getAllowanceBalance(ctx.userId)", () => {
+    expect(src).toContain("getAllowanceBalance(ctx.userId)");
+  });
+
+  it("getAllowanceBalance imported from allowance lib", () => {
+    expect(src).toContain("getAllowanceBalance");
+    expect(src).toContain('from "../../lib/allowance"');
+  });
+
+  it("queries subscriptions table for periodEnd", () => {
+    expect(src).toContain("subscriptions");
+    expect(src).toContain("currentPeriodEnd");
+  });
+
+  it("returns balance + periodEnd shape", () => {
+    expect(src).toContain("balance,");
+    expect(src).toContain("periodEnd:");
+  });
+
+  it("periodEnd is null when no subscription row", () => {
+    // Null coalesce pattern: sub?.currentPeriodEnd ?? null
+    expect(src).toContain("?? null");
+  });
+
+  it("does NOT hardcode any allowance number", () => {
+    // Guard: no magic numbers for allowance size
+    expect(src).not.toMatch(/allowanceBalance[\s\S]{0,500}balance:\s*\d+/m);
+  });
+});
+
+describe("R2 — subscriptionStatus procedure (issue #56)", () => {
+  it("procedure named subscriptionStatus exists on creditsRouter", () => {
+    expect(src).toContain("subscriptionStatus: protectedProcedure");
+  });
+
+  it("returns plan:'free' + status:'none' for free user (no row)", () => {
+    expect(src).toContain('plan: "free"');
+    expect(src).toContain('status: "none"');
+  });
+
+  it("returns null dates for free user", () => {
+    expect(src).toContain("currentPeriodStart: null");
+    expect(src).toContain("currentPeriodEnd: null");
+  });
+
+  it("returns real plan + status from subscriptions row for paid user", () => {
+    expect(src).toContain("plan: sub.plan");
+    expect(src).toContain("status: sub.status");
+  });
+
+  it("returns real period dates from subscriptions row", () => {
+    expect(src).toContain("currentPeriodStart: sub.currentPeriodStart");
+    expect(src).toContain("currentPeriodEnd: sub.currentPeriodEnd");
+  });
+
+  it("has explicit return type to avoid tRPC union-strip of null fields", () => {
+    // Explicit Promise<{...}> annotation prevents tRPC stripping null from the type.
+    expect(src).toContain("): Promise<{");
+  });
+});
+
+// ── Mobile BillingPage wiring guards (issue #56 Codex gap) ──────────────────
+// Source-scan pattern: read mobile BillingPage source and assert it consumes
+// both #56 reads + invalidates them after redeem. Goes RED against the pre-fix
+// hardcoded-placeholder version; GREEN now.
+
+const mobileSrc = readFileSync(
+  join(import.meta.dirname, "../../../apps/mobile/src/pages/BillingPage.tsx"),
+  "utf-8",
+);
+
+describe("R3 — mobile BillingPage wiring (issue #56 Codex gap)", () => {
+  it("consumes credits.allowanceBalance via useQuery", () => {
+    expect(mobileSrc).toContain("credits.allowanceBalance.useQuery");
+  });
+
+  it("consumes credits.subscriptionStatus via useQuery", () => {
+    expect(mobileSrc).toContain("credits.subscriptionStatus.useQuery");
+  });
+
+  it("invalidates allowanceBalance after redeem", () => {
+    expect(mobileSrc).toContain("utils.credits.allowanceBalance.invalidate");
+  });
+
+  it("invalidates subscriptionStatus after redeem", () => {
+    expect(mobileSrc).toContain("utils.credits.subscriptionStatus.invalidate");
+  });
+
+  it("does NOT hard-lock plan badge to 'Gratuito' string literal", () => {
+    // Pre-fix: plan badge was hardcoded 'Gratuito' unconditionally.
+    // Post-fix: planLabel() derives it from real data — the static literal
+    // still exists inside planLabel() as a fallback branch, but the badge
+    // itself is driven by subscriptionStatus data, not a bare string literal
+    // outside the helper. Guard: the component uses planLabel(…) rather than
+    // embedding the raw pt-BR string directly in JSX.
+    expect(mobileSrc).toContain("planLabel(");
+  });
+
+  it("does NOT contain the static 'Disponível em breve' allowance placeholder", () => {
+    // Pre-fix: allowance card showed this static placeholder.
+    // Post-fix: replaced by real data from allowanceBalance query.
+    expect(mobileSrc).not.toContain("Disponível em breve");
+  });
+});

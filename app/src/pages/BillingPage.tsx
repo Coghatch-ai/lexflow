@@ -1,18 +1,15 @@
 // app/src/pages/BillingPage.tsx
 //
 // Billing / account screen (S7 — issue #54).
-// Shows: subscription plan status, credit balance, allowance balance (placeholder
-// until backend read endpoint added — see #54 report), ledger/history, redeem coupon.
+// Shows: subscription plan status, credit balance, allowance balance, ledger/history,
+// redeem coupon.
 //
 // Reads:
-//   credits.balance  → {balance: number, costs: {tutor, coach}}
-//   credits.ledger   → ledger rows (newest first, limit 50)
-//   credits.redeem   → mutation (all 3 kinds)
-//
-// Missing backend read endpoints (flagged, not added per #54 constraint):
-//   allowance balance → no user-facing tRPC procedure exists
-//   subscription status → no user-facing tRPC procedure exists
-// Both surfaces render a pt-BR placeholder/disabled state until those are added.
+//   credits.balance            → {balance: number, costs: {tutor, coach}}
+//   credits.ledger             → ledger rows (newest first, limit 50)
+//   credits.allowanceBalance   → {balance: number, periodEnd: string | null}  (#56)
+//   credits.subscriptionStatus → {plan, status, currentPeriodStart, currentPeriodEnd}  (#56)
+//   credits.redeem             → mutation (all 3 kinds)
 
 import type { ReactElement } from 'react';
 import { CreditCard, Coins, Zap, Tag, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
@@ -42,9 +39,28 @@ function actionLabel(action: string): string {
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
-function PlanCard(): ReactElement {
-  // Subscription status read endpoint is not yet available on the user-facing
-  // tRPC router. Renders a placeholder until it is added.
+interface PlanCardProps {
+  plan: string | undefined;
+  status: string | undefined;
+  periodEnd: string | null | undefined;
+  isLoading: boolean;
+}
+
+function planLabel(plan: string | undefined): string {
+  if (plan === 'paid') return 'Premium';
+  if (plan === 'free' || plan === undefined) return 'Gratuito';
+  return plan;
+}
+
+function statusLabel(status: string | undefined): string {
+  if (status === 'active') return 'Ativo';
+  if (status === 'canceled') return 'Cancelado';
+  if (status === 'past_due') return 'Em atraso';
+  return '—';
+}
+
+function PlanCard({ plan, status, periodEnd, isLoading }: PlanCardProps): ReactElement {
+  const isPaid = plan === 'paid' && status === 'active';
   return (
     <div className="rounded-xl border border-line bg-surface p-6 space-y-3">
       <div className="flex items-center gap-2">
@@ -54,12 +70,29 @@ function PlanCard(): ReactElement {
       <div className="flex items-center justify-between">
         <div>
           <p className="text-sm text-ink-mute">Status da assinatura</p>
-          <p className="mt-1 text-sm text-ink-soft italic">
-            Disponível em breve — ative um cupom de assinatura para começar.
-          </p>
+          {isLoading ? (
+            <p className="mt-1 text-sm text-ink-soft">Carregando…</p>
+          ) : isPaid ? (
+            <p className="mt-1 text-sm text-ink">
+              {statusLabel(status)}
+              {periodEnd !== null && periodEnd !== undefined
+                ? ` — válido até ${formatDate(periodEnd)}`
+                : ''}
+            </p>
+          ) : (
+            <p className="mt-1 text-sm text-ink-soft italic">
+              Ative um cupom de assinatura para começar.
+            </p>
+          )}
         </div>
-        <span className="shrink-0 rounded-full border border-line bg-paper px-3 py-1 text-xs font-semibold text-ink-mute">
-          Gratuito
+        <span
+          className={`shrink-0 rounded-full border px-3 py-1 text-xs font-semibold ${
+            isPaid
+              ? 'border-seal-bright bg-seal-pale text-seal-bright'
+              : 'border-line bg-paper text-ink-mute'
+          }`}
+        >
+          {isLoading ? '…' : planLabel(plan)}
         </span>
       </div>
     </div>
@@ -68,10 +101,19 @@ function PlanCard(): ReactElement {
 
 interface BalanceCardsProps {
   creditBalance: number | undefined;
+  allowanceBalance: number | undefined;
+  allowancePeriodEnd: string | null | undefined;
   isLoading: boolean;
+  isAllowanceLoading: boolean;
 }
 
-function BalanceCards({ creditBalance, isLoading }: BalanceCardsProps): ReactElement {
+function BalanceCards({
+  creditBalance,
+  allowanceBalance,
+  allowancePeriodEnd,
+  isLoading,
+  isAllowanceLoading,
+}: BalanceCardsProps): ReactElement {
   return (
     <div className="grid gap-4 sm:grid-cols-2">
       {/* Credit balance — wired to credits.balance */}
@@ -86,17 +128,19 @@ function BalanceCards({ creditBalance, isLoading }: BalanceCardsProps): ReactEle
         <p className="text-xs text-ink-mute">Para assistente e coach (não expira)</p>
       </div>
 
-      {/* Allowance balance — missing backend read; placeholder */}
-      <div className="rounded-xl border border-line bg-surface p-6 space-y-2 opacity-60">
+      {/* Allowance balance — wired to credits.allowanceBalance (#56) */}
+      <div className="rounded-xl border border-line bg-surface p-6 space-y-2">
         <div className="flex items-center gap-2">
           <Zap className="w-4 h-4 text-ink-soft" />
           <p className="eyebrow">IA Principal</p>
         </div>
-        <p className="font-display text-4xl font-bold tabular-nums leading-none text-ink-mute">
-          —
+        <p className="font-display text-4xl font-bold tabular-nums leading-none text-ink">
+          {isAllowanceLoading ? '…' : (allowanceBalance ?? '—')}
         </p>
         <p className="text-xs text-ink-mute">
-          Saldo disponível em breve
+          {allowancePeriodEnd !== null && allowancePeriodEnd !== undefined
+            ? `Período até ${formatDate(allowancePeriodEnd)}`
+            : 'Para explicações e correções de fase 2'}
         </p>
       </div>
     </div>
@@ -174,20 +218,32 @@ function LedgerTable({ rows, isLoading }: LedgerTableProps): ReactElement {
 export default function BillingPage(): ReactElement {
   const balanceQuery = trpc.credits.balance.useQuery();
   const ledgerQuery = trpc.credits.ledger.useQuery();
+  const allowanceQuery = trpc.credits.allowanceBalance.useQuery();
+  const subscriptionQuery = trpc.credits.subscriptionStatus.useQuery();
   const utils = trpc.useUtils();
 
   function handleRedeemSuccess(): void {
     void utils.credits.balance.invalidate();
     void utils.credits.ledger.invalidate();
+    void utils.credits.allowanceBalance.invalidate();
+    void utils.credits.subscriptionStatus.invalidate();
   }
 
   return (
     <div className="space-y-6">
-      <PlanCard />
+      <PlanCard
+        plan={subscriptionQuery.data?.plan}
+        status={subscriptionQuery.data?.status}
+        periodEnd={subscriptionQuery.data?.currentPeriodEnd}
+        isLoading={subscriptionQuery.isLoading}
+      />
 
       <BalanceCards
         creditBalance={balanceQuery.data?.balance}
+        allowanceBalance={allowanceQuery.data?.balance}
+        allowancePeriodEnd={allowanceQuery.data?.periodEnd}
         isLoading={balanceQuery.isLoading}
+        isAllowanceLoading={allowanceQuery.isLoading}
       />
 
       {/* Redeem coupon */}

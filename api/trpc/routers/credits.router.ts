@@ -18,6 +18,10 @@
 //   'subscription' — activates a subscription period via grantSubscription
 //
 // All three kinds go through the same atomic-cap + replay-guard rails.
+//
+// Read procedures (issue #56):
+//   allowanceBalance     — remaining allowance units + period end (protectedProcedure)
+//   subscriptionStatus   — plan + status + period dates; free user → {plan:"free",status:"none"}
 
 import { z } from "zod";
 import { and, desc, eq, gt, isNull, lt, or, sql } from "drizzle-orm";
@@ -25,9 +29,9 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { TRPCError } from "@trpc/server";
 import { adminProcedure, protectedProcedure, router } from "../procedures";
 import { db } from "../../db/client";
-import { coupons, creditLedger } from "../../../drizzle/schema";
+import { coupons, creditLedger, subscriptions } from "../../../drizzle/schema";
 import { getBalance, grantCredits } from "../../lib/credits";
-import { grantAllowance } from "../../lib/allowance";
+import { grantAllowance, getAllowanceBalance } from "../../lib/allowance";
 import { grantSubscription } from "../../lib/subscription";
 import {
   COUPON_ALPHABET,
@@ -147,6 +151,64 @@ export const creditsRouter = router({
   balance: protectedProcedure.query(async ({ ctx }) => {
     return { balance: await getBalance(ctx.userId), costs: CREDIT_COSTS };
   }),
+
+  // Remaining allowance units for CORE AI (phase-1 explanation + phase-2 grading).
+  // Reuses getAllowanceBalance (SUM(delta) from allowance_ledger, paid path only).
+  // periodEnd: null when the user has no active subscription row.
+  // No config numbers exposed — balance is derived purely from the ledger.
+  allowanceBalance: protectedProcedure.query(
+    async ({ ctx }): Promise<{ balance: number; periodEnd: string | null }> => {
+      const [sub] = await db
+        .select({ currentPeriodEnd: subscriptions.currentPeriodEnd })
+        .from(subscriptions)
+        .where(eq(subscriptions.userId, ctx.userId))
+        .limit(1);
+      const balance = await getAllowanceBalance(ctx.userId);
+      return {
+        balance,
+        periodEnd: sub?.currentPeriodEnd ?? null,
+      };
+    },
+  ),
+
+  // Subscription plan + period for the signed-in user.
+  // Free user (no subscriptions row) returns plan:"free", status:"none", null dates —
+  // never an error. Explicit return type avoids tRPC union-strip of null fields.
+  subscriptionStatus: protectedProcedure.query(
+    async ({
+      ctx,
+    }): Promise<{
+      plan: string;
+      status: string;
+      currentPeriodStart: string | null;
+      currentPeriodEnd: string | null;
+    }> => {
+      const [sub] = await db
+        .select({
+          plan: subscriptions.plan,
+          status: subscriptions.status,
+          currentPeriodStart: subscriptions.currentPeriodStart,
+          currentPeriodEnd: subscriptions.currentPeriodEnd,
+        })
+        .from(subscriptions)
+        .where(eq(subscriptions.userId, ctx.userId))
+        .limit(1);
+      if (sub === undefined) {
+        return {
+          plan: "free",
+          status: "none",
+          currentPeriodStart: null,
+          currentPeriodEnd: null,
+        };
+      }
+      return {
+        plan: sub.plan,
+        status: sub.status,
+        currentPeriodStart: sub.currentPeriodStart,
+        currentPeriodEnd: sub.currentPeriodEnd,
+      };
+    },
+  ),
 
   // Recent ledger rows, newest first.
   ledger: protectedProcedure.query(async ({ ctx }) => {

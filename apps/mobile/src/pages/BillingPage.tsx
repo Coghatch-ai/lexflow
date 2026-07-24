@@ -1,17 +1,15 @@
 // apps/mobile/src/pages/BillingPage.tsx
 //
 // Billing / account screen for the mobile PWA (S7 — issue #54).
-// Plan status, both balances (credits + allowance placeholder), redeem coupon,
+// Plan status, both balances (credits + allowance), redeem coupon,
 // credit ledger. pt-BR. No hardcoded prices.
 //
 // Reads:
-//   credits.balance  → {balance, costs}
-//   credits.ledger   → rows newest first (limit 50)
-//   credits.redeem   → mutation (all 3 coupon kinds)
-//
-// Missing backend read endpoints (flagged, not added per #54 constraint):
-//   allowance balance → no user-facing tRPC procedure
-//   subscription status → no user-facing tRPC procedure
+//   credits.balance            → {balance, costs}
+//   credits.ledger             → rows newest first (limit 50)
+//   credits.allowanceBalance   → {balance: number, periodEnd: string | null}  (#56)
+//   credits.subscriptionStatus → {plan, status, currentPeriodStart, currentPeriodEnd}  (#56)
+//   credits.redeem             → mutation (all 3 coupon kinds)
 
 import { useState, type ReactElement } from "react";
 import { ArrowDownLeft, ArrowUpRight, CreditCard, Coins, Tag, Zap } from "lucide-react";
@@ -47,6 +45,19 @@ function kindMessage(kind: CouponKind, granted: number): string {
     return `+${String(granted)} uso${granted === 1 ? "" : "s"} de IA principal adicionado${granted === 1 ? "" : "s"}!`;
   }
   return `Assinatura ativada por ${String(granted)} ${granted === 1 ? "mês" : "meses"}!`;
+}
+
+function planLabel(plan: string | undefined): string {
+  if (plan === "paid") return "Premium";
+  if (plan === "free" || plan === undefined) return "Gratuito";
+  return plan;
+}
+
+function statusLabel(status: string | undefined): string {
+  if (status === "active") return "Ativo";
+  if (status === "canceled") return "Cancelado";
+  if (status === "past_due") return "Em atraso";
+  return "—";
 }
 
 // ── RedeemForm ────────────────────────────────────────────────────────────────
@@ -118,66 +129,138 @@ function RedeemForm({ onSuccess }: RedeemFormProps): ReactElement {
   );
 }
 
+// ── PlanSection ───────────────────────────────────────────────────────────────
+
+interface PlanSectionProps {
+  plan: string | undefined;
+  status: string | undefined;
+  periodEnd: string | null | undefined;
+  isLoading: boolean;
+}
+
+function PlanSection({ plan, status, periodEnd, isLoading }: PlanSectionProps): ReactElement {
+  const isPaid = plan === "paid" && status === "active";
+  return (
+    <section className="rounded-xl border border-line bg-surface p-4 space-y-2">
+      <div className="flex items-center gap-2">
+        <CreditCard className="h-4 w-4 text-ink-soft" />
+        <p className="text-sm font-semibold text-ink">Plano</p>
+      </div>
+      <div className="flex items-center justify-between">
+        <div>
+          {isLoading ? (
+            <p className="text-xs text-ink-mute">Carregando…</p>
+          ) : isPaid ? (
+            <p className="text-xs text-ink">
+              {statusLabel(status)}
+              {periodEnd != null ? ` — válido até ${fmtDate(periodEnd)}` : ""}
+            </p>
+          ) : (
+            <p className="text-xs text-ink-mute italic">
+              Ative um cupom de assinatura para acessar a IA principal sem limite diário.
+            </p>
+          )}
+        </div>
+        <span
+          className={`shrink-0 ml-3 rounded-full border px-2.5 py-1 text-[0.7rem] font-semibold ${
+            isPaid
+              ? "border-seal-bright bg-seal-pale text-seal-bright"
+              : "border-line bg-paper text-ink-mute"
+          }`}
+        >
+          {isLoading ? "…" : planLabel(plan)}
+        </span>
+      </div>
+    </section>
+  );
+}
+
+// ── BalanceSection ────────────────────────────────────────────────────────────
+
+interface BalanceSectionProps {
+  creditBalance: number | undefined;
+  creditLoading: boolean;
+  allowanceBalance: number | undefined;
+  allowancePeriodEnd: string | null | undefined;
+  allowanceLoading: boolean;
+}
+
+function BalanceSection({
+  creditBalance,
+  creditLoading,
+  allowanceBalance,
+  allowancePeriodEnd,
+  allowanceLoading,
+}: BalanceSectionProps): ReactElement {
+  return (
+    <section className="grid grid-cols-2 gap-3">
+      <div className="rounded-xl border border-line bg-surface p-4 space-y-1">
+        <div className="flex items-center gap-1.5">
+          <Coins className="h-3.5 w-3.5 text-seal" strokeWidth={1.75} />
+          <p className="text-[0.7rem] font-semibold uppercase tracking-wide text-ink-mute">
+            Créditos
+          </p>
+        </div>
+        <p className="font-display text-3xl font-bold tnum leading-none text-ink">
+          {creditLoading ? "…" : (creditBalance ?? "—")}
+        </p>
+        <p className="text-[0.65rem] text-ink-mute">Assistente &amp; coach</p>
+      </div>
+
+      <div className="rounded-xl border border-line bg-surface p-4 space-y-1">
+        <div className="flex items-center gap-1.5">
+          <Zap className="h-3.5 w-3.5 text-ink-soft" strokeWidth={1.75} />
+          <p className="text-[0.7rem] font-semibold uppercase tracking-wide text-ink-mute">
+            IA Principal
+          </p>
+        </div>
+        <p className="font-display text-3xl font-bold tnum leading-none text-ink">
+          {allowanceLoading ? "…" : (allowanceBalance ?? 0)}
+        </p>
+        <p className="text-[0.65rem] text-ink-mute">
+          {allowancePeriodEnd != null
+            ? `Período até ${fmtDate(allowancePeriodEnd)}`
+            : "Para explicações e correções de fase 2"}
+        </p>
+      </div>
+    </section>
+  );
+}
+
 // ── BillingPage ───────────────────────────────────────────────────────────────
 
 export function BillingPage(): ReactElement {
   const utils = trpc.useUtils();
   const balanceQ = trpc.credits.balance.useQuery();
   const ledgerQ = trpc.credits.ledger.useQuery();
+  const allowanceQ = trpc.credits.allowanceBalance.useQuery();
+  const subscriptionQ = trpc.credits.subscriptionStatus.useQuery();
 
   function invalidate(): void {
     void utils.credits.balance.invalidate();
     void utils.credits.ledger.invalidate();
+    void utils.credits.allowanceBalance.invalidate();
+    void utils.credits.subscriptionStatus.invalidate();
   }
 
   return (
     <div className="flex flex-col gap-5 px-4 py-6 pb-24">
       <h1 className="font-display text-2xl font-bold text-ink">Conta &amp; Créditos</h1>
 
-      {/* Plan — placeholder until subscription read endpoint exists */}
-      <section className="rounded-xl border border-line bg-surface p-4 space-y-2">
-        <div className="flex items-center gap-2">
-          <CreditCard className="h-4 w-4 text-ink-soft" />
-          <p className="text-sm font-semibold text-ink">Plano</p>
-        </div>
-        <div className="flex items-center justify-between">
-          <p className="text-xs text-ink-mute">
-            Ative um cupom de assinatura para acessar a IA principal sem limite diário.
-          </p>
-          <span className="shrink-0 ml-3 rounded-full border border-line bg-paper px-2.5 py-1 text-[0.7rem] font-semibold text-ink-mute">
-            Gratuito
-          </span>
-        </div>
-      </section>
+      <PlanSection
+        plan={subscriptionQ.data?.plan}
+        status={subscriptionQ.data?.status}
+        periodEnd={subscriptionQ.data?.currentPeriodEnd}
+        isLoading={subscriptionQ.isLoading}
+      />
 
-      {/* Balances */}
-      <section className="grid grid-cols-2 gap-3">
-        {/* Credit balance — wired */}
-        <div className="rounded-xl border border-line bg-surface p-4 space-y-1">
-          <div className="flex items-center gap-1.5">
-            <Coins className="h-3.5 w-3.5 text-seal" strokeWidth={1.75} />
-            <p className="text-[0.7rem] font-semibold uppercase tracking-wide text-ink-mute">
-              Créditos
-            </p>
-          </div>
-          <p className="font-display text-3xl font-bold tnum leading-none text-ink">
-            {balanceQ.isLoading ? "…" : (balanceQ.data?.balance ?? "—")}
-          </p>
-          <p className="text-[0.65rem] text-ink-mute">Assistente &amp; coach</p>
-        </div>
-
-        {/* Allowance balance — placeholder */}
-        <div className="rounded-xl border border-line bg-surface p-4 space-y-1 opacity-60">
-          <div className="flex items-center gap-1.5">
-            <Zap className="h-3.5 w-3.5 text-ink-soft" strokeWidth={1.75} />
-            <p className="text-[0.7rem] font-semibold uppercase tracking-wide text-ink-mute">
-              IA Principal
-            </p>
-          </div>
-          <p className="font-display text-3xl font-bold tnum leading-none text-ink-mute">—</p>
-          <p className="text-[0.65rem] text-ink-mute">Disponível em breve</p>
-        </div>
-      </section>
+      <BalanceSection
+        creditBalance={balanceQ.data?.balance}
+        creditLoading={balanceQ.isLoading}
+        allowanceBalance={allowanceQ.data?.balance}
+        allowancePeriodEnd={allowanceQ.data?.periodEnd}
+        allowanceLoading={allowanceQ.isLoading}
+      />
 
       {/* Redeem coupon */}
       <section className="rounded-xl border border-line bg-surface p-4">
