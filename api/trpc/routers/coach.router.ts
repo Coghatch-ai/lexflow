@@ -18,9 +18,9 @@ import {
   userAnswers,
   userQuestionStates,
 } from "../../../drizzle/schema";
-import { enqueueRelayJob, getRelayJob } from "../../lib/relay";
+import { enqueueRelayJob, getRelayJob, mintJobId } from "../../lib/relay";
 import { resolveAiPrompt } from "../../lib/ai-prompts";
-import { assertCredits, debitCredits } from "../../lib/credits";
+import { assertCredits, debitCredits, refundCredits } from "../../lib/credits";
 import { accuracyPct } from "../../../shared/domain/scoring";
 import { LOV_SEED } from "../../../shared/data/lov";
 import {
@@ -174,8 +174,21 @@ export const coachRouter = router({
 
       await assertCredits(ctx.userId, "coach");
       const payload = resolveAiPrompt("oab-coach", buildCoachVariables(data));
-      const jobId = await enqueueRelayJob(ctx.userId, payload);
-      await debitCredits(ctx.userId, "coach", jobId);
+
+      // Spend order (mirrors allowance rail — issue #55):
+      //   mintJobId → assertCredits (above) → debitCredits BEFORE enqueue
+      //   → enqueueRelayJob → [on throw: refundCredits]
+      const coachJobId = mintJobId();
+      await debitCredits(ctx.userId, "coach", coachJobId);
+
+      let jobId: string;
+      try {
+        jobId = await enqueueRelayJob(ctx.userId, payload, coachJobId);
+      } catch (enqueueErr) {
+        await refundCredits(ctx.userId, coachJobId);
+        throw enqueueErr;
+      }
+
       return { cached: false as const, digest: null, jobId, statsSnapshot: data };
     }),
 

@@ -34,15 +34,18 @@
 // Anniversary reset (rollover/expire) is handled by S3's spend engine — out of
 // scope here (this file only activates/extends the period).
 
-import { eq, sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { db } from "../db/client";
 import { allowanceLedger, subscriptions } from "../../drizzle/schema";
 import { grantAllowance } from "./allowance";
 import { getConfigNumber, CONFIG_KEYS } from "./pricing-config";
 import { PLAN_PAID } from "../../shared/domain/allowance";
+import { hashLockKey } from "./ledger-debit";
 
 // Minimal executor type — same subset used by grantAllowance.
-type DbOrTx = Pick<typeof db, "insert" | "select" | "update">;
+// `execute` added so the FOR UPDATE raw query runs on the same connection/tx,
+// which is required for the row-level lock to be held until the tx commits.
+type DbOrTx = Pick<typeof db, "insert" | "select" | "update" | "execute">;
 
 /**
  * Internal implementation — all writes take a required executor so every
@@ -64,6 +67,19 @@ async function grantSubscriptionImpl(
   note: string | undefined,
   executor: DbOrTx,
 ): Promise<void> {
+  // Per-user advisory lock — serializes concurrent grants for the same user,
+  // including the first-grant case where no subscriptions row exists yet.
+  // FOR UPDATE below only locks an EXISTING row; when two distinct-key grants
+  // race on a new user both sentinel inserts succeed (keyed by idempotencyKey,
+  // not userId), both SELECT FOR UPDATE lock zero rows, and both compute the
+  // same periodStart → second write overwrites the first extension. The
+  // advisory lock prevents this: the second concurrent grant blocks here until
+  // the first commits, then sees the updated current_period_end and extends
+  // forward correctly. Namespace "subscription" ≠ "allowance"/"credit" so this
+  // lock does not collide with the spend-rail locks in ledger-debit.ts.
+  const subLockKey = hashLockKey(userId, "subscription");
+  await executor.execute(sql`SELECT pg_advisory_xact_lock(${subLockKey})`);
+
   // F3 sentinel — insert a zero-delta allowance_ledger row BEFORE touching the
   // subscription row. The unique ref_id index makes this a no-op (0 rows inserted)
   // on retry. When 0 rows come back the key was already committed → short-circuit.
@@ -99,16 +115,28 @@ async function grantSubscriptionImpl(
 
   // Derive periodStart from max(existing current_period_end, now) so repeated
   // grants with DIFFERENT keys extend forward rather than resetting to now.
-  const [existing] = await executor
-    .select({ currentPeriodEnd: subscriptions.currentPeriodEnd })
-    .from(subscriptions)
-    .where(eq(subscriptions.userId, userId))
-    .limit(1);
+  //
+  // FOR UPDATE: serializes concurrent distinct-key grants for the same user.
+  // Without this, two concurrent grants both read the same current_period_end,
+  // compute the same periodStart, and write the same period (one extension lost).
+  // The lock is valid here because grantSubscriptionImpl always runs inside a
+  // transaction (db.transaction wrapper in standalone path; caller tx in coupon
+  // path) — FOR UPDATE requires an active transaction to hold the lock.
+  // First-grant path (no row yet) is already serialized by the sentinel unique
+  // insert above; FOR UPDATE only matters when a row already exists.
+  const existingResult = await executor.execute(sql`
+    SELECT current_period_end
+    FROM subscriptions
+    WHERE user_id = ${userId}::uuid
+    LIMIT 1
+    FOR UPDATE
+  `);
+  const existing = (existingResult.rows as Array<{ current_period_end: string | null }>)[0];
 
   const now = new Date();
   let periodStart: Date;
-  if (existing?.currentPeriodEnd != null) {
-    const existingEnd = new Date(existing.currentPeriodEnd);
+  if (existing?.current_period_end != null) {
+    const existingEnd = new Date(existing.current_period_end);
     periodStart = existingEnd > now ? existingEnd : now;
   } else {
     periodStart = now;

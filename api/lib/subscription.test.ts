@@ -122,7 +122,8 @@ describe("S6 — [F3] idempotencyKey is a required parameter (Codex finding #3)"
 
 describe("S7 — [F3] period extends from max(existingEnd, now) (Codex finding #3)", () => {
   it("reads existing subscription before computing periodStart", () => {
-    expect(src).toContain("existing?.currentPeriodEnd");
+    // FOR UPDATE raw query returns snake_case column; check either accessor form.
+    expect(src).toMatch(/existing\?\.current_period_end|existing\?\.currentPeriodEnd/);
   });
 
   it("periodStart derived from max(existingEnd, now)", () => {
@@ -254,6 +255,86 @@ describe("S10 — [F3 sentinel] subscriptions row NOT mutated on same-key retry"
     // Confirm onConflictDoUpdate appears exactly once (the gated upsert).
     const matches = src.match(/onConflictDoUpdate/g);
     expect(matches).toHaveLength(1);
+  });
+});
+
+describe("S13 — [#55] FOR UPDATE on subscription row read serializes concurrent grants", () => {
+  it("FOR UPDATE present in subscription.ts", () => {
+    expect(src).toContain("FOR UPDATE");
+  });
+
+  it("FOR UPDATE appears before periodStart computation", () => {
+    const forUpdatePos = src.indexOf("FOR UPDATE");
+    const periodStartPos = src.indexOf("let periodStart:");
+    expect(forUpdatePos).toBeGreaterThan(-1);
+    expect(periodStartPos).toBeGreaterThan(-1);
+    expect(forUpdatePos).toBeLessThan(periodStartPos);
+  });
+
+  it("executor.execute used (FOR UPDATE on same tx connection)", () => {
+    expect(src).toContain("executor.execute(sql");
+  });
+
+  it("DbOrTx Pick includes execute", () => {
+    expect(src).toContain('"execute"');
+  });
+
+  it("existing row access uses snake_case current_period_end from raw SQL result", () => {
+    expect(src).toContain("current_period_end");
+  });
+});
+
+describe("S14 — [#55 Codex re-review] per-user advisory lock serializes first-grant race", () => {
+  // FOR UPDATE only locks an EXISTING subscriptions row. Two concurrent
+  // distinct-key grants on a new user both succeed the sentinel insert (keyed
+  // by idempotencyKey, not userId), both SELECT FOR UPDATE lock zero rows, and
+  // both compute the same periodStart → second write overwrites the first
+  // extension. Fix: pg_advisory_xact_lock(hashLockKey(userId,"subscription"))
+  // taken as the FIRST statement in grantSubscriptionImpl, before the sentinel
+  // insert, on the same tx executor. The second concurrent grant blocks until
+  // the first commits, then reads the updated current_period_end.
+  //
+  // Honest limit: a live-Postgres two-concurrent-grants test (two distinct
+  // idempotency keys → period extended twice, not once) is needed pre-deploy;
+  // no DB harness here — source-text guards are the strongest tractable proof.
+
+  it("hashLockKey imported from ledger-debit (reuse shared primitive)", () => {
+    expect(src).toContain('from "./ledger-debit"');
+    expect(src).toContain("hashLockKey");
+  });
+
+  it('pg_advisory_xact_lock taken with hashLockKey(userId, "subscription")', () => {
+    expect(src).toContain('hashLockKey(userId, "subscription")');
+    expect(src).toContain("pg_advisory_xact_lock");
+  });
+
+  it("advisory lock taken via executor.execute (same tx connection)", () => {
+    // Must use executor, not bare db, so the lock is held in the same
+    // transaction as the sentinel insert + subscription upsert.
+    expect(src).toMatch(/executor\.execute\(sql`SELECT pg_advisory_xact_lock/);
+  });
+
+  it("advisory lock taken BEFORE sentinel insert (serializes before any write)", () => {
+    const lockPos = src.indexOf("pg_advisory_xact_lock");
+    const sentinelPos = src.indexOf("onConflictDoNothing({ target: allowanceLedger.refId })");
+    expect(lockPos).toBeGreaterThan(-1);
+    expect(sentinelPos).toBeGreaterThan(-1);
+    expect(lockPos).toBeLessThan(sentinelPos);
+  });
+
+  it("advisory lock taken BEFORE FOR UPDATE read (full serialization)", () => {
+    const lockPos = src.indexOf("pg_advisory_xact_lock");
+    // Use the executor.execute call that contains FOR UPDATE (skip comment occurrences)
+    const forUpdatePos = src.indexOf("const existingResult = await executor.execute(sql`");
+    expect(lockPos).toBeGreaterThan(-1);
+    expect(forUpdatePos).toBeGreaterThan(-1);
+    expect(lockPos).toBeLessThan(forUpdatePos);
+  });
+
+  it("namespace is 'subscription' (distinct from allowance/credit rails)", () => {
+    expect(src).toContain('"subscription"');
+    // Confirm the string appears in the hashLockKey call context
+    expect(src).toMatch(/hashLockKey\(userId,\s*"subscription"\)/);
   });
 });
 

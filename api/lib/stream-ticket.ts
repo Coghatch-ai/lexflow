@@ -20,8 +20,9 @@ export async function enqueueStreamTicket(
   userId: string,
   sub: string,
   payload: AiRelayPayload,
+  preMintedJobId?: string,
 ): Promise<string> {
-  const jobId = randomUUID();
+  const jobId = preMintedJobId ?? randomUUID();
   try {
     await s3.send(
       new PutObjectCommand({

@@ -27,6 +27,7 @@ import { and, eq, sql, lt } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db } from "../db/client";
 import { allowanceLedger, freeDailyCounter, subscriptions } from "../../drizzle/schema";
+import { atomicDebitAllowance } from "./ledger-debit";
 
 // Minimal executor type accepted by grantAllowance when called inside a
 // transaction. drizzle node-postgres transactions expose the same .insert()
@@ -192,20 +193,13 @@ export async function assertCoreAction(userId: string, jobId: string): Promise<"
   return "free";
 }
 
-/** Record the allowance spend for an enqueued job. Idempotent via ref_id unique index.
+/** Record the allowance spend for an enqueued job. Atomic guarded debit via
+ * atomicDebitAllowance: inserts ONLY when balance >= ALLOWANCE_COST (balance
+ * guard in WHERE clause). Idempotent via ref_id unique index (replay = no-op).
+ * Throws FORBIDDEN when balance is insufficient (guard fires, 0 rows returned).
  * MUST only be called for PAID users — free-tier spends must NOT write this table (F3 fix). */
 export async function debitAllowance(userId: string, refId: string): Promise<void> {
-  await db
-    .insert(allowanceLedger)
-    .values({
-      userId,
-      delta: -ALLOWANCE_COST,
-      action: "spend",
-      refId,
-      createdBy: userId,
-      lastUpdBy: userId,
-    })
-    .onConflictDoNothing({ target: allowanceLedger.refId });
+  await atomicDebitAllowance(userId, refId);
 }
 
 /**

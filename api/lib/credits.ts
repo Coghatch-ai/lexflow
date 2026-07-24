@@ -15,6 +15,7 @@ import { TRPCError } from "@trpc/server";
 import { db } from "../db/client";
 import { creditLedger } from "../../drizzle/schema";
 import { CREDIT_COSTS, type CreditAction } from "../../shared/domain/credits";
+import { atomicDebitCredits } from "./ledger-debit";
 
 export async function getBalance(userId: string): Promise<number> {
   const [row] = await db
@@ -36,23 +37,16 @@ export async function assertCredits(userId: string, action: CreditAction): Promi
   }
 }
 
-// Record the spend for an enqueued job. Idempotent via ref_id unique index.
+// Record the spend for an enqueued job. Atomic guarded debit via
+// atomicDebitCredits: inserts ONLY when balance >= CREDIT_COSTS[action]
+// (balance guard in WHERE clause). Idempotent via ref_id unique index
+// (replay = no-op). Throws FORBIDDEN when balance is insufficient.
 export async function debitCredits(
   userId: string,
   action: CreditAction,
   refId: string,
 ): Promise<void> {
-  await db
-    .insert(creditLedger)
-    .values({
-      userId,
-      delta: -CREDIT_COSTS[action],
-      action,
-      refId,
-      createdBy: userId,
-      lastUpdBy: userId,
-    })
-    .onConflictDoNothing({ target: creditLedger.refId });
+  await atomicDebitCredits(userId, action, refId);
 }
 
 // Refund a failed job by its jobId. Looks up the original spend row to mirror

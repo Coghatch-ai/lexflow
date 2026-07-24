@@ -32,7 +32,7 @@ import { aiTutorMessages, oabQuestions, users } from "../../../drizzle/schema";
 import { enqueueRelayJob, getRelayJob, mintJobId } from "../../lib/relay";
 import { enqueueStreamTicket } from "../../lib/stream-ticket";
 import { resolveAiPrompt } from "../../lib/ai-prompts";
-import { assertCredits, debitCredits } from "../../lib/credits";
+import { assertCredits, debitCredits, refundCredits } from "../../lib/credits";
 import {
   assertCoreAction,
   debitAllowance,
@@ -153,21 +153,35 @@ export const aiRouter = router({
         followUp,
       }),
     );
+
+    // Spend order (mirrors grade / allowance path — issue #55):
+    //   mintJobId → assertCredits (above) → debitCredits BEFORE enqueue
+    //   → enqueueRelayJob → [on throw: refundCredits]
+    // A relay job is NEVER dispatched unless the debit row is durable first;
+    // if dispatch fails the debit is reversed (symmetric with allowance rail).
+    const tutorJobId = mintJobId();
+    await debitCredits(ctx.userId, "tutor", tutorJobId);
+
     let jobId: string;
-    if (input.stream === true) {
-      const [me] = await db
-        .select({ externalId: users.externalId })
-        .from(users)
-        .where(eq(users.id, ctx.userId))
-        .limit(1);
-      if (me === undefined) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Usuário não encontrado" });
+    try {
+      if (input.stream === true) {
+        const [me] = await db
+          .select({ externalId: users.externalId })
+          .from(users)
+          .where(eq(users.id, ctx.userId))
+          .limit(1);
+        if (me === undefined) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Usuário não encontrado" });
+        }
+        jobId = await enqueueStreamTicket(ctx.userId, me.externalId, payload, tutorJobId);
+      } else {
+        jobId = await enqueueRelayJob(ctx.userId, payload, tutorJobId);
       }
-      jobId = await enqueueStreamTicket(ctx.userId, me.externalId, payload);
-    } else {
-      jobId = await enqueueRelayJob(ctx.userId, payload);
+    } catch (enqueueErr) {
+      // Dispatch failed — reverse the pre-committed debit. Idempotent via refund:<jobId>.
+      await refundCredits(ctx.userId, tutorJobId);
+      throw enqueueErr;
     }
-    await debitCredits(ctx.userId, "tutor", jobId);
 
     await db.insert(aiTutorMessages).values({
       userId: ctx.userId,
