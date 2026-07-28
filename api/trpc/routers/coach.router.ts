@@ -21,6 +21,8 @@ import {
 import { enqueueRelayJob, getRelayJob, mintJobId } from "../../lib/relay";
 import { resolveAiPrompt } from "../../lib/ai-prompts";
 import { assertCredits, debitCredits, refundCredits } from "../../lib/credits";
+import { CREDIT_COSTS } from "../../../shared/domain/credits";
+import { admissionRead, resolveMeteringModel, settleDelivered } from "../../lib/ai-metering";
 import { accuracyPct } from "../../../shared/domain/scoring";
 import { LOV_SEED } from "../../../shared/data/lov";
 import {
@@ -172,6 +174,9 @@ export const coachRouter = router({
         });
       }
 
+      // D3 shadow admission-read (epic #50): observe-only, never denies. The old
+      // assertCredits below stays authoritative; delivered-only charge is in finalize.
+      await admissionRead(ctx.userId);
       await assertCredits(ctx.userId, "coach");
       const payload = resolveAiPrompt("oab-coach", buildCoachVariables(data));
 
@@ -219,6 +224,19 @@ export const coachRouter = router({
         statsSnapshot: snapshot,
         createdBy: ctx.userId,
         lastUpdBy: ctx.userId,
+      });
+      // D3 delivered-only SHADOW charge (epic #50): relay result confirmed done
+      // above (pending/error threw), so delivered=true. Writes nothing in shadow;
+      // the old credit debit at generate stays authoritative.
+      await settleDelivered({
+        userId: ctx.userId,
+        source: "coach",
+        refId: `coach:${input.jobId}`,
+        model: resolveMeteringModel(),
+        usage: { kind: "tokens", amount: 1200 },
+        delivered: true,
+        oldDebitCents: CREDIT_COSTS.coach,
+        action: "coach",
       });
       return { digest: parsed };
     }),

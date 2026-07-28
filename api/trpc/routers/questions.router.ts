@@ -28,6 +28,8 @@ import {
   refundAllowance,
   reverseFreeTierCounter,
 } from "../../lib/allowance";
+import { admissionRead, resolveMeteringModel, settleDelivered } from "../../lib/ai-metering";
+import { ALLOWANCE_COST } from "../../../shared/domain/allowance";
 
 // Output contract for focusedDrill — kept a single explicit shape (see note on
 // the procedure).
@@ -260,6 +262,10 @@ export const questionsRouter = router({
       );
       // Step 1: reserve jobId — no relay work started yet.
       const jobId = mintJobId();
+      // D3 shadow admission-read (epic #50): observe-only, never denies. The old
+      // assertCoreAction below stays authoritative; delivered-only charge is in
+      // finalizeExplanation.
+      await admissionRead(ctx.userId);
       // Step 2: assert entitlement BEFORE any spend or enqueue.
       // On FORBIDDEN nothing is debited or enqueued.
       const tier = await assertCoreAction(ctx.userId, jobId);
@@ -326,6 +332,20 @@ export const questionsRouter = router({
         .update(oabQuestions)
         .set({ aiExplanation: parsed, lastUpdAt: new Date().toISOString() })
         .where(eq(oabQuestions.id, input.id));
+      // D3 delivered-only SHADOW charge (epic #50): relay result confirmed done
+      // above (pending/error threw), so delivered=true. Writes nothing in shadow;
+      // the old allowance/free-counter rail from getOrGenerateExplanation stays
+      // authoritative. refId keyed by the user-unique jobId (question id is global).
+      await settleDelivered({
+        userId: ctx.userId,
+        source: "explanation",
+        refId: `explain:${input.jobId}`,
+        model: resolveMeteringModel(),
+        usage: { kind: "tokens", amount: 2048 },
+        delivered: true,
+        oldDebitCents: ALLOWANCE_COST,
+        action: "explanation",
+      });
       return { explanation: parsed };
     }),
 });

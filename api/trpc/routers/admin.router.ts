@@ -25,8 +25,9 @@ import {
   optionLetter,
   stripCorrectLetterFromWhyWrong,
 } from "../../../shared/domain/ai-eval";
-import { enqueueRelayJob } from "../../lib/relay";
+import { enqueueRelayJob, getRelayJob } from "../../lib/relay";
 import { resolveAiPrompt } from "../../lib/ai-prompts";
+import { admissionRead, resolveMeteringModel, settleDelivered } from "../../lib/ai-metering";
 import { getAllConfigRows, upsertConfigRow } from "../../lib/pricing-config";
 import { grantSubscription } from "../../lib/subscription";
 import { grantAllowance } from "../../lib/allowance";
@@ -480,8 +481,39 @@ export const adminRouter = router({
       )
       .mutation(async ({ ctx, input }) => {
         const payload = resolveAiPrompt("oab-explain", buildExplainVariables(input));
+        // D3 shadow admission-read (epic #50): this door was UNMETERED before —
+        // observe-only, never denies; the delivered-only charge is in
+        // settleGeneration. No old debit rail existed here (oldDebitCents=0 there).
+        await admissionRead(ctx.userId);
         const jobId = await enqueueRelayJob(ctx.userId, payload);
         return { jobId };
+      }),
+
+    // D3 (epic #50) — delivered-only SHADOW settle for the admin explanation door,
+    // which was previously UNMETERED (Codex: meter admin.generateExplanation). The
+    // client calls this after polling relay.job; it re-reads the result server-side
+    // (delivery authoritative) and fires the shadow charge + reconcile. oldDebit=0
+    // (no prior rail) so the metric surfaces the would-charge for a formerly-free
+    // action. Writes nothing in shadow.
+    settleGeneration: adminProcedure
+      .input(z.object({ jobId: z.string().uuid() }))
+      .mutation(async ({ ctx, input }) => {
+        const job = await getRelayJob(ctx.userId, input.jobId);
+        const delivered = job.status === "done";
+        const result = await settleDelivered({
+          userId: ctx.userId,
+          source: "explanation",
+          refId: `explain:admin:${input.jobId}`,
+          // Metering model MUST be server-derived (Codex F2): no client-supplied
+          // model may reach costFor() (an unknown string → rawCents=0 dodge under
+          // enforce). resolveMeteringModel() (no arg) → PROD_DEFAULT_MODEL.
+          model: resolveMeteringModel(),
+          usage: { kind: "tokens", amount: 2048 },
+          delivered,
+          oldDebitCents: 0,
+          action: "admin.generateExplanation",
+        });
+        return { settled: result?.outcome ?? "skipped" };
       }),
 
     // Persist an admin-reviewed AI explanation for a question. The explanation is

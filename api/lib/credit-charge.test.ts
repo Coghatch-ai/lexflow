@@ -227,12 +227,15 @@ describe("G6 — D2: the GRANT-side funding rails now wire the money core (charg
       .split("\n")
       .map((f) => f.trim())
       .filter((f) => f.length > 0 && !f.endsWith(".test.ts"));
-    // Exactly the D2 grant-rail importers (order-independent).
+    // The D2 grant-rail importers PLUS the D3 delivered-only metering door
+    // (api/lib/ai-metering.ts wires charge() onto the AI call sites in shadow).
+    // Order-independent.
     expect(files.sort()).toEqual(
       [
         "api/lib/allowance.ts",
         "api/lib/credits.ts",
         "api/lib/subscription.ts",
+        "api/lib/ai-metering.ts",
         "api/trpc/routers/credits.router.ts",
       ].sort(),
     );

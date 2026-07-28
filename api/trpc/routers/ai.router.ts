@@ -40,6 +40,9 @@ import {
   reverseFreeTierCounter,
 } from "../../lib/allowance";
 import { buildGradeVariables } from "../../../shared/domain/ai-eval";
+import { admissionRead, resolveMeteringModel, settleDelivered } from "../../lib/ai-metering";
+import { ALLOWANCE_COST } from "../../../shared/domain/allowance";
+import { CREDIT_COSTS } from "../../../shared/domain/credits";
 import {
   TUTOR_FOLLOW_UP_MAX_CHARS,
   TUTOR_MODES,
@@ -90,6 +93,11 @@ export const aiRouter = router({
     const payload = resolveAiPrompt("oab-grade", buildGradeVariables(input), providerOptions);
     // Step 1: reserve jobId — no relay work started yet.
     const jobId = mintJobId();
+    // D3 shadow admission-read (epic #50): OBSERVE the unified balance at the door.
+    // Never denies — the OLD debit-at-admission rail (assertCoreAction) below stays
+    // authoritative this slice. The read is discarded here; the delivered-only
+    // charge + reconcile happen in gradeSettle after the relay result is known.
+    await admissionRead(ctx.userId);
     // Step 2: assert entitlement BEFORE any spend or enqueue.
     // On FORBIDDEN nothing is debited or enqueued.
     const tier = await assertCoreAction(ctx.userId, jobId);
@@ -115,6 +123,37 @@ export const aiRouter = router({
     return { jobId };
   }),
 
+  // D3 (epic #50) — delivered-only SHADOW settle for grade. The client calls this
+  // after polling relay.job to done, before persisting the grade via
+  // discursive.saveAnswer. It re-reads the relay result server-side (delivery is
+  // authoritative here, never client-asserted) and fires the shadow charge +
+  // reconcile metric. Writes NOTHING in shadow; a not-delivered job is a total
+  // no-op. The OLD allowance/free-counter rail already settled at enqueue and is
+  // untouched — this only OBSERVES.
+  gradeSettle: protectedProcedure
+    .input(z.object({ jobId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const job = await getRelayJob(ctx.userId, input.jobId);
+      const delivered = job.status === "done";
+      const result = await settleDelivered({
+        userId: ctx.userId,
+        source: "grade",
+        refId: `grade:${input.jobId}`,
+        // Metering model MUST be server-derived (Codex F1): a client-supplied model
+        // would let an unknown string force rawCents=0 (costFor→0) and dodge the
+        // charge once D4 enforces. resolveMeteringModel() (no arg) → PROD_DEFAULT_MODEL,
+        // the relay's live selection. No client value reaches costFor().
+        model: resolveMeteringModel(),
+        // Grade output is the graded feedback (JSON) — meter on the prompt's output
+        // budget as a stable per-action usage proxy until real token counts flow.
+        usage: { kind: "tokens", amount: 2048 },
+        delivered,
+        oldDebitCents: ALLOWANCE_COST,
+        action: "grade",
+      });
+      return { settled: result?.outcome ?? "skipped" };
+    }),
+
   // Ask the per-question tutor. Quota-gated at enqueue (the cost-commit point);
   // persists the user turn so the thread survives navigation. Returns a jobId;
   // the client polls relay.job then calls tutorFinalize.
@@ -137,6 +176,9 @@ export const aiRouter = router({
       throw new TRPCError({ code: "NOT_FOUND", message: "Questão não encontrada" });
     }
 
+    // D3 shadow admission-read (epic #50): observe-only, never denies. The old
+    // assertCredits below stays authoritative; delivered-only charge is in tutorFinalize.
+    await admissionRead(ctx.userId);
     await assertCredits(ctx.userId, "tutor");
 
     const followUp = input.followUp ?? null;
@@ -224,6 +266,19 @@ export const aiRouter = router({
         content: parsed.answer,
         createdBy: ctx.userId,
         lastUpdBy: ctx.userId,
+      });
+      // D3 delivered-only SHADOW charge (epic #50): the relay result is confirmed
+      // done above (pending/error already threw), so delivered=true. Writes nothing
+      // in shadow; the old credit debit at tutorAsk stays authoritative.
+      await settleDelivered({
+        userId: ctx.userId,
+        source: "tutor",
+        refId: `tutor:${input.jobId}`,
+        model: resolveMeteringModel(),
+        usage: { kind: "tokens", amount: 900 },
+        delivered: true,
+        oldDebitCents: CREDIT_COSTS.tutor,
+        action: "tutorAsk",
       });
       return { answer: parsed.answer };
     }),
