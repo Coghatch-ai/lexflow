@@ -12,6 +12,11 @@
 import { readFileSync } from "fs";
 import { join } from "path";
 import { describe, expect, it } from "vitest";
+import { grantCredits } from "./credits";
+import {
+  CHARGE_LEDGER_REF_PREFIX,
+  LEGACY_ALLOWANCE_REF_PREFIX,
+} from "../../shared/domain/credit-reserved";
 
 const src = readFileSync(join(import.meta.dirname, "credits.ts"), "utf-8");
 
@@ -72,6 +77,44 @@ describe("C3 — grantCredits present (admin grant path unchanged)", () => {
 
   it("grant action is admin_grant", () => {
     expect(src).toContain('"admin_grant"');
+  });
+});
+
+describe("C5 — grantCredits enforces the reserved-prefix guard (r3 finding; live writer)", () => {
+  // grantCredits is a LIVE credit_ledger.ref_id writer taking a caller refId. A
+  // reserved-prefix refId must be REJECTED before any db.insert so it can never
+  // squat the internal charge:/legacy_allowance: namespace and later no-op the
+  // money core's fail-loud paired insert. The reject is synchronous, BEFORE any DB
+  // call → hermetic (never opens a connection).
+  it("rejects a charge:-prefixed caller refId", async () => {
+    await expect(
+      grantCredits(
+        "00000000-0000-0000-0000-000000000000",
+        100,
+        "admin_grant",
+        `${CHARGE_LEDGER_REF_PREFIX}evil`,
+      ),
+    ).rejects.toThrow(/reserved ledger prefix "charge:"/);
+  });
+
+  it("rejects a legacy_allowance:-prefixed caller refId", async () => {
+    await expect(
+      grantCredits(
+        "00000000-0000-0000-0000-000000000000",
+        100,
+        "admin_grant",
+        `${LEGACY_ALLOWANCE_REF_PREFIX}x`,
+      ),
+    ).rejects.toThrow(/reserved ledger prefix "legacy_allowance:"/);
+  });
+
+  it("calls assertExternalRefId before any db.insert (guard precedes the write)", () => {
+    const fnStart = src.indexOf("export async function grantCredits");
+    const body = src.slice(fnStart);
+    const guardPos = body.indexOf("assertExternalRefId");
+    const insertPos = body.indexOf(".insert(");
+    expect(guardPos).toBeGreaterThan(-1);
+    expect(guardPos).toBeLessThan(insertPos);
   });
 });
 

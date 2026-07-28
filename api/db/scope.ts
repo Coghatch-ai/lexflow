@@ -24,6 +24,8 @@ const TABLE_SCOPE: Record<string, ScopeType> = {
   exam_calendar_events: { type: "global" },
   coupons: { type: "global" },
   pricing_config: { type: "global" },
+  // Global admin money-engine config (mult/rollover/expiry knobs) — not user-owned.
+  credit_config: { type: "global" },
 
   // Per-user owned tables
   user_answers: { type: "user" },
@@ -46,6 +48,10 @@ const TABLE_SCOPE: Record<string, ScopeType> = {
   subscriptions: { type: "user" },
   allowance_ledger: { type: "user" },
   free_daily_counter: { type: "user" },
+  // Monetization foundation port — D1 (epic #50). Per-user materialized balance
+  // and idempotent charge attribution.
+  credit_balances: { type: "user" },
+  credit_charges: { type: "user" },
 };
 
 function tableName(table: PgTable): string {

@@ -93,6 +93,25 @@ describe("K3 — replay guard sentinel for allowance + subscription kinds", () =
   });
 });
 
+describe("K8 — coupon redeem enforces the reserved-prefix guard before any ledger write (r3)", () => {
+  // redeemInTx builds replayRefId from a caller-supplied coupon `code` and writes it
+  // into the GLOBAL credit_ledger.ref_id across all three rails. It must call the
+  // shared assertExternalRefId guard BEFORE any tx.insert so a caller can never squat
+  // the internal charge:/legacy_allowance: namespace via a coupon code.
+  it("imports assertExternalRefId from the shared reserved registry", () => {
+    expect(src).toContain("assertExternalRefId");
+    expect(src).toContain('from "../../../shared/domain/credit-reserved"');
+  });
+
+  it("asserts replayRefId before the first creditLedger insert", () => {
+    const guardIdx = src.indexOf("assertExternalRefId(replayRefId");
+    const firstInsertIdx = src.indexOf("tx.insert(creditLedger)");
+    expect(guardIdx).toBeGreaterThan(-1);
+    expect(firstInsertIdx).toBeGreaterThan(-1);
+    expect(guardIdx).toBeLessThan(firstInsertIdx);
+  });
+});
+
 describe("K4 — mintCoupon validates kind-specific value fields", () => {
   it("credits kind requires valueCredits > 0", () => {
     expect(src).toContain("Cupom de créditos requer valueCredits > 0");

@@ -5,8 +5,10 @@
 //   - balance = SUM(delta); never stored, never trusted from the client.
 //   - every spend/refund carries a unique ref_id (jobId / refund:<jobId>)
 //     so retries can never double-apply (DB unique index enforces).
-//   - spend order: assertCoreAction → enqueue relay → debitAllowance(refId=jobId)
-//     (PAID path only — free path must NOT write allowance_ledger rows).
+//   - spend order: assertCoreAction → debitAllowance(refId=jobId) → enqueue relay
+//     (debit-before-enqueue; the debit is the cost-commit point, reversed via
+//     refundAllowance if the enqueue throws). PAID path only — free path must NOT
+//     write allowance_ledger rows.
 //   - refunds fire from relay.job on status:error, idempotent (onConflictDoNothing).
 //
 // Free-tier gate: free users (no active paid subscription) are limited to

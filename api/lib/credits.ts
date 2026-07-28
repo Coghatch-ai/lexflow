@@ -4,9 +4,11 @@
 // - balance = SUM(delta); never stored, never trusted from the client.
 // - every spend/refund carries a unique ref_id (jobId / refund:<jobId>) so
 //   retries and double-polls can never double-apply (DB unique index enforces).
-// - spend order per AI procedure: assertCredits (cheap read) → enqueue relay
-//   job → debitCredits(refId=jobId). The tiny race between read and debit can
-//   only over-spend by one action for one user (single-user B2C) — accepted.
+// - spend order per AI procedure: assertCredits (cheap read) → debitCredits(
+//   refId=jobId) → enqueue relay job (debit-before-enqueue; the debit is the
+//   cost-commit point, reversed via refundCredits if the enqueue throws). The
+//   tiny race between the read and the atomic debit can only over-spend by one
+//   action for one user (single-user B2C) — accepted.
 // - refunds fire from the relay.job poll when a job comes back status:error,
 //   keyed refund:<jobId> — idempotent no matter how many times the client polls.
 
@@ -15,6 +17,7 @@ import { TRPCError } from "@trpc/server";
 import { db } from "../db/client";
 import { creditLedger } from "../../drizzle/schema";
 import { CREDIT_COSTS, type CreditAction } from "../../shared/domain/credits";
+import { assertExternalRefId } from "../../shared/domain/credit-reserved";
 import { atomicDebitCredits } from "./ledger-debit";
 
 export async function getBalance(userId: string): Promise<number> {
@@ -86,6 +89,11 @@ export async function grantCredits(
   refId: string | null,
   note?: string,
 ): Promise<void> {
+  // RESERVED-PREFIX GUARD. This is a LIVE credit_ledger writer taking a caller-
+  // supplied refId; a `charge:`/`legacy_allowance:`-prefixed refId would squat an
+  // internal namespace and later no-op a fail-loud paired insert. Reject at the
+  // boundary (internal charge()/backfill own those prefixes, not this path).
+  assertExternalRefId(refId, "grantCredits()");
   await db
     .insert(creditLedger)
     .values({

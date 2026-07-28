@@ -185,6 +185,18 @@ export const coupons = pgTable(
 
 // Pay-as-you-go credit ledger — balance = SUM(delta). ref_id = idempotency key
 // (jobId spend / refund:<jobId> / coupon:<code>:<userId>); unique index bars doubles.
+//
+// D1 (epic #50) — this is being unified into the SINGLE append-only money ledger.
+// New columns are ADDITIVE (the legacy `delta`/`action` stay for the current
+// rails until D2 migrates them):
+//   - deltaCents: signed cents in the unified engine (positive grant/purchase,
+//     negative consumption/expiry). Nullable until backfill populates it.
+//   - kind: canonical ledger kind — grant | purchase | refund | consumption |
+//     adjustment | expiry. `expiry` is the append-only NEGATIVE reset row (D2).
+//   - source: open string (purchase | coupon | admin | legacy | subscription |
+//     legacy_allowance_consumption | …). Unlisted source → DEFAULT mult 100 (1×).
+// A CHECK constrains kind to the known set; source is intentionally unconstrained
+// (open-string, config-driven multiplier per source in credit_config).
 export const creditLedger = pgTable(
   "credit_ledger",
   {
@@ -192,14 +204,80 @@ export const creditLedger = pgTable(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    delta: integer("delta").notNull(), // signed credits
-    action: text("action").notNull(), // LedgerAction: tutor | coach | grade | signup_grant | admin_grant | refund
+    delta: integer("delta").notNull(), // LEGACY signed credits (pre-D1 rails)
+    action: text("action").notNull(), // LEGACY LedgerAction (pre-D1 rails)
+    // ── D1 unified-ledger columns (additive) ──
+    deltaCents: integer("delta_cents"), // signed cents — the invariant's term
+    kind: text("kind"), // canonical ledger kind (see CHECK below)
+    source: text("source"), // open-string funding/spend source
     refId: text("ref_id").unique(), // idempotency key — nullable for manual grants
     note: text("note"),
     ...systemFields,
   },
-  (t) => [index("idx_credit_ledger_user_created").on(t.userId, t.createdAt)],
+  (t) => [
+    index("idx_credit_ledger_user_created").on(t.userId, t.createdAt),
+    // D1: constrain the canonical kind to the known set (open source stays free).
+    // NULL is allowed so legacy rows (pre-backfill) do not violate the check.
+    check(
+      "credit_ledger_kind_check",
+      sql`${t.kind} IS NULL OR ${t.kind} IN ('grant', 'purchase', 'refund', 'consumption', 'adjustment', 'expiry')`,
+    ),
+  ],
 );
+
+// ─── D1 unified credit engine — materialized balance, charges, config ───────
+
+// Materialized per-user balance (1:1 with users). The invariant this table
+// enforces: balance_cents == SUM(credit_ledger.delta_cents) for the user, kept
+// true because the money core (api/lib/credit-charge.ts) mutates this row and
+// appends the ledger row in the SAME transaction, always via
+// INSERT … ON CONFLICT (user_id) DO UPDATE — never a bare UPDATE.
+//   - balance_cents: whole-cent authoritative balance (may be negative — real).
+//   - bag_cents: OFF-ledger fractional carry (numeric(12,4)); sub-cent charges
+//     accumulate here until floor >= 1¢ flushes one consumption row.
+//   - reference_cents: wallet-gauge anchor — snapshot of balance at last positive
+//     money-in (grant/purchase); the D4 fuel gauge is balance/reference.
+export const creditBalances = pgTable("credit_balances", {
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  balanceCents: integer("balance_cents").notNull().default(0),
+  bagCents: numeric("bag_cents", { precision: 12, scale: 4 }).notNull().default("0"),
+  referenceCents: integer("reference_cents").notNull().default(0),
+  ...systemFields,
+});
+
+// Idempotent charge attribution. One row per settled charge; ref_id is the PK so
+// a replay is absorbed by INSERT … ON CONFLICT (ref_id) DO NOTHING RETURNING —
+// an empty RETURNING means the charge already happened, so the bag does NOT
+// re-accumulate. raw_cents/owed_cents are the pre/post-multiplier audit trail.
+export const creditCharges = pgTable(
+  "credit_charges",
+  {
+    refId: text("ref_id").primaryKey(), // idempotency key = charge identity
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    source: text("source").notNull(), // open-string source (drives multiplier)
+    rawCents: numeric("raw_cents", { precision: 12, scale: 4 }).notNull(), // pre-multiplier cost
+    owedCents: numeric("owed_cents", { precision: 12, scale: 4 }).notNull(), // post-multiplier fractional owed
+    ...systemFields,
+  },
+  (t) => [index("idx_credit_charges_user").on(t.userId)],
+);
+
+// Global admin config for the money engine — every live knob is a DB row, no
+// redeploy to tune. Scoped GLOBAL (like pricing_config): not user-owned.
+//   key examples: 'mult.<source>' (×100 int; 100 = 1×, absent → 100),
+//     'rollover.<source>' (0/1 bool as int), 'expiry_months.<source>' (int N).
+//   value_int is a plain integer — fixed-point ×100 for multipliers, bool-as-int
+//     for flags, month count for expiry. No float knobs (float drift avoided).
+export const creditConfig = pgTable("credit_config", {
+  key: text("key").primaryKey(),
+  valueInt: integer("value_int").notNull(),
+  description: text("description"),
+  ...systemFields,
+});
 
 // ─── Admin-editable pricing / config table — S5 ────────────────────────────
 //

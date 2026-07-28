@@ -39,6 +39,7 @@ import {
   CREDIT_COSTS,
   normalizeCouponCode,
 } from "../../../shared/domain/credits";
+import { assertExternalRefId } from "../../../shared/domain/credit-reserved";
 import { COUPON_KINDS, type CouponKind } from "../../../shared/domain/coupons";
 
 function randomCouponCode(): string {
@@ -85,6 +86,10 @@ async function redeemInTx(
   }
   const kind = won.kind as CouponKind;
   const replayRefId = `coupon:${code}:${userId}`;
+  // Defense-in-depth: this is a LIVE credit_ledger writer built from a caller-
+  // supplied coupon `code`. Reject a reserved internal namespace before any of the
+  // three rails writes it to the global ledger ref_id (charge()/backfill own those).
+  assertExternalRefId(replayRefId, "coupon redeem");
 
   if (kind === "credits") {
     // Rail 2a: replay guard via credit_ledger ref_id unique index.

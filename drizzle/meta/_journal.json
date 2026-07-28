@@ -176,6 +176,13 @@
       "when": 1784851450449,
       "tag": "0024_coupon_kind_check",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1785263257014,
+      "tag": "0025_orange_black_crow",
+      "breakpoints": true
     }
   ]
 }
