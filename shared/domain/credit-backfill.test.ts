@@ -70,7 +70,9 @@ describe("mapLegacyRow — two-rail source map", () => {
       source: "legacy_allowance_consumption",
     });
   });
+});
 
+describe("mapLegacyRow — write-mode (INSERT vs UPDATE) targeting", () => {
   it("allowance rows are INSERTs with a deterministic namespaced ledger ref_id", () => {
     // The D1 bug: allowance rows must MATERIALIZE new canonical credit_ledger rows
     // (writeMode "insert"), not update a nonexistent credit_ledger row by ref_id.

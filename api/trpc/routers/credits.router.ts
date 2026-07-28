@@ -33,6 +33,7 @@ import { coupons, creditLedger, subscriptions } from "../../../drizzle/schema";
 import { getBalance, grantCredits } from "../../lib/credits";
 import { grantAllowance, getAllowanceBalance } from "../../lib/allowance";
 import { grantSubscription } from "../../lib/subscription";
+import { grant } from "../../lib/credit-charge";
 import {
   COUPON_ALPHABET,
   COUPON_CODE_REGEX,
@@ -91,18 +92,29 @@ async function redeemInTx(
   // three rails writes it to the global ledger ref_id (charge()/backfill own those).
   assertExternalRefId(replayRefId, "coupon redeem");
 
+  // Replay guard (D2): the per-(coupon,user) ref_id is claimed via the money-core
+  // grant() (idempotent ON CONFLICT DO NOTHING). A replay returns applied=false —
+  // we THROW so the whole tx (including the Rail-1 cap increment) rolls back and no
+  // redemption slot is permanently burned. This preserves the old
+  // "NO onConflictDoNothing → replay throws" semantics through the one writer.
+  const claimReplay = (applied: boolean): void => {
+    if (!applied) {
+      throw new TRPCError({ code: "FORBIDDEN", message: "Você já resgatou este cupom" });
+    }
+  };
+
   if (kind === "credits") {
-    // Rail 2a: replay guard via credit_ledger ref_id unique index.
-    // NO onConflictDoNothing — replay must throw to roll back cap increment.
-    await tx.insert(creditLedger).values({
-      userId,
-      delta: won.valueCredits,
-      action: "coupon_grant",
+    // Rail 2a: credits grant through the money core (kind=grant, source=coupon),
+    // joining the coupon tx. Replay → applied=false → throw → cap rolls back.
+    const res = await grant({
+      scope: { userId },
+      cents: won.valueCredits,
+      source: "coupon",
       refId: replayRefId,
-      note: code,
-      createdBy: userId,
-      lastUpdBy: userId,
+      kind: "grant",
+      tx,
     });
+    claimReplay(res.applied);
     return { kind, granted: won.valueCredits };
   }
 
@@ -114,16 +126,16 @@ async function redeemInTx(
         message: "Cupom de allowance sem valueUnits válido",
       });
     }
-    // Rail 2b: sentinel + F1: grantAllowance inside tx — all writes in ONE tx.
-    await tx.insert(creditLedger).values({
-      userId,
-      delta: 0,
-      action: "coupon_grant",
+    // Rail 2b: sentinel claim (money core, joins tx) + F1: grantAllowance inside tx.
+    const res = await grant({
+      scope: { userId },
+      cents: 0,
+      source: "coupon",
       refId: replayRefId,
-      note: `allowance:${code}`,
-      createdBy: userId,
-      lastUpdBy: userId,
+      kind: "grant",
+      tx,
     });
+    claimReplay(res.applied);
     await grantAllowance(userId, won.valueUnits, "top_up", replayRefId, `coupon:${code}`, tx);
     return { kind, granted: won.valueUnits };
   }
@@ -136,16 +148,16 @@ async function redeemInTx(
       message: "Cupom de assinatura sem valuePeriodMonths válido",
     });
   }
-  // Rail 2c: sentinel inside tx + F1/F3: grantSubscription receives tx + idempotencyKey.
-  await tx.insert(creditLedger).values({
-    userId,
-    delta: 0,
-    action: "coupon_grant",
+  // Rail 2c: sentinel claim (money core, joins tx) + F1/F3: grantSubscription in tx.
+  const res = await grant({
+    scope: { userId },
+    cents: 0,
+    source: "coupon",
     refId: replayRefId,
-    note: `subscription:${code}`,
-    createdBy: userId,
-    lastUpdBy: userId,
+    kind: "grant",
+    tx,
   });
+  claimReplay(res.applied);
   await grantSubscription(userId, won.valuePeriodMonths, replayRefId, `coupon:${code}`, tx);
   return { kind, granted: won.valuePeriodMonths };
 }

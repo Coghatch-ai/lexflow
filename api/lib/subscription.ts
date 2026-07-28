@@ -36,16 +36,17 @@
 
 import { sql } from "drizzle-orm";
 import { db } from "../db/client";
-import { allowanceLedger, subscriptions } from "../../drizzle/schema";
+import { subscriptions } from "../../drizzle/schema";
 import { grantAllowance } from "./allowance";
+import { grant, type CreditTx } from "./credit-charge";
 import { getConfigNumber, CONFIG_KEYS } from "./pricing-config";
 import { PLAN_PAID } from "../../shared/domain/allowance";
 import { hashLockKey } from "./ledger-debit";
 
-// Minimal executor type — same subset used by grantAllowance.
-// `execute` added so the FOR UPDATE raw query runs on the same connection/tx,
-// which is required for the row-level lock to be held until the tx commits.
-type DbOrTx = Pick<typeof db, "insert" | "select" | "update" | "execute">;
+// Executor type — the money-core writers + the raw SQL here all run on the SAME
+// transaction. CreditTx (a drizzle tx) satisfies both `.execute`/`.insert` and the
+// money core's tx param, so a single type flows through the whole grant chain.
+type DbOrTx = CreditTx;
 
 /**
  * Internal implementation — all writes take a required executor so every
@@ -80,34 +81,28 @@ async function grantSubscriptionImpl(
   const subLockKey = hashLockKey(userId, "subscription");
   await executor.execute(sql`SELECT pg_advisory_xact_lock(${subLockKey})`);
 
-  // F3 sentinel — insert a zero-delta allowance_ledger row BEFORE touching the
-  // subscription row. The unique ref_id index makes this a no-op (0 rows inserted)
-  // on retry. When 0 rows come back the key was already committed → short-circuit.
+  // F3 sentinel — a zero-cents grant() into the UNIFIED credit_ledger BEFORE
+  // touching the subscription row (D2: raw allowance_ledger writes are illegal
+  // outside the money core, so the sentinel is now a core write too). grant() is
+  // idempotent by ref_id: applied=false means the key was already committed → this
+  // is a retry → short-circuit before the period extension.
   //
-  // IMPORTANT: the sentinel refId is namespaced as `sub:sentinel:<idempotencyKey>`
-  // so it does NOT collide with the real allowance top-up below, which uses
-  // `refId = idempotencyKey` (no prefix). Without the namespace both writes share
-  // the same ref_id → top-up hits onConflictDoNothing on first call → subscriber
-  // gets zero allowance. The namespace keeps them distinct:
-  //   sentinel row  → refId = "sub:sentinel:<key>"  delta=0
-  //   allowance row → refId = "<key>"               delta=units
+  // The sentinel refId `sub:sentinel:<key>` is DISTINCT from the real allowance
+  // top-up refId (`<key>`), so the sentinel never shadows the grant. cents=0 keeps
+  // the balance unchanged (marker only). source=subscription groups it with the
+  // grant it guards.
   const sentinelRefId = `sub:sentinel:${idempotencyKey}`;
-  const sentinelResult = await executor
-    .insert(allowanceLedger)
-    .values({
-      userId,
-      delta: 0,
-      action: "monthly_grant",
-      refId: sentinelRefId,
-      note: `sentinel:subscription_grant`,
-      createdBy: userId,
-      lastUpdBy: userId,
-    })
-    .onConflictDoNothing({ target: allowanceLedger.refId })
-    .returning({ id: allowanceLedger.id });
+  const sentinel = await grant({
+    scope: { userId },
+    cents: 0,
+    source: "subscription",
+    refId: sentinelRefId,
+    kind: "grant",
+    tx: executor,
+  });
 
-  // 0 rows → key already used → this is a retry; do nothing.
-  if (sentinelResult.length === 0) {
+  // Not applied → key already used → this is a retry; do nothing.
+  if (!sentinel.applied) {
     return;
   }
 

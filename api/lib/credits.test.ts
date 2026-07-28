@@ -58,11 +58,14 @@ describe("C2 — refundCredits is idempotent via onConflictDoNothing", () => {
     expect(src).toContain("`refund:${jobId}`");
   });
 
-  it("refund uses onConflictDoNothing (idempotent)", () => {
+  it("refund routes through the money core refund() (idempotent by ref_id there)", () => {
+    // D2: the raw credit_ledger insert is gone — the money-back-in is written by the
+    // money core's dormant refund() (ON CONFLICT DO NOTHING inside credit-charge.ts).
     const fnStart = src.indexOf("export async function refundCredits");
     const fnEnd = src.indexOf("\nexport async function ", fnStart + 1);
     const body = fnEnd > fnStart ? src.slice(fnStart, fnEnd) : src.slice(fnStart);
-    expect(body).toContain("onConflictDoNothing");
+    expect(body).toContain("refund({");
+    expect(body).not.toContain(".insert(");
   });
 
   it("refund is a no-op when spend row absent (early return)", () => {
@@ -108,13 +111,14 @@ describe("C5 — grantCredits enforces the reserved-prefix guard (r3 finding; li
     ).rejects.toThrow(/reserved ledger prefix "legacy_allowance:"/);
   });
 
-  it("calls assertExternalRefId before any db.insert (guard precedes the write)", () => {
+  it("routes through the money core grant() (the reserved-prefix guard lives there)", () => {
+    // D2: grantCredits no longer does a raw insert; it delegates to grant(), which
+    // runs assertExternalRefId at the money-core boundary before opening any tx. The
+    // two reject tests above exercise that guard end-to-end through grantCredits.
     const fnStart = src.indexOf("export async function grantCredits");
     const body = src.slice(fnStart);
-    const guardPos = body.indexOf("assertExternalRefId");
-    const insertPos = body.indexOf(".insert(");
-    expect(guardPos).toBeGreaterThan(-1);
-    expect(guardPos).toBeLessThan(insertPos);
+    expect(body).toContain("grant({");
+    expect(body).not.toContain(".insert(");
   });
 });
 

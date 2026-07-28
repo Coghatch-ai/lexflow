@@ -150,7 +150,9 @@ describe("R5 — grantSubscriptionImpl: FOR UPDATE on subscription read before p
     expect(subSrc).toContain("executor.execute(sql");
   });
 
-  it("DbOrTx includes execute in its Pick type", () => {
-    expect(subSrc).toContain('"execute"');
+  it("executor type is the money-core CreditTx (a drizzle tx: has .execute)", () => {
+    // D2: DbOrTx is now the money-core CreditTx (the drizzle transaction), which
+    // exposes .execute for the FOR UPDATE / advisory-lock queries.
+    expect(subSrc).toContain("type DbOrTx = CreditTx");
   });
 });

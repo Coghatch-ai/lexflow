@@ -58,11 +58,19 @@ describe("G2 — idempotency via credit_charges ON CONFLICT DO NOTHING RETURNING
   });
 });
 
+// charge()-scoped source (the runInTx helper mentions db.transaction earlier in
+// the file for grant/refund; scope these guards to charge()'s own body so they
+// measure charge()'s control flow, not the shared helper).
+const chargeSrc = src.slice(
+  src.indexOf("export async function charge"),
+  src.indexOf("export interface GrantParams"),
+);
+
 describe("G3 — delivered:false is a universal no-op (no tx)", () => {
   it("returns no-op before opening a transaction when !delivered", () => {
-    expect(src).toContain("if (!delivered)");
-    const guardPos = src.indexOf("if (!delivered)");
-    const txPos = src.indexOf("db.transaction");
+    expect(chargeSrc).toContain("if (!delivered)");
+    const guardPos = chargeSrc.indexOf("if (!delivered)");
+    const txPos = chargeSrc.indexOf("db.transaction");
     expect(guardPos).toBeGreaterThan(-1);
     expect(guardPos).toBeLessThan(txPos); // guard precedes any tx
   });
@@ -70,13 +78,13 @@ describe("G3 — delivered:false is a universal no-op (no tx)", () => {
 
 describe("G4 — dryRun is shadow: writes nothing", () => {
   it("dryRun branch returns before db.transaction and contains no INSERT", () => {
-    const dryPos = src.indexOf("if (dryRun)");
-    const txPos = src.indexOf("db.transaction");
+    const dryPos = chargeSrc.indexOf("if (dryRun)");
+    const txPos = chargeSrc.indexOf("db.transaction");
     expect(dryPos).toBeGreaterThan(-1);
     expect(dryPos).toBeLessThan(txPos);
     // The dryRun block (between `if (dryRun)` and the following `return db.transaction`)
     // must not contain an INSERT.
-    const block = src.slice(dryPos, txPos);
+    const block = chargeSrc.slice(dryPos, txPos);
     expect(block).not.toContain("INSERT");
   });
 });
@@ -201,11 +209,11 @@ describe("G10 — grant() REJECTS a caller refId that squats a reserved internal
   });
 });
 
-describe("G6 — DORMANT: charge() has no call site yet (D3 wires it)", () => {
-  it("no non-test source file IMPORTS credit-charge", () => {
-    // grep the tree for an IMPORT of this module (from "…/credit-charge") OUTSIDE
-    // the test. Dormant in D1 → nothing wires it. Comment mentions are ignored;
-    // only a real `from "…credit-charge"` import counts as a call site.
+describe("G6 — D2: the GRANT-side funding rails now wire the money core (charge() still dormant, D3)", () => {
+  it("the funding-rail files IMPORT credit-charge (grant/refund/expire wired in D2)", () => {
+    // D1 shipped charge()/grant() dormant; D2 routes the GRANT/refund/coupon/
+    // subscription/admin WRITE side through the money core. So the funding-rail
+    // files MUST now import it. (The SPEND `charge()` call sites are still D3.)
     let out = "";
     try {
       out = execSync(
@@ -218,7 +226,37 @@ describe("G6 — DORMANT: charge() has no call site yet (D3 wires it)", () => {
     const files = out
       .split("\n")
       .map((f) => f.trim())
-      .filter((f) => f.length > 0 && !f.endsWith("credit-charge.test.ts"));
-    expect(files).toEqual([]);
+      .filter((f) => f.length > 0 && !f.endsWith(".test.ts"));
+    // Exactly the D2 grant-rail importers (order-independent).
+    expect(files.sort()).toEqual(
+      [
+        "api/lib/allowance.ts",
+        "api/lib/credits.ts",
+        "api/lib/subscription.ts",
+        "api/trpc/routers/credits.router.ts",
+      ].sort(),
+    );
+  });
+
+  it("no SPEND call site invokes charge() yet (D3 wires delivered-only charging)", () => {
+    // charge() (the metered SPEND writer) stays dormant in D2 — grep for a call,
+    // not just an import. The grant rails import grant()/refund()/expire(), never
+    // charge(); the AI routers must not call charge( until D3.
+    let out = "";
+    try {
+      out = execSync(
+        "git grep -n --untracked -e 'charge(' -- 'api/trpc/**/*.ts' | grep -v '\\.test\\.ts' || true",
+        { cwd: join(import.meta.dirname, "..", ".."), encoding: "utf-8" },
+      );
+    } catch {
+      out = "";
+    }
+    // No `charge(` invocation in the routers (grant/refund/expire are fine; those
+    // are money-IN / reset, not the dormant metered spend writer).
+    const spendCalls = out
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0 && /[^a-zA-Z_.]charge\(/.test(` ${l}`) && !/\/\//.test(l));
+    expect(spendCalls).toEqual([]);
   });
 });

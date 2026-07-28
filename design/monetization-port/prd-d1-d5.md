@@ -72,6 +72,8 @@ Original sketch had D1–D5. Collapse **findings-D4 (wallet gauge) + findings-D5
 
 **Safety gates here:** reset policy DEFINED + config-driven before any expiry runs; two-rail freeze/dual-write; double-grant idempotency. (Codex "decide reset before D2" satisfied by owner decision above.)
 
+> **Expiry ships DORMANT in D2; ACTIVATION moves to D3 (tech-safety refinement, Codex #59).** The per-source rollover/expiry POLICY is unchanged — this is a sequencing fix, not a business change. In D2 live spend is still the legacy debit-at-admission rail (allowance_ledger/legacy credit_ledger), so the unified `credit_balances`/`credit_ledger` do not yet reflect TRUE consumption. Running expiry against live balances now would claw the wrong amount. So expiry is implemented + config-driven + unit-tested against the unified model, and is now **source/window-aware** (claws only the EXPIRING source's own leftover — `SUM(credit_ledger.delta_cents) WHERE source=<source>`, clamped ≥0 — never the whole unified balance, never other sources' funds), but is wired to NO live/scheduled caller in D2. A test guard (`credit-charge-d2.test.ts` D2-F) asserts no production caller of `expire()` exists yet.
+
 ---
 
 ## D3 — Move AI call sites to delivered-only `charge()` in SHADOW + cost-of-goods + reconcile
@@ -95,6 +97,8 @@ Original sketch had D1–D5. Collapse **findings-D4 (wallet gauge) + findings-D5
 - `costFor(unknownModel)` returns 0, does not throw.
 
 **Safety gates here:** shadow-first; reconciliation BEFORE authoritative; old debit removed LAST. (Codex D3 sequence.)
+
+> **Activate expiry here (deferred from D2, Codex #59).** Once spend routes through `charge()` and the unified `credit_ledger` reflects TRUE per-source consumption, wire the (already-implemented, source/window-aware) `expire()` to its scheduled/live caller. Until this slice makes the unified model authoritative, expiry stays dormant. The dormancy guard test (`credit-charge-d2.test.ts` D2-F) is retired/updated in this slice when the live caller lands.
 
 ---
 

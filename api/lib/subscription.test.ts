@@ -157,49 +157,43 @@ describe("S8 — [F3] tx param threaded into grantAllowance (Codex finding #1+3)
   });
 });
 
-describe("S9 — [F3 sentinel] subscription upsert guarded by allowance_ledger sentinel (Codex re-review)", () => {
-  it("imports allowanceLedger from schema", () => {
-    // sentinel insert uses the allowanceLedger table
-    expect(src).toContain("allowanceLedger");
-    expect(src).toContain("{ allowanceLedger, subscriptions }");
+describe("S9 — [D2] subscription upsert guarded by a money-core zero-cents grant sentinel", () => {
+  it("sentinel is a money-core grant() (raw allowance_ledger insert removed in D2)", () => {
+    // D2 one-writer enforcement: the sentinel is no longer a raw allowance_ledger
+    // insert — it is a zero-cents grant() into the unified ledger, idempotent by
+    // ref_id. subscription.ts must no longer import/insert allowanceLedger.
+    expect(src).toContain("grant({");
+    expect(src).not.toMatch(/\.insert\(allowanceLedger\)/);
   });
 
-  it("sentinel insert uses onConflictDoNothing on refId", () => {
-    expect(src).toContain("onConflictDoNothing({ target: allowanceLedger.refId })");
+  it("sentinel is zero-cents (marker only, does not move balance)", () => {
+    const sentinelPos = src.indexOf("const sentinel = await grant({");
+    expect(sentinelPos).toBeGreaterThan(-1);
+    const block = src.slice(sentinelPos, sentinelPos + 300);
+    expect(block).toContain("cents: 0");
+    expect(block).toContain("refId: sentinelRefId");
   });
 
-  it("sentinel uses .returning to detect first-vs-retry", () => {
-    expect(src).toContain(".returning({ id: allowanceLedger.id })");
+  it("short-circuits (returns early) when the sentinel grant is a replay (applied=false)", () => {
+    expect(src).toContain("if (!sentinel.applied)");
+    expect(src).toMatch(/if \(!sentinel\.applied\)[\s\S]*?return;/m);
   });
 
-  it("short-circuits (returns early) when sentinel returns 0 rows", () => {
-    expect(src).toContain("sentinelResult.length === 0");
-    expect(src).toMatch(/sentinelResult\.length === 0[\s\S]*?return;/m);
-  });
-
-  it("sentinel insert happens BEFORE the subscriptions upsert", () => {
-    const sentinelPos = src.indexOf("onConflictDoNothing({ target: allowanceLedger.refId })");
+  it("sentinel grant happens BEFORE the subscriptions upsert", () => {
+    const sentinelPos = src.indexOf("const sentinel = await grant({");
     const upsertPos = src.indexOf("onConflictDoUpdate");
     expect(sentinelPos).toBeGreaterThan(-1);
     expect(upsertPos).toBeGreaterThan(-1);
     expect(sentinelPos).toBeLessThan(upsertPos);
   });
 
-  it("sentinel delta is 0 (zero-delta sentinel, not a real grant)", () => {
-    // The sentinel row must carry delta: 0 so it does not affect balance.
-    expect(src).toContain("delta: 0");
-  });
-
-  it("sentinel refId is namespaced sub:sentinel:<key> (not bare idempotencyKey)", () => {
-    // The sentinel must use a DISTINCT ref_id from the real allowance grant.
-    // If both used `refId: idempotencyKey` the allowance insert would hit
-    // onConflictDoNothing on the first call → subscriber gets zero allowance.
-    // Fixed: sentinel uses `sub:sentinel:${idempotencyKey}` template literal.
+  it("sentinel refId is namespaced sub:sentinel:<key> (distinct from the real grant)", () => {
+    // The sentinel must use a DISTINCT ref_id from the real allowance grant, else
+    // the grant's own idempotency would short-circuit and the subscriber gets zero
+    // allowance. Fixed: sentinel uses `sub:sentinel:${idempotencyKey}`.
     expect(src).toContain("sub:sentinel:");
     expect(src).toContain("sentinelRefId");
     expect(src).toContain("refId: sentinelRefId");
-    // Must NOT use bare idempotencyKey as the sentinel refId.
-    expect(src).not.toMatch(/refId:\s*idempotencyKey[^,\n]*,\s*\n\s*note:\s*`sentinel:/);
   });
 });
 
@@ -238,9 +232,9 @@ describe("S11 — [QA blocker] sentinel refId ≠ grantAllowance refId (distinct
 
 describe("S10 — [F3 sentinel] subscriptions row NOT mutated on same-key retry", () => {
   it("subscription upsert is inside the sentinel guard (after early-return)", () => {
-    // After `if (sentinelResult.length === 0) { return; }` the upsert follows.
+    // After `if (!sentinel.applied) { return; }` the upsert follows.
     // Verify the upsert is NOT before the sentinel check.
-    const earlyReturnPos = src.indexOf("sentinelResult.length === 0");
+    const earlyReturnPos = src.indexOf("if (!sentinel.applied)");
     const upsertPos = src.indexOf("onConflictDoUpdate");
     expect(earlyReturnPos).toBeGreaterThan(-1);
     expect(upsertPos).toBeGreaterThan(-1);
@@ -250,8 +244,8 @@ describe("S10 — [F3 sentinel] subscriptions row NOT mutated on same-key retry"
 
   it("old pattern absent: no unconditional subscription upsert before sentinel", () => {
     // Before the fix the upsert ran before any idempotency check.
-    // Sentinel check (sentinelResult) must exist as the only gate.
-    expect(src).toContain("sentinelResult");
+    // Sentinel check (sentinel.applied) must exist as the only gate.
+    expect(src).toContain("sentinel.applied");
     // Confirm onConflictDoUpdate appears exactly once (the gated upsert).
     const matches = src.match(/onConflictDoUpdate/g);
     expect(matches).toHaveLength(1);
@@ -275,8 +269,11 @@ describe("S13 — [#55] FOR UPDATE on subscription row read serializes concurren
     expect(src).toContain("executor.execute(sql");
   });
 
-  it("DbOrTx Pick includes execute", () => {
-    expect(src).toContain('"execute"');
+  it("executor type is the money-core CreditTx (a drizzle tx: execute + insert)", () => {
+    // D2: the executor now flows into the money core too, so it is typed CreditTx
+    // (the drizzle transaction) rather than a hand-rolled Pick. A real drizzle tx
+    // exposes .execute (used for FOR UPDATE / advisory lock) and .insert.
+    expect(src).toContain("type DbOrTx = CreditTx");
   });
 
   it("existing row access uses snake_case current_period_end from raw SQL result", () => {
@@ -314,9 +311,9 @@ describe("S14 — [#55 Codex re-review] per-user advisory lock serializes first-
     expect(src).toMatch(/executor\.execute\(sql`SELECT pg_advisory_xact_lock/);
   });
 
-  it("advisory lock taken BEFORE sentinel insert (serializes before any write)", () => {
+  it("advisory lock taken BEFORE the sentinel grant (serializes before any write)", () => {
     const lockPos = src.indexOf("pg_advisory_xact_lock");
-    const sentinelPos = src.indexOf("onConflictDoNothing({ target: allowanceLedger.refId })");
+    const sentinelPos = src.indexOf("const sentinel = await grant({");
     expect(lockPos).toBeGreaterThan(-1);
     expect(sentinelPos).toBeGreaterThan(-1);
     expect(lockPos).toBeLessThan(sentinelPos);

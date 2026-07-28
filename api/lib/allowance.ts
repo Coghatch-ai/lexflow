@@ -30,13 +30,15 @@ import { TRPCError } from "@trpc/server";
 import { db } from "../db/client";
 import { allowanceLedger, freeDailyCounter, subscriptions } from "../../drizzle/schema";
 import { atomicDebitAllowance } from "./ledger-debit";
-
-// Minimal executor type accepted by grantAllowance when called inside a
-// transaction. drizzle node-postgres transactions expose the same .insert()
-// interface as the global db — we only need the subset used here.
-type DbOrTx = Pick<typeof db, "insert" | "select" | "update">;
+import { grant, refund, type LegacyMirror, type CreditTx } from "./credit-charge";
 
 import { ALLOWANCE_COST, FREE_TIER_DAILY_LIMIT, PLAN_PAID } from "../../shared/domain/allowance";
+
+// The unified-ledger `source` every allowance grant maps to. Allowance is the
+// subscription entitlement (monthly/coupon/admin top-ups all fund the same
+// entitlement), so on the unified ledger it is one source. Per-source reset
+// knobs (rollover.subscription / expiry_months.subscription) key off this.
+const ALLOWANCE_SOURCE = "subscription" as const;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -209,6 +211,13 @@ export async function debitAllowance(userId: string, refId: string): Promise<voi
  * mirror its amount; no-op when the spend doesn't exist or refund already applied.
  * Called from relay.router when a job returns status:error.
  * Only fires for paid-path jobs (free-path never writes allowance_ledger).
+ *
+ * D2 (epic #50): the money-back-in is routed through the money core's dormant
+ * refund() writer (kind=refund, source=subscription) so the unified credit_ledger
+ * + credit_balances are updated by the single writer — a raw allowance_ledger
+ * insert here is now illegal. A `legacyMirror` writes the compat allowance_ledger
+ * refund row in the SAME core tx, so the pre-D3 SPEND admission (which reads
+ * allowance_ledger) still sees the reversal. delta is 1:1 cents (D1 backfill).
  */
 export async function refundAllowance(userId: string, jobId: string): Promise<void> {
   const [spend] = await db
@@ -223,27 +232,35 @@ export async function refundAllowance(userId: string, jobId: string): Promise<vo
     )
     .limit(1);
   if (spend === undefined) return;
-  await db
-    .insert(allowanceLedger)
-    .values({
-      userId,
-      delta: -spend.delta,
+  await refund({
+    scope: { userId },
+    cents: -spend.delta, // spend.delta is negative → positive money-back-in
+    source: ALLOWANCE_SOURCE,
+    refId: `refund:${jobId}`,
+    legacyMirror: {
+      table: "allowance_ledger",
       action: "refund",
+      units: -spend.delta,
       refId: `refund:${jobId}`,
       note: "spend",
-      createdBy: userId,
-      lastUpdBy: userId,
-    })
-    .onConflictDoNothing({ target: allowanceLedger.refId });
+    },
+  });
 }
 
 /**
- * Idempotent positive allowance grant (admin / coupon / monthly). refId dedupes replays.
+ * Idempotent positive allowance grant (admin / coupon / monthly).
+ *
+ * D2 (epic #50): routed through the money core's grant() writer (kind=grant,
+ * source=subscription). The unified credit_ledger + credit_balances are updated in
+ * one tx, and a `legacyMirror` writes the compat allowance_ledger row in that SAME
+ * tx so the pre-D3 SPEND admission (SUM(allowance_ledger.delta)) still sees the
+ * grant — the money core is the ONLY writer of both tables' grant rows. Allowance
+ * units map 1:1 to cents (D1 backfill convention).
  *
  * @param tx - optional transaction executor. When redeeming a coupon, pass the
- *   active drizzle transaction so the insert joins the same atomic unit as the
- *   coupon cap increment and replay-guard sentinel. Standalone callers (admin
- *   grant, subscription activation) omit this and use the module-level db.
+ *   active drizzle transaction so the grant joins the same atomic unit as the
+ *   coupon cap increment. Standalone callers (admin grant, subscription
+ *   activation) omit this and the core opens its own transaction.
  */
 export async function grantAllowance(
   userId: string,
@@ -251,19 +268,25 @@ export async function grantAllowance(
   action: "monthly_grant" | "top_up" | "rollover" | "admin_grant",
   refId: string,
   note?: string,
-  tx?: DbOrTx,
+  tx?: CreditTx,
 ): Promise<void> {
-  const executor = tx ?? db;
-  await executor
-    .insert(allowanceLedger)
-    .values({
-      userId,
-      delta: units,
-      action,
-      refId,
-      note: note ?? null,
-      createdBy: userId,
-      lastUpdBy: userId,
-    })
-    .onConflictDoNothing({ target: allowanceLedger.refId });
+  const mirror: LegacyMirror = {
+    table: "allowance_ledger",
+    action,
+    units,
+    refId,
+    note,
+  };
+  await grant({
+    scope: { userId },
+    cents: units,
+    source: ALLOWANCE_SOURCE,
+    // The unified credit_ledger.ref_id must not collide with the legacy allowance
+    // ref_id (kept identical historically). Namespace the unified side so the two
+    // unique indices are independent; the mirror keeps the bare legacy refId.
+    refId: `allowance_grant:${refId}`,
+    kind: "grant",
+    legacyMirror: mirror,
+    tx,
+  });
 }

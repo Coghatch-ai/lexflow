@@ -71,21 +71,30 @@ describe("K3 — replay guard sentinel for allowance + subscription kinds", () =
     expect(hasCtxForm || hasDirectForm).toBe(true);
   });
 
-  it("allowance kind inserts sentinel into creditLedger before grantAllowance", () => {
-    // The sentinel insert must come before grantAllowance in the source.
-    const sentinelIdx = src.indexOf("allowance:${code}");
+  it("allowance kind claims the replay sentinel (money-core grant) before grantAllowance", () => {
+    // D2: the sentinel is now a money-core grant() claim (cents:0), joining the tx,
+    // then claimReplay throws on a replay. It must come before grantAllowance.
+    const claimIdx = src.indexOf("claimReplay(res.applied);");
     const grantIdx = src.indexOf("grantAllowance(");
-    expect(sentinelIdx).toBeGreaterThan(-1);
+    expect(claimIdx).toBeGreaterThan(-1);
     expect(grantIdx).toBeGreaterThan(-1);
-    expect(sentinelIdx).toBeLessThan(grantIdx);
+    expect(claimIdx).toBeLessThan(grantIdx);
   });
 
-  it("subscription kind inserts sentinel into creditLedger before grantSubscription", () => {
-    const sentinelIdx = src.indexOf("subscription:${code}");
+  it("subscription kind claims the replay sentinel before grantSubscription", () => {
+    // The LAST claimReplay precedes grantSubscription (subscription is the final branch).
+    const claimIdx = src.lastIndexOf("claimReplay(res.applied);");
     const grantIdx = src.indexOf("grantSubscription(");
-    expect(sentinelIdx).toBeGreaterThan(-1);
+    expect(claimIdx).toBeGreaterThan(-1);
     expect(grantIdx).toBeGreaterThan(-1);
-    expect(sentinelIdx).toBeLessThan(grantIdx);
+    expect(claimIdx).toBeLessThan(grantIdx);
+  });
+
+  it("replay of a claimed coupon THROWS so the atomic cap increment rolls back", () => {
+    // claimReplay(applied=false) throws FORBIDDEN → the whole tx (incl. Rail-1 cap
+    // increment) rolls back → no redemption slot is permanently burned.
+    expect(src).toContain("const claimReplay");
+    expect(src).toMatch(/if \(!applied\)[\s\S]*?Você já resgatou este cupom/);
   });
 
   it("double-redeem error message preserved", () => {
@@ -103,12 +112,18 @@ describe("K8 — coupon redeem enforces the reserved-prefix guard before any led
     expect(src).toContain('from "../../../shared/domain/credit-reserved"');
   });
 
-  it("asserts replayRefId before the first creditLedger insert", () => {
+  it("asserts replayRefId before the first money-core grant claim", () => {
+    // D2: the raw tx.insert(creditLedger) sentinels are gone; the first ledger write
+    // is now a money-core grant() claim. The guard must still precede it.
     const guardIdx = src.indexOf("assertExternalRefId(replayRefId");
-    const firstInsertIdx = src.indexOf("tx.insert(creditLedger)");
+    const firstGrantIdx = src.indexOf("await grant({");
     expect(guardIdx).toBeGreaterThan(-1);
-    expect(firstInsertIdx).toBeGreaterThan(-1);
-    expect(guardIdx).toBeLessThan(firstInsertIdx);
+    expect(firstGrantIdx).toBeGreaterThan(-1);
+    expect(guardIdx).toBeLessThan(firstGrantIdx);
+  });
+
+  it("no raw tx.insert(creditLedger) survives in the coupon rails (one-writer, D2)", () => {
+    expect(src).not.toContain("tx.insert(creditLedger)");
   });
 });
 

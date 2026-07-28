@@ -17,8 +17,8 @@ import { TRPCError } from "@trpc/server";
 import { db } from "../db/client";
 import { creditLedger } from "../../drizzle/schema";
 import { CREDIT_COSTS, type CreditAction } from "../../shared/domain/credits";
-import { assertExternalRefId } from "../../shared/domain/credit-reserved";
 import { atomicDebitCredits } from "./ledger-debit";
+import { grant, refund } from "./credit-charge";
 
 export async function getBalance(userId: string): Promise<number> {
   const [row] = await db
@@ -54,9 +54,16 @@ export async function debitCredits(
 
 // Refund a failed job by its jobId. Looks up the original spend row to mirror
 // its amount; no-op when the spend doesn't exist or the refund already applied.
+//
+// D2 (epic #50): the money-BACK-IN write is routed through the money core's
+// dormant refund() writer (kind=refund) — a raw credit_ledger insert here is now
+// illegal (one-writer enforcement). refund() writes the legacy `delta` column too
+// (positive), so the pre-D3 SPEND admission (getBalance = SUM(delta)) still sees
+// the reversal. The spend row this reverses still lives on the legacy credit rail
+// until D3 retires debit-at-admission.
 export async function refundCredits(userId: string, jobId: string): Promise<void> {
   const [spend] = await db
-    .select({ delta: creditLedger.delta, action: creditLedger.action })
+    .select({ delta: creditLedger.delta })
     .from(creditLedger)
     .where(
       and(
@@ -67,43 +74,34 @@ export async function refundCredits(userId: string, jobId: string): Promise<void
     )
     .limit(1);
   if (spend === undefined) return;
-  await db
-    .insert(creditLedger)
-    .values({
-      userId,
-      delta: -spend.delta,
-      action: "refund",
-      refId: `refund:${jobId}`,
-      note: spend.action,
-      createdBy: userId,
-      lastUpdBy: userId,
-    })
-    .onConflictDoNothing({ target: creditLedger.refId });
+  await refund({
+    scope: { userId },
+    cents: -spend.delta, // spend.delta is negative → positive money-back-in
+    source: "legacy",
+    refId: `refund:${jobId}`,
+  });
 }
 
 // Idempotent positive grant (admin). refId dedupes replays.
+//
+// D2 (epic #50): routed through the money core's grant() writer (kind=grant,
+// source=admin) so the unified credit_ledger + credit_balances are updated in one
+// tx by the single writer. grant() writes the legacy `delta` column too, so the
+// pre-D3 credit-rail admission (getBalance = SUM(delta)) still sees admin grants.
+// The reserved-prefix guard now lives inside grant(); passing a null refId is not
+// supported by the core (idempotency needs a key) — admin always supplies one.
 export async function grantCredits(
   userId: string,
   credits: number,
-  action: "admin_grant",
-  refId: string | null,
-  note?: string,
+  _action: "admin_grant",
+  refId: string,
+  _note?: string,
 ): Promise<void> {
-  // RESERVED-PREFIX GUARD. This is a LIVE credit_ledger writer taking a caller-
-  // supplied refId; a `charge:`/`legacy_allowance:`-prefixed refId would squat an
-  // internal namespace and later no-op a fail-loud paired insert. Reject at the
-  // boundary (internal charge()/backfill own those prefixes, not this path).
-  assertExternalRefId(refId, "grantCredits()");
-  await db
-    .insert(creditLedger)
-    .values({
-      userId,
-      delta: credits,
-      action,
-      refId,
-      note: note ?? null,
-      createdBy: userId,
-      lastUpdBy: userId,
-    })
-    .onConflictDoNothing({ target: creditLedger.refId });
+  await grant({
+    scope: { userId },
+    cents: credits,
+    source: "admin",
+    refId,
+    kind: "grant",
+  });
 }
