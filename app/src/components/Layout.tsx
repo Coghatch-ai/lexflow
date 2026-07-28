@@ -49,6 +49,14 @@ function isActive(itemPath: string, currentPath: string): boolean {
   return itemPath === '/' ? currentPath === '/' : currentPath.startsWith(itemPath);
 }
 
+// Pages that fill the whole main content area (no max-w constraint). Opt-in only;
+// every other page keeps the default centered max-w-[78rem] wrapper.
+const fullBleedPaths = ['/admin/questions'];
+
+function isFullBleed(currentPath: string): boolean {
+  return fullBleedPaths.some((p) => currentPath.startsWith(p));
+}
+
 export default function Layout({ children }: LayoutProps): ReactElement {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [location, navigate] = useLocation();
@@ -201,7 +209,15 @@ export default function Layout({ children }: LayoutProps): ReactElement {
         </header>
 
         {/* Page content */}
-        <div className="px-4 md:px-8 py-6 md:py-8 max-w-[78rem] mx-auto">{children}</div>
+        <div
+          className={
+            isFullBleed(location)
+              ? 'px-4 md:px-8 py-6 md:py-8'
+              : 'px-4 md:px-8 py-6 md:py-8 max-w-[78rem] mx-auto'
+          }
+        >
+          {children}
+        </div>
 
         <footer className="px-8 pb-8 pt-2 text-xs text-ink-mute">
           <span className="inline-block h-1 w-1 rounded-full bg-seal align-middle mr-2" />

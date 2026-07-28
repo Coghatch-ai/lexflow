@@ -157,7 +157,7 @@ function QuestionsList({
               {(query.data?.rows ?? []).map((row) => (
                 <tr key={row.id} className="hover:bg-paper-sink transition-colors">
                   <td className="px-3 py-2.5 font-mono text-xs text-ink-mute whitespace-nowrap">{row.id}</td>
-                  <td className="px-3 py-2.5 text-ink max-w-xs">
+                  <td className="px-3 py-2.5 text-ink">
                     <p className="line-clamp-2">{row.questionText}</p>
                   </td>
                   <td className="px-3 py-2.5 text-ink-soft whitespace-nowrap">
@@ -314,5 +314,8 @@ function QuestionsPanel(): ReactElement {
 }
 
 export function AdminQuestionsPage(): ReactElement {
+  // Full-bleed handled by Layout: `/admin/questions` is in Layout's fullBleedPaths,
+  // so its content wrapper drops `max-w-[78rem] mx-auto` and this page fills the
+  // whole main content area (right of the sidebar). No viewport math here.
   return <AdminGate><QuestionsPanel /></AdminGate>;
 }
