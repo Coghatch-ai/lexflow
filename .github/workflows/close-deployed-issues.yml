@@ -23,6 +23,11 @@ jobs:
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.head_branch == 'main'
     runs-on: ubuntu-latest
+    # PROD-scoped so this job can read the environment secret AWS_ROLE_ARN
+    # (used to assume the OIDC role for the requester-email S3 enqueue).
+    # Without it, secrets.AWS_ROLE_ARN is empty and configure-aws-credentials
+    # fails with "Could not load credentials from any providers".
+    environment: PROD
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       REPO: ${{ github.repository }}
