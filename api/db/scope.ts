@@ -46,12 +46,15 @@ const TABLE_SCOPE: Record<string, ScopeType> = {
   credit_ledger: { type: "user" },
   // Monetization — S1 + S2 (issue #51)
   subscriptions: { type: "user" },
-  allowance_ledger: { type: "user" },
-  free_daily_counter: { type: "user" },
-  // Monetization foundation port — D1 (epic #50). Per-user materialized balance
-  // and idempotent charge attribution.
+  // Unified credit engine (epic #50). Per-user materialized balance + idempotent
+  // charge attribution. (The old allowance rail table + the free-tier daily counter
+  // table were DELETED in D4 — one unified engine; allowance is now
+  // source=subscription grants.)
   credit_balances: { type: "user" },
   credit_charges: { type: "user" },
+  // Single-use relay-job consume marker (Codex #61 round 3) — one done job backs
+  // exactly one persisted AI output, bound to one target.
+  ai_job_consumption: { type: "user" },
 };
 
 function tableName(table: PgTable): string {

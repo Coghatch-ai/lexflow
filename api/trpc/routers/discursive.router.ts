@@ -23,6 +23,10 @@ import {
 } from "../../../drizzle/schema";
 import { protectedProcedure, router } from "../procedures";
 import { QUESTION_TYPES } from "../../../shared/domain/discursive-question";
+import { getRelayJob } from "../../lib/relay";
+import { resolveMeteringModel, consumeAndCharge } from "../../lib/ai-metering";
+import type { CreditTx } from "../../lib/credit-charge";
+import { parseGradeResponse } from "../../../shared/domain/ai-eval";
 
 // Catalog fields safe to expose before the student submits — deliberately omits
 // modelAnswer + legalBasis (the answer key), which only answerKey() returns.
@@ -49,8 +53,16 @@ const listInput = z.object({
 });
 
 // Persisting one answer: upsert by `answerId` (UPDATE) or create it (INSERT).
-// aiScore/aiFeedback are the browser-parsed grade (client-asserted, like selfScore);
-// both null ⇒ no grade written this call (e.g. finalizing self-scores at finish).
+//
+// AI GRADE IS SERVER-DERIVED, NEVER CLIENT-ASSERTED (Codex #61 round 3). The client
+// NEVER sends aiScore/aiFeedback — those are the trust hole (a client could forge the
+// grade or omit it to persist AI output while dodging the charge). Instead, when an AI
+// grade rides on this call the client sends ONLY the `gradeJobId` that produced it;
+// saveAnswer re-reads that relay job SERVER-SIDE, requires it be `done` and owned by
+// ctx.userId, parses {score,feedback} from the relay result itself, and only then
+// persists + settles (refId `grade:<gradeJobId>`). A jobless save is MANUAL only
+// (self-score / finalize) and can carry NO AI grade at all — so a delivered grade can
+// never be persisted without a verified job AND its charge.
 const saveAnswerInput = z.object({
   answerId: z.string().uuid().optional(),
   questionId: z.string().min(1),
@@ -58,15 +70,23 @@ const saveAnswerInput = z.object({
   selfScore: z.number().min(0).nullable().default(null),
   timeSpent: z.number().int().min(0).default(0),
   sessionId: z.string().uuid().nullable().default(null),
-  aiScore: z.number().min(0).nullable().default(null),
-  aiFeedback: z.string().min(1).nullable().default(null),
+  // Present ⇒ an AI grade rides on this call: server re-reads the job, derives the
+  // grade from the relay result, and charges `grade:<gradeJobId>`. Absent ⇒ a manual
+  // save (no AI fields are accepted or written on this path).
+  gradeJobId: z.string().uuid().optional(),
 });
 
 type AiGrade = { aiScore: number; aiFeedback: string };
 
+// The transaction executor upsertAnswer writes through. The AI-graded path passes
+// its open tx so the persist joins the consume-marker + charge in ONE atomic unit
+// (Codex #61 round 3); the manual path passes the plain db handle.
+type Exec = CreditTx | typeof db;
+
 // Upsert one user answer. ai_* columns are written only when a grade is supplied;
 // a no-grade call (e.g. finalizing an ungraded answer) leaves any existing grade intact.
 async function upsertAnswer(
+  exec: Exec,
   ctx: { userId: string; db: ScopedDb },
   input: {
     answerId?: string | undefined;
@@ -87,7 +107,7 @@ async function upsertAnswer(
       lastUpdAt: now,
       lastUpdBy: ctx.userId,
     };
-    const [row] = await db
+    const [row] = await exec
       .update(userDiscursiveAnswers)
       .set(
         input.ai !== null
@@ -102,7 +122,7 @@ async function upsertAnswer(
       throw new TRPCError({ code: "NOT_FOUND", message: "Resposta não encontrada" });
     return row.id;
   }
-  const [row] = await db
+  const [row] = await exec
     .insert(userDiscursiveAnswers)
     .values({
       userId: ctx.userId,
@@ -213,21 +233,111 @@ export const discursiveRouter = router({
   // Persist (or update) one answer, optionally with its AI grade. Client-asserted
   // (like the self-score) and Clerk-gated via protectedProcedure — the browser
   // parses {score, feedback} from the relay's text and sends them here.
+  //
+  // AUTHORITATIVE grade settlement lives HERE (Codex #61): when a gradeJobId rides
+  // on the call, we re-read the relay result SERVER-SIDE (delivery authoritative,
+  // never client-asserted) and fire the money-core charge keyed by `grade:<jobId>`.
+  // This is the consume/persist proc the client MUST call — so a delivered grade
+  // can never be persisted without being charged, and there is no separate optional
+  // settle proc. Idempotent by refId: a double-persist of the same jobId charges
+  // exactly once (credit_charges ON CONFLICT). The consume marker + charge + persist
+  // commit in ONE tx via consumeAndCharge, so persist can never outlive its charge.
   saveAnswer: protectedProcedure.input(saveAnswerInput).mutation(async ({ ctx, input }) => {
-    const ai: AiGrade | null =
-      input.aiScore !== null && input.aiFeedback !== null
-        ? { aiScore: input.aiScore, aiFeedback: input.aiFeedback }
-        : null;
-    const answerId = await upsertAnswer(ctx, {
-      answerId: input.answerId,
-      questionId: input.questionId,
-      answerText: input.answerText,
-      selfScore: input.selfScore,
-      timeSpent: input.timeSpent,
-      sessionId: input.sessionId,
-      ai,
+    // No gradeJobId ⇒ MANUAL save (self-score / finalize). No AI grade is derived or
+    // written on this path — the ai_* columns stay untouched (upsert `ai: null`).
+    if (input.gradeJobId === undefined) {
+      const answerId = await upsertAnswer(db, ctx, {
+        answerId: input.answerId,
+        questionId: input.questionId,
+        answerText: input.answerText,
+        selfScore: input.selfScore,
+        timeSpent: input.timeSpent,
+        sessionId: input.sessionId,
+        ai: null,
+      });
+      return { answerId, aiScore: null, aiFeedback: null };
+    }
+
+    // AI-graded save: the grade is SERVER-DERIVED from the relay job, NEVER trusted
+    // from the client. Re-read the job (scoped to ctx.userId, so a foreign job is
+    // pending/NOT-FOUND here) and REQUIRE it be `done` before anything is persisted.
+    // A missing/random/pending jobId → reject with NO AI fields written and NO charge.
+    const job = await getRelayJob(ctx.userId, input.gradeJobId);
+    if (job.status === "pending") {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "A avaliação ainda está em andamento" });
+    }
+    if (job.status === "error") {
+      throw new TRPCError({ code: "BAD_GATEWAY", message: job.error });
+    }
+    // maxPoints bounds the derived score (parseGradeResponse clamps to it).
+    const [q] = await db
+      .select({ maxPoints: oabDiscursiveQuestions.maxPoints })
+      .from(oabDiscursiveQuestions)
+      .where(eq(oabDiscursiveQuestions.id, input.questionId))
+      .limit(1);
+    if (q === undefined) {
+      throw new TRPCError({ code: "NOT_FOUND", message: "Questão não encontrada" });
+    }
+    const raw = job.data as { text: string };
+    const graded = parseGradeResponse(raw.text, q.maxPoints);
+    if (graded === null) {
+      throw new TRPCError({ code: "BAD_GATEWAY", message: "A IA retornou um formato inesperado" });
+    }
+    const ai: AiGrade = { aiScore: graded.score, aiFeedback: graded.feedback };
+
+    // ATOMIC persist + single-use consume + charge (Codex #61 round 3). The consume
+    // marker + charge + AI-field persist all run in ONE transaction: they commit
+    // together or roll back together, so a persisted grade can never outlive its
+    // charge. The marker is BOUND to questionId (the grade's stable target): a replay
+    // of the same gradeJobId onto a DIFFERENT question is REJECTED (CONFLICT); onto
+    // the SAME question it is an idempotent no-op (persist + charge already committed
+    // once). refId `grade:<jobId>` is shared by the marker (PK) and charge().
+    const gradeJobId = input.gradeJobId;
+    const refId = `grade:${gradeJobId}`;
+    const answerId = await db.transaction(async (tx) => {
+      const outcome = await consumeAndCharge({
+        tx,
+        userId: ctx.userId,
+        jobId: gradeJobId,
+        targetId: input.questionId,
+        source: "grade",
+        refId,
+        // Metering model MUST be server-derived: a client-supplied model would let
+        // an unknown string force rawCents=0 (costFor→0) and dodge the charge.
+        model: resolveMeteringModel(),
+        // Grade output is the graded feedback (JSON) — meter on the prompt's output
+        // budget as a stable per-action usage proxy until real token counts flow.
+        usage: { kind: "tokens", amount: 2048 },
+      });
+      if (outcome === "replay") {
+        // Same job already consumed onto this question — return the already-persisted
+        // answer without re-persisting (idempotent). Prefer the client answerId when
+        // supplied; else the most recent graded answer for this (user, question).
+        if (input.answerId !== undefined) return input.answerId;
+        const [prior] = await tx
+          .select({ id: userDiscursiveAnswers.id })
+          .from(userDiscursiveAnswers)
+          .where(
+            and(
+              eq(userDiscursiveAnswers.questionId, input.questionId),
+              ctx.db.conditions(userDiscursiveAnswers),
+            ),
+          )
+          .orderBy(desc(userDiscursiveAnswers.aiGradedAt))
+          .limit(1);
+        return prior?.id ?? input.questionId;
+      }
+      return upsertAnswer(tx, ctx, {
+        answerId: input.answerId,
+        questionId: input.questionId,
+        answerText: input.answerText,
+        selfScore: input.selfScore,
+        timeSpent: input.timeSpent,
+        sessionId: input.sessionId,
+        ai,
+      });
     });
-    return { answerId, aiScore: ai?.aiScore ?? null, aiFeedback: ai?.aiFeedback ?? null };
+    return { answerId, aiScore: ai.aiScore, aiFeedback: ai.aiFeedback };
   }),
 
   // Close a prova session (endedAt + total self-score, computed client-side from

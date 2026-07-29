@@ -20,9 +20,8 @@ import {
 } from "../../../drizzle/schema";
 import { enqueueRelayJob, getRelayJob, mintJobId } from "../../lib/relay";
 import { resolveAiPrompt } from "../../lib/ai-prompts";
-import { assertCredits, debitCredits, refundCredits } from "../../lib/credits";
-import { CREDIT_COSTS } from "../../../shared/domain/credits";
-import { admissionRead, resolveMeteringModel, settleDelivered } from "../../lib/ai-metering";
+import { admit } from "../../lib/admission";
+import { resolveMeteringModel, consumeAndCharge } from "../../lib/ai-metering";
 import { accuracyPct } from "../../../shared/domain/scoring";
 import { LOV_SEED } from "../../../shared/data/lov";
 import {
@@ -174,25 +173,15 @@ export const coachRouter = router({
         });
       }
 
-      // D3 shadow admission-read (epic #50): observe-only, never denies. The old
-      // assertCredits below stays authoritative; delivered-only charge is in finalize.
-      await admissionRead(ctx.userId);
-      await assertCredits(ctx.userId, "coach");
+      // Admission: DENY at balance <= 0 (grace-at-zero). Fail-closed burst on read
+      // fail. Charge settles post-delivery in finalize.
+      await admit(ctx.userId);
       const payload = resolveAiPrompt("oab-coach", buildCoachVariables(data));
 
-      // Spend order (mirrors allowance rail — issue #55):
-      //   mintJobId → assertCredits (above) → debitCredits BEFORE enqueue
-      //   → enqueueRelayJob → [on throw: refundCredits]
+      // Nothing spent at enqueue — the charge settles post-delivery in finalize
+      // (an undelivered job is never charged).
       const coachJobId = mintJobId();
-      await debitCredits(ctx.userId, "coach", coachJobId);
-
-      let jobId: string;
-      try {
-        jobId = await enqueueRelayJob(ctx.userId, payload, coachJobId);
-      } catch (enqueueErr) {
-        await refundCredits(ctx.userId, coachJobId);
-        throw enqueueErr;
-      }
+      const jobId = await enqueueRelayJob(ctx.userId, payload, coachJobId);
 
       return { cached: false as const, digest: null, jobId, statsSnapshot: data };
     }),
@@ -218,25 +207,33 @@ export const coachRouter = router({
         });
       }
       const snapshot = await assembleStudentData(ctx.userId);
-      await db.insert(aiCoachDigests).values({
-        userId: ctx.userId,
-        digest: parsed,
-        statsSnapshot: snapshot,
-        createdBy: ctx.userId,
-        lastUpdBy: ctx.userId,
-      });
-      // D3 delivered-only SHADOW charge (epic #50): relay result confirmed done
-      // above (pending/error threw), so delivered=true. Writes nothing in shadow;
-      // the old credit debit at generate stays authoritative.
-      await settleDelivered({
-        userId: ctx.userId,
-        source: "coach",
-        refId: `coach:${input.jobId}`,
-        model: resolveMeteringModel(),
-        usage: { kind: "tokens", amount: 1200 },
-        delivered: true,
-        oldDebitCents: CREDIT_COSTS.coach,
-        action: "coach",
+      // ATOMIC persist + single-use consume + charge (Codex #61 round 4). The consume
+      // marker + charge + digest INSERT all run in ONE transaction: they commit or roll
+      // back together, so a persisted digest can never outlive its charge. The marker is
+      // BOUND to input.jobId (the stable single-digest-per-job target): a replay of the
+      // same jobId REJECTS a second digest for a different target and is an idempotent
+      // no-op for the same target — so ONE job persists at most ONE digest (a replay must
+      // NOT insert another). refId `coach:<jobId>` is shared by the marker (PK) + charge().
+      await db.transaction(async (tx) => {
+        const outcome = await consumeAndCharge({
+          tx,
+          userId: ctx.userId,
+          jobId: input.jobId,
+          targetId: input.jobId,
+          source: "coach",
+          refId: `coach:${input.jobId}`,
+          // Metering model MUST be server-derived (client model → costFor=0 dodge).
+          model: resolveMeteringModel(),
+          usage: { kind: "tokens", amount: 1200 },
+        });
+        if (outcome === "replay") return; // digest already inserted + charged once.
+        await tx.insert(aiCoachDigests).values({
+          userId: ctx.userId,
+          digest: parsed,
+          statsSnapshot: snapshot,
+          createdBy: ctx.userId,
+          lastUpdBy: ctx.userId,
+        });
       });
       return { digest: parsed };
     }),

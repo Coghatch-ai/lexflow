@@ -94,6 +94,12 @@ export default function DiscursiveRunner({
     const parsed = parseGradeResponse((data as { text: string }).text, current.maxPoints);
     if (parsed === null) throw new Error("Não foi possível interpretar a avaliação da IA");
     setAiResult(parsed); // inline display first — persistence is fire-and-forget
+    // gradeJobId anchors SERVER-SIDE settlement inside saveAnswer (refId grade:<jobId>):
+    // the charge fires on the persist path, not a separate client call. The grade
+    // itself is NOT sent — saveAnswer re-reads the relay job by gradeJobId and DERIVES
+    // {score,feedback} server-side (Codex #61), so the client can neither forge the
+    // grade nor persist AI output without the charge. The inline `parsed` above is
+    // display-only.
     gradePersistRef.current = saveAnswer
       .mutateAsync({
         answerId: answerIdRef.current ?? undefined,
@@ -102,8 +108,7 @@ export default function DiscursiveRunner({
         selfScore,
         timeSpent: timer,
         sessionId,
-        aiScore: parsed.score,
-        aiFeedback: parsed.feedback,
+        gradeJobId: jobId,
       })
       .then((r) => { answerIdRef.current = r.answerId; })
       .catch((err: unknown) => { console.error("Falha ao salvar avaliação da IA", err); });

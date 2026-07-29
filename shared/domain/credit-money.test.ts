@@ -16,6 +16,7 @@ import {
   simulateCharge,
   simulateGrant,
   ledgerSum,
+  walletPercent,
   MULT_DEFAULT_X100,
   MULT_MAX_X100,
   RAW_CENTS_CAP,
@@ -147,5 +148,39 @@ describe("D1 bag crossing 1c — exactly one consumption row = balance decrement
     expect(acct.balanceCents).toBe(-1); // decrement == flushed row
     expect(acct.bagCents).toBeCloseTo(0.2, 10);
     expect(acct.balanceCents).toBe(ledgerSum(acct));
+  });
+});
+
+// ─── D4 wallet fuel gauge ────────────────────────────────────────────────────
+
+describe("walletPercent — server-computed fuel gauge percent [0,100]", () => {
+  it("full wallet at the reference anchor → 100", () => {
+    expect(walletPercent(1000, 1000)).toBe(100);
+  });
+  it("half the reference → 50", () => {
+    expect(walletPercent(500, 1000)).toBe(50);
+  });
+  it("empty balance → 0", () => {
+    expect(walletPercent(0, 1000)).toBe(0);
+    expect(walletPercent(-50, 1000)).toBe(0);
+  });
+  it("never funded (reference 0) → 0, never divide-by-zero", () => {
+    expect(walletPercent(0, 0)).toBe(0);
+    expect(walletPercent(100, 0)).toBe(0);
+  });
+  it("balance above the reference (fresh grant, not re-anchored) clamps to 100", () => {
+    expect(walletPercent(2000, 1000)).toBe(100);
+  });
+  it("non-finite inputs → 0 (never throws / NaN)", () => {
+    expect(walletPercent(Number.NaN, 1000)).toBe(0);
+    expect(walletPercent(500, Number.POSITIVE_INFINITY)).toBe(0);
+  });
+  it("always returns an integer in [0,100]", () => {
+    for (let b = -100; b <= 1200; b += 37) {
+      const p = walletPercent(b, 1000);
+      expect(Number.isInteger(p)).toBe(true);
+      expect(p).toBeGreaterThanOrEqual(0);
+      expect(p).toBeLessThanOrEqual(100);
+    }
   });
 });

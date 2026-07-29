@@ -5,7 +5,7 @@
 // coupons + admin are the only grant paths this build.
 //
 // Grant logic:
-//   1. Insert a sentinel row into allowance_ledger (delta=0,
+//   1. Insert a zero-cents sentinel grant into the unified ledger (cents=0,
 //      refId=`sub:sentinel:<idempotencyKey>`) BEFORE mutating the subscription row.
 //      The unique ref_id index makes this insert a no-op (onConflictDoNothing) on
 //      retry — short-circuit: skip the subscription upsert and allowance top-up.
@@ -41,12 +41,28 @@ import { grantAllowance } from "./allowance";
 import { grant, type CreditTx } from "./credit-charge";
 import { getConfigNumber, CONFIG_KEYS } from "./pricing-config";
 import { PLAN_PAID } from "../../shared/domain/allowance";
-import { hashLockKey } from "./ledger-debit";
 
 // Executor type — the money-core writers + the raw SQL here all run on the SAME
 // transaction. CreditTx (a drizzle tx) satisfies both `.execute`/`.insert` and the
 // money core's tx param, so a single type flows through the whole grant chain.
 type DbOrTx = CreditTx;
+
+/**
+ * Stable 32-bit unsigned integer derived from (userId, namespace) via djb2 — the
+ * pg_advisory_xact_lock key. Different namespaces yield different keys so unrelated
+ * per-user locks do not needlessly block each other. Returns a safe JS number
+ * (max 2^32-1 < Number.MAX_SAFE_INTEGER). Local to this file (the last advisory-lock
+ * user after the no-legacy cutover removed the spend rails).
+ */
+export function hashLockKey(userId: string, namespace: string): number {
+  const str = `${userId}|${namespace}`;
+  let hash = 5381;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) + hash) ^ str.charCodeAt(i);
+    hash = hash >>> 0;
+  }
+  return hash;
+}
 
 /**
  * Internal implementation — all writes take a required executor so every
@@ -76,16 +92,16 @@ async function grantSubscriptionImpl(
   // same periodStart → second write overwrites the first extension. The
   // advisory lock prevents this: the second concurrent grant blocks here until
   // the first commits, then sees the updated current_period_end and extends
-  // forward correctly. Namespace "subscription" ≠ "allowance"/"credit" so this
-  // lock does not collide with the spend-rail locks in ledger-debit.ts.
+  // forward correctly. The "subscription" namespace is unique to this file (the
+  // last advisory-lock user after the no-legacy cutover removed the spend rails).
   const subLockKey = hashLockKey(userId, "subscription");
   await executor.execute(sql`SELECT pg_advisory_xact_lock(${subLockKey})`);
 
   // F3 sentinel — a zero-cents grant() into the UNIFIED credit_ledger BEFORE
-  // touching the subscription row (D2: raw allowance_ledger writes are illegal
-  // outside the money core, so the sentinel is now a core write too). grant() is
-  // idempotent by ref_id: applied=false means the key was already committed → this
-  // is a retry → short-circuit before the period extension.
+  // touching the subscription row (the money core is the ONLY ledger writer, so the
+  // sentinel is a core write too). grant() is idempotent by ref_id: applied=false
+  // means the key was already committed → this is a retry → short-circuit before the
+  // period extension.
   //
   // The sentinel refId `sub:sentinel:<key>` is DISTINCT from the real allowance
   // top-up refId (`<key>`), so the sentinel never shadows the grant. cents=0 keeps

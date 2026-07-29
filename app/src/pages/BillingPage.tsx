@@ -4,15 +4,14 @@
 // Shows: subscription plan status, credit balance, allowance balance, ledger/history,
 // redeem coupon.
 //
-// Reads:
-//   credits.balance            → {balance: number, costs: {tutor, coach}}
+// Reads (D4 — one unified wallet):
+//   credits.wallet             → {percent: number, periodEnd: string | null} (fuel gauge)
 //   credits.ledger             → ledger rows (newest first, limit 50)
-//   credits.allowanceBalance   → {balance: number, periodEnd: string | null}  (#56)
-//   credits.subscriptionStatus → {plan, status, currentPeriodStart, currentPeriodEnd}  (#56)
+//   credits.subscriptionStatus → {plan, status, currentPeriodStart, currentPeriodEnd}
 //   credits.redeem             → mutation (all 3 kinds)
 
 import type { ReactElement } from 'react';
-import { CreditCard, Coins, Zap, Tag, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
+import { CreditCard, Zap, Tag, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
 import { trpc } from '../shared/lib/trpc';
 import RedeemCoupon from '../shared/components/RedeemCoupon';
 
@@ -99,50 +98,43 @@ function PlanCard({ plan, status, periodEnd, isLoading }: PlanCardProps): ReactE
   );
 }
 
-interface BalanceCardsProps {
-  creditBalance: number | undefined;
-  allowanceBalance: number | undefined;
-  allowancePeriodEnd: string | null | undefined;
+interface WalletCardProps {
+  percent: number | undefined;
+  periodEnd: string | null | undefined;
   isLoading: boolean;
-  isAllowanceLoading: boolean;
 }
 
-function BalanceCards({
-  creditBalance,
-  allowanceBalance,
-  allowancePeriodEnd,
-  isLoading,
-  isAllowanceLoading,
-}: BalanceCardsProps): ReactElement {
+// One unified wallet fuel gauge (D4). The server sends a percent [0,100] only —
+// no magnitude reaches the client, and the client never recomputes reset logic.
+function WalletCard({ percent, periodEnd, isLoading }: WalletCardProps): ReactElement {
+  const pct = percent ?? 0;
+  const isLow = percent !== undefined && percent <= 15;
   return (
-    <div className="grid gap-4 sm:grid-cols-2">
-      {/* Credit balance — wired to credits.balance */}
-      <div className="rounded-xl border border-line bg-surface p-6 space-y-2">
-        <div className="flex items-center gap-2">
-          <Coins className="w-4 h-4 text-seal-bright" />
-          <p className="eyebrow">Créditos</p>
-        </div>
-        <p className="font-display text-4xl font-bold tabular-nums leading-none text-ink">
-          {isLoading ? '…' : (creditBalance ?? '—')}
-        </p>
-        <p className="text-xs text-ink-mute">Para assistente e coach (não expira)</p>
+    <div className="rounded-xl border border-line bg-surface p-6 space-y-3">
+      <div className="flex items-center gap-2">
+        <Zap className="w-4 h-4 text-seal-bright" />
+        <p className="eyebrow">Saldo de IA</p>
       </div>
-
-      {/* Allowance balance — wired to credits.allowanceBalance (#56) */}
-      <div className="rounded-xl border border-line bg-surface p-6 space-y-2">
-        <div className="flex items-center gap-2">
-          <Zap className="w-4 h-4 text-ink-soft" />
-          <p className="eyebrow">IA Principal</p>
-        </div>
-        <p className="font-display text-4xl font-bold tabular-nums leading-none text-ink">
-          {isAllowanceLoading ? '…' : (allowanceBalance ?? '—')}
-        </p>
-        <p className="text-xs text-ink-mute">
-          {allowancePeriodEnd !== null && allowancePeriodEnd !== undefined
-            ? `Período até ${formatDate(allowancePeriodEnd)}`
-            : 'Para explicações e correções de fase 2'}
-        </p>
+      <div
+        className="h-3 w-full overflow-hidden rounded-full bg-paper border border-line"
+        role="progressbar"
+        aria-valuenow={pct}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-label="Saldo de IA"
+      >
+        <div
+          className={`h-full rounded-full transition-all ${isLow ? 'bg-red-500' : 'bg-seal-bright'}`}
+          style={{ width: `${String(isLoading ? 0 : pct)}%` }}
+        />
       </div>
+      <p className="text-xs text-ink-mute">
+        {isLoading
+          ? 'Carregando…'
+          : periodEnd !== null && periodEnd !== undefined
+            ? `${String(pct)}% — período até ${formatDate(periodEnd)}`
+            : `${String(pct)}% do seu saldo de IA`}
+      </p>
     </div>
   );
 }
@@ -216,16 +208,14 @@ function LedgerTable({ rows, isLoading }: LedgerTableProps): ReactElement {
 // ── BillingPage (default export) ──────────────────────────────────────────────
 
 export default function BillingPage(): ReactElement {
-  const balanceQuery = trpc.credits.balance.useQuery();
+  const walletQuery = trpc.credits.wallet.useQuery();
   const ledgerQuery = trpc.credits.ledger.useQuery();
-  const allowanceQuery = trpc.credits.allowanceBalance.useQuery();
   const subscriptionQuery = trpc.credits.subscriptionStatus.useQuery();
   const utils = trpc.useUtils();
 
   function handleRedeemSuccess(): void {
-    void utils.credits.balance.invalidate();
+    void utils.credits.wallet.invalidate();
     void utils.credits.ledger.invalidate();
-    void utils.credits.allowanceBalance.invalidate();
     void utils.credits.subscriptionStatus.invalidate();
   }
 
@@ -238,12 +228,10 @@ export default function BillingPage(): ReactElement {
         isLoading={subscriptionQuery.isLoading}
       />
 
-      <BalanceCards
-        creditBalance={balanceQuery.data?.balance}
-        allowanceBalance={allowanceQuery.data?.balance}
-        allowancePeriodEnd={allowanceQuery.data?.periodEnd}
-        isLoading={balanceQuery.isLoading}
-        isAllowanceLoading={allowanceQuery.isLoading}
+      <WalletCard
+        percent={walletQuery.data?.percent}
+        periodEnd={walletQuery.data?.periodEnd}
+        isLoading={walletQuery.isLoading}
       />
 
       {/* Redeem coupon */}

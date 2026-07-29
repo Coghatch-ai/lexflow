@@ -36,46 +36,33 @@ describe("new monetization tables present in schema-ai.ts", () => {
     expect(schemaSrc).toContain('"subscriptions"');
   });
 
-  it("allowance_ledger table exported", () => {
-    expect(schemaSrc).toContain("export const allowanceLedger");
-    expect(schemaSrc).toContain('"allowance_ledger"');
+  it("unified credit engine tables exported (credit_balances + credit_charges)", () => {
+    expect(schemaSrc).toContain("export const creditBalances");
+    expect(schemaSrc).toContain('"credit_balances"');
+    expect(schemaSrc).toContain("export const creditCharges");
+    expect(schemaSrc).toContain('"credit_charges"');
   });
 
-  it("free_daily_counter table exported", () => {
-    expect(schemaSrc).toContain("export const freeDailyCounter");
-    expect(schemaSrc).toContain('"free_daily_counter"');
+  it("D4 no-legacy: the old allowance rail + free-tier counter tables are GONE", () => {
+    expect(schemaSrc).not.toContain("export const allowanceLedger");
+    expect(schemaSrc).not.toContain("export const freeDailyCounter");
   });
 });
 
-// ── TABLE_SCOPE entries present (S1 + S2) ────────────────────────────────────
+// ── TABLE_SCOPE entries present ──────────────────────────────────────────────
 
-describe("TABLE_SCOPE entries for new user-owned tables", () => {
+describe("TABLE_SCOPE entries for user-owned monetization tables", () => {
   it("subscriptions is user-scoped", () => {
     expect(scopeSrc).toContain('subscriptions: { type: "user" }');
   });
 
-  it("allowance_ledger is user-scoped", () => {
-    expect(scopeSrc).toContain('allowance_ledger: { type: "user" }');
+  it("credit_balances + credit_charges are user-scoped", () => {
+    expect(scopeSrc).toContain('credit_balances: { type: "user" }');
+    expect(scopeSrc).toContain('credit_charges: { type: "user" }');
   });
 
-  it("free_daily_counter is user-scoped", () => {
-    expect(scopeSrc).toContain('free_daily_counter: { type: "user" }');
-  });
-});
-
-// ── Money invariants — allowance_ledger mirrors credit_ledger shape ──────────
-
-describe("allowance_ledger money invariants", () => {
-  it("has delta column (SUM-based balance)", () => {
-    expect(schemaSrc).toContain('"delta"');
-  });
-
-  it("has ref_id unique column (idempotency)", () => {
-    expect(schemaSrc).toContain('"ref_id"');
-  });
-
-  it("has action column", () => {
-    // 'action' appears in allowanceLedger block
-    expect(schemaSrc).toContain('"action"');
+  it("D4 no-legacy: the removed tables have NO TABLE_SCOPE entry", () => {
+    expect(scopeSrc).not.toContain("allowance_ledger:");
+    expect(scopeSrc).not.toContain("free_daily_counter:");
   });
 });

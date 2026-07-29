@@ -43,7 +43,7 @@ export default function RedeemCoupon({
       setSuccessMsg(msg);
       setErrorMsg(null);
       setCode("");
-      void utils.credits.balance.invalidate();
+      void utils.credits.wallet.invalidate();
       void utils.credits.ledger.invalidate();
       onSuccess?.();
     },

@@ -295,8 +295,8 @@ describe("S14 — [#55 Codex re-review] per-user advisory lock serializes first-
   // idempotency keys → period extended twice, not once) is needed pre-deploy;
   // no DB harness here — source-text guards are the strongest tractable proof.
 
-  it("hashLockKey imported from ledger-debit (reuse shared primitive)", () => {
-    expect(src).toContain('from "./ledger-debit"');
+  it("hashLockKey is defined locally (the last advisory-lock user after the no-legacy cutover)", () => {
+    expect(src).toContain("export function hashLockKey");
     expect(src).toContain("hashLockKey");
   });
 

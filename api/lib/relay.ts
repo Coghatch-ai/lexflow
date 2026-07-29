@@ -24,16 +24,15 @@ export type RelayJobStatus =
   | { status: "done"; data: unknown }
   | { status: "error"; error: string };
 
-/** Mint a jobId without dispatching any work. Use this to reserve an id before
- * asserting entitlement, so the assert can store the id for idempotent reversal
- * (F1+F2 fix — callers must call assertCoreAction BEFORE enqueueRelayJob). */
+/** Mint a jobId without dispatching any work. Use this to reserve an id before the
+ * admission check, so the job carries a stable id through settle. */
 export function mintJobId(): string {
   return randomUUID();
 }
 
-// Enqueue a relay job for `userId`. Accepts a pre-minted jobId so callers can
-// assert entitlement BEFORE dispatching work (pass the same id to assertCoreAction
-// first, then call this only after the claim/assert succeeds).
+// Enqueue a relay job for `userId`. Accepts a pre-minted jobId so callers can run
+// the admission check (api/lib/admission.ts) BEFORE dispatching work, then call this
+// only after admission succeeds.
 export async function enqueueRelayJob(
   userId: string,
   payload: object,

@@ -183,6 +183,20 @@
       "when": 1785263257014,
       "tag": "0025_orange_black_crow",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1785278468751,
+      "tag": "0026_brown_zzzax",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1785287129232,
+      "tag": "0027_open_punisher",
+      "breakpoints": true
     }
   ]
 }

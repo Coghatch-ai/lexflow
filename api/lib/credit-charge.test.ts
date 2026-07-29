@@ -1,6 +1,6 @@
 // api/lib/credit-charge.test.ts
 //
-// Source-text guards for the dormant D1 charge() engine (epic #50). The pure
+// Source-text guards for the AUTHORITATIVE charge() engine (D4, epic #50). The pure
 // money semantics are proven hermetically in shared/domain/credit-money.test.ts
 // (invariant / replay / sub-cent / bag-crossing over the in-memory model). This
 // file guards the PERSISTENCE contract that only exists at the SQL layer — the
@@ -10,20 +10,15 @@
 //   G2 — idempotency claim: INSERT credit_charges … ON CONFLICT (ref_id) DO
 //        NOTHING RETURNING; empty → replay early return (bag no re-accumulate).
 //   G3 — delivered:false → universal no-op, no transaction opened.
-//   G4 — dryRun → shadow, writes nothing (no INSERT inside the dryRun branch).
 //   G5 — ledger + balance writes are concentrated in this ONE file (single
 //        writer): the consumption row and the balance upsert live in the same tx.
-//   G6 — DORMANT: no call site imports charge() yet (D3 wires it).
+//   G6 — NO-LEGACY: no shadow/dryRun mode, no legacy allowance_ledger mirror.
 
 import { readFileSync } from "fs";
 import { join } from "path";
 import { describe, expect, it } from "vitest";
-import { execSync } from "child_process";
 import { grant } from "./credit-charge";
-import {
-  CHARGE_LEDGER_REF_PREFIX,
-  LEGACY_ALLOWANCE_REF_PREFIX,
-} from "../../shared/domain/credit-reserved";
+import { CHARGE_LEDGER_REF_PREFIX } from "../../shared/domain/credit-reserved";
 
 const src = readFileSync(join(import.meta.dirname, "credit-charge.ts"), "utf-8");
 
@@ -70,22 +65,25 @@ describe("G3 — delivered:false is a universal no-op (no tx)", () => {
   it("returns no-op before opening a transaction when !delivered", () => {
     expect(chargeSrc).toContain("if (!delivered)");
     const guardPos = chargeSrc.indexOf("if (!delivered)");
-    const txPos = chargeSrc.indexOf("db.transaction");
+    // charge() now opens its tx via runInTx (joins the caller's tx when supplied —
+    // Codex #61 round 3, so the AI persist + consume marker + charge form ONE unit).
+    const txPos = chargeSrc.indexOf("runInTx");
     expect(guardPos).toBeGreaterThan(-1);
     expect(guardPos).toBeLessThan(txPos); // guard precedes any tx
   });
 });
 
-describe("G4 — dryRun is shadow: writes nothing", () => {
-  it("dryRun branch returns before db.transaction and contains no INSERT", () => {
-    const dryPos = chargeSrc.indexOf("if (dryRun)");
-    const txPos = chargeSrc.indexOf("db.transaction");
-    expect(dryPos).toBeGreaterThan(-1);
-    expect(dryPos).toBeLessThan(txPos);
-    // The dryRun block (between `if (dryRun)` and the following `return db.transaction`)
-    // must not contain an INSERT.
-    const block = chargeSrc.slice(dryPos, txPos);
-    expect(block).not.toContain("INSERT");
+describe("G4 — NO-LEGACY: charge() is authoritative, no shadow/dryRun, no legacy mirror", () => {
+  it("charge() has no dryRun/shadow branch", () => {
+    expect(chargeSrc).not.toContain("dryRun");
+    expect(chargeSrc).not.toContain("shadow");
+    expect(chargeSrc).not.toMatch(/outcome:\s*"shadow"/);
+  });
+
+  it("the whole engine never writes the deleted allowance_ledger table (no legacy mirror)", () => {
+    expect(src).not.toContain("allowance_ledger");
+    expect(src).not.toContain("LegacyMirror");
+    expect(src).not.toContain("legacyMirror");
   });
 });
 
@@ -187,18 +185,6 @@ describe("G10 — grant() REJECTS a caller refId that squats a reserved internal
     ).rejects.toThrow(/reserved ledger prefix/);
   });
 
-  it("throws on a `legacy_allowance:`-prefixed refId", async () => {
-    await expect(
-      grant({
-        scope: { userId: "u" },
-        cents: 100,
-        source: "coupon",
-        refId: `${LEGACY_ALLOWANCE_REF_PREFIX}x`,
-        kind: "grant",
-      }),
-    ).rejects.toThrow(/reserved ledger prefix/);
-  });
-
   it("source-guard: the reject runs before db.transaction in grant()", () => {
     const grantPos = src.indexOf("export async function grant");
     const grantBody = src.slice(grantPos);
@@ -209,57 +195,67 @@ describe("G10 — grant() REJECTS a caller refId that squats a reserved internal
   });
 });
 
-describe("G6 — D2: the GRANT-side funding rails now wire the money core (charge() still dormant, D3)", () => {
-  it("the funding-rail files IMPORT credit-charge (grant/refund/expire wired in D2)", () => {
-    // D1 shipped charge()/grant() dormant; D2 routes the GRANT/refund/coupon/
-    // subscription/admin WRITE side through the money core. So the funding-rail
-    // files MUST now import it. (The SPEND `charge()` call sites are still D3.)
-    let out = "";
-    try {
-      out = execSync(
-        "git grep -l --untracked -e \"from ['\\\"].*credit-charge['\\\"]\" -- 'api/**/*.ts' 'shared/**/*.ts' 'app/**/*.ts' || true",
-        { cwd: join(import.meta.dirname, "..", ".."), encoding: "utf-8" },
-      );
-    } catch {
-      out = "";
-    }
-    const files = out
-      .split("\n")
-      .map((f) => f.trim())
-      .filter((f) => f.length > 0 && !f.endsWith(".test.ts"));
-    // The D2 grant-rail importers PLUS the D3 delivered-only metering door
-    // (api/lib/ai-metering.ts wires charge() onto the AI call sites in shadow).
-    // Order-independent.
-    expect(files.sort()).toEqual(
-      [
-        "api/lib/allowance.ts",
-        "api/lib/credits.ts",
-        "api/lib/subscription.ts",
-        "api/lib/ai-metering.ts",
-        "api/trpc/routers/credits.router.ts",
-      ].sort(),
-    );
+describe("G11 — atomic unit uses ONE connection: config reads run on the active tx, never global db (r5 #high)", () => {
+  // Codex #61 round 5: charge({ tx }) called multiplierFor() which read
+  // credit_config on the GLOBAL `db` handle — a hidden SECOND connection inside
+  // the supposedly-atomic persist+consume-marker+charge unit. Every read+write of
+  // the atomic unit must run on the caller's transaction executor.
+
+  it("multiplierFor takes an executor arg (not just source) so the read threads the tx", () => {
+    // Signature carries the executor: multiplierFor(exec, source).
+    expect(src).toMatch(/function multiplierFor\(\s*exec:\s*CreditExec\s*,\s*source:\s*string/);
+    // Its select runs on the passed executor, NEVER the global db.
+    const fnPos = src.indexOf("function multiplierFor");
+    const fnBody = src.slice(fnPos, src.indexOf("}", src.indexOf("return row?.value")));
+    expect(fnBody).toContain("await exec");
+    expect(fnBody).not.toContain("await db");
   });
 
-  it("no SPEND call site invokes charge() yet (D3 wires delivered-only charging)", () => {
-    // charge() (the metered SPEND writer) stays dormant in D2 — grep for a call,
-    // not just an import. The grant rails import grant()/refund()/expire(), never
-    // charge(); the AI routers must not call charge( until D3.
-    let out = "";
-    try {
-      out = execSync(
-        "git grep -n --untracked -e 'charge(' -- 'api/trpc/**/*.ts' | grep -v '\\.test\\.ts' || true",
-        { cwd: join(import.meta.dirname, "..", ".."), encoding: "utf-8" },
-      );
-    } catch {
-      out = "";
-    }
-    // No `charge(` invocation in the routers (grant/refund/expire are fine; those
-    // are money-IN / reset, not the dormant metered spend writer).
-    const spendCalls = out
-      .split("\n")
-      .map((l) => l.trim())
-      .filter((l) => l.length > 0 && /[^a-zA-Z_.]charge\(/.test(` ${l}`) && !/\/\//.test(l));
-    expect(spendCalls).toEqual([]);
+  it("charge() resolves the multiplier INSIDE runInTx, passing the active tx", () => {
+    // The multiplier lookup must sit inside the runInTx callback and receive `tx`,
+    // so with a caller tx the config read joins that same transaction/connection.
+    const runInTxPos = chargeSrc.indexOf("return runInTx(params.tx");
+    const multCallPos = chargeSrc.indexOf("multiplierFor(tx, source)");
+    expect(runInTxPos).toBeGreaterThan(-1);
+    expect(multCallPos).toBeGreaterThan(runInTxPos); // read is inside the tx callback
+  });
+
+  it("charge() NEVER reads the multiplier on the global db (no multiplierFor(db …), no db.select in body)", () => {
+    // Guard against a regression back to the global-db handle for the mult lookup.
+    expect(chargeSrc).not.toContain("multiplierFor(db");
+    expect(chargeSrc).not.toContain("multiplierFor(source)");
+    expect(chargeSrc).not.toContain("db.select");
+    expect(chargeSrc).not.toContain("await db\n");
+  });
+
+  it("expire() reads rollover/expiry_months config on the tx executor, not the global db", () => {
+    // Same pattern audited (Codex r5): expire()'s policy read + clawback write are
+    // one atomic unit — config reads must run on `tx`, never `db`.
+    const expirePos = src.indexOf("export async function expire");
+    const expireBody = src.slice(expirePos);
+    // The two config selects bind rolloverKey/expiryMonthsKey; they must use `tx`.
+    expect(expireBody).toContain("await tx\n      .select({ value: creditConfig.valueInt })");
+    // No global-db select survives inside expire().
+    const dbSelectPos = expireBody.indexOf("db\n    .select");
+    expect(dbSelectPos).toBe(-1);
+    // The policy gate now lives inside db.transaction (config read joins the tx).
+    const txPos = expireBody.indexOf("return db.transaction");
+    const policyPos = expireBody.indexOf("resolveResetPolicy");
+    expect(txPos).toBeGreaterThan(-1);
+    expect(policyPos).toBeGreaterThan(txPos); // policy resolved inside the tx callback
+  });
+});
+
+describe("G6 — AUTHORITATIVE: charge() is the SOLE spend path (metered post-delivery)", () => {
+  it("the delivered-only metering door (ai-metering) calls charge() for real (no shadow arg)", () => {
+    const meter = readFileSync(join(import.meta.dirname, "ai-metering.ts"), "utf-8");
+    // charge() is called with delivered but NO dryRun (authoritative).
+    expect(meter).toContain("charge({");
+    expect(meter).not.toContain("dryRun");
+  });
+
+  it("charge() carries the D4 AUTHORITATIVE header (not the old DORMANT/shadow one)", () => {
+    expect(src).toContain("AUTHORITATIVE");
+    expect(src).not.toContain("SHIPPED DORMANT");
   });
 });

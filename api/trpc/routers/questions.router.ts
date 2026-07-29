@@ -22,14 +22,8 @@ import {
 } from "../../../shared/domain/ai-eval";
 import { enqueueRelayJob, getRelayJob, mintJobId } from "../../lib/relay";
 import { resolveAiPrompt } from "../../lib/ai-prompts";
-import {
-  assertCoreAction,
-  debitAllowance,
-  refundAllowance,
-  reverseFreeTierCounter,
-} from "../../lib/allowance";
-import { admissionRead, resolveMeteringModel, settleDelivered } from "../../lib/ai-metering";
-import { ALLOWANCE_COST } from "../../../shared/domain/allowance";
+import { admit } from "../../lib/admission";
+import { resolveMeteringModel, consumeAndCharge } from "../../lib/ai-metering";
 
 // Output contract for focusedDrill — kept a single explicit shape (see note on
 // the procedure).
@@ -244,13 +238,10 @@ export const questionsRouter = router({
         return { cached: true as const, explanation: row.aiExplanation, jobId: null };
       }
 
-      // Cache miss — live LLM call → CORE action → debit allowance (S3 #52).
-      // Spend order (Codex 5th-pass):
-      //   mintJobId → assertCoreAction(jobId) → debitAllowance (PAID, BEFORE enqueue)
-      //   → enqueueRelayJob → [on throw: refundAllowance (paid) | reverseFreeTierCounter (free)]
-      // A paid relay job is NEVER dispatched without a prior durable debit row.
-      // If enqueue fails, the pre-committed debit is reversed (symmetric with free path).
-      // F3: only PAID path writes allowance_ledger rows — free path touches counter only.
+      // Cache miss — live LLM call. Admission reads the unified balance
+      // (grace-at-zero, fail-closed burst). Nothing is spent at enqueue — the charge
+      // settles post-delivery in finalizeExplanation (an undelivered job is never
+      // charged), so there is no debit/refund dance.
       const payload = resolveAiPrompt(
         "oab-explain",
         buildExplainVariables({
@@ -260,34 +251,9 @@ export const questionsRouter = router({
           legalBasis: row.legalBasis ?? null,
         }),
       );
-      // Step 1: reserve jobId — no relay work started yet.
+      await admit(ctx.userId);
       const jobId = mintJobId();
-      // D3 shadow admission-read (epic #50): observe-only, never denies. The old
-      // assertCoreAction below stays authoritative; delivered-only charge is in
-      // finalizeExplanation.
-      await admissionRead(ctx.userId);
-      // Step 2: assert entitlement BEFORE any spend or enqueue.
-      // On FORBIDDEN nothing is debited or enqueued.
-      const tier = await assertCoreAction(ctx.userId, jobId);
-      // Step 3 (PAID only): commit spend BEFORE dispatch. If the ledger write fails,
-      // no S3 job is enqueued — no partial window. The minted jobId is used as ref_id
-      // so the relay-error refundAllowance path still matches (same id, same row).
-      if (tier === "paid") {
-        await debitAllowance(ctx.userId, jobId);
-      }
-      // Step 4: dispatch relay job. On failure, reverse whichever rail was claimed.
-      try {
-        await enqueueRelayJob(ctx.userId, payload, jobId);
-      } catch (enqueueErr) {
-        if (tier === "free") {
-          await reverseFreeTierCounter(ctx.userId, jobId);
-        } else {
-          // Paid debit already committed — reverse it so the user isn't charged for
-          // an undelivered job. Idempotent via refund:<jobId> unique ref_id.
-          await refundAllowance(ctx.userId, jobId);
-        }
-        throw enqueueErr;
-      }
+      await enqueueRelayJob(ctx.userId, payload, jobId);
       return { cached: false as const, explanation: null, jobId };
     }),
 
@@ -328,23 +294,32 @@ export const questionsRouter = router({
           message: "A IA retornou um formato inesperado",
         });
       }
-      await db
-        .update(oabQuestions)
-        .set({ aiExplanation: parsed, lastUpdAt: new Date().toISOString() })
-        .where(eq(oabQuestions.id, input.id));
-      // D3 delivered-only SHADOW charge (epic #50): relay result confirmed done
-      // above (pending/error threw), so delivered=true. Writes nothing in shadow;
-      // the old allowance/free-counter rail from getOrGenerateExplanation stays
-      // authoritative. refId keyed by the user-unique jobId (question id is global).
-      await settleDelivered({
-        userId: ctx.userId,
-        source: "explanation",
-        refId: `explain:${input.jobId}`,
-        model: resolveMeteringModel(),
-        usage: { kind: "tokens", amount: 2048 },
-        delivered: true,
-        oldDebitCents: ALLOWANCE_COST,
-        action: "explanation",
+      // ATOMIC persist + single-use consume + charge (Codex #61 round 4). The consume
+      // marker + charge + aiExplanation UPDATE all run in ONE transaction: they commit
+      // together or roll back together, so a persisted explanation can never outlive its
+      // charge. The marker is BOUND to input.id (the explained question): a replay of the
+      // same jobId onto a DIFFERENT question is REJECTED (CONFLICT); onto the SAME
+      // question it is an idempotent no-op (persist + charge already committed once). refId
+      // `explain:<jobId>` is shared by the marker (PK) and charge(). oab_questions is the
+      // global catalog (not per-user) — no TABLE_SCOPE change needed here.
+      await db.transaction(async (tx) => {
+        const outcome = await consumeAndCharge({
+          tx,
+          userId: ctx.userId,
+          jobId: input.jobId,
+          targetId: input.id,
+          source: "explanation",
+          refId: `explain:${input.jobId}`,
+          // Metering model MUST be server-derived: a client-supplied model would let an
+          // unknown string force rawCents=0 (costFor→0) and dodge the charge.
+          model: resolveMeteringModel(),
+          usage: { kind: "tokens", amount: 2048 },
+        });
+        if (outcome === "replay") return; // already consumed onto this question.
+        await tx
+          .update(oabQuestions)
+          .set({ aiExplanation: parsed, lastUpdAt: new Date().toISOString() })
+          .where(eq(oabQuestions.id, input.id));
       });
       return { explanation: parsed };
     }),

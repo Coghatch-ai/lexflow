@@ -159,7 +159,7 @@ export function simulateCharge(
   acct.bagCents = remainderCents;
   if (flushCents >= 1) {
     // Mirror the engine: the consumption ledger ref_id is NAMESPACED (`charge:`)
-    // so it can never collide with a grant/purchase/legacy/allowance ref_id.
+    // so it can never collide with a grant/purchase/refund ref_id.
     // credit_charges keeps the RAW refId; only the ledger side carries the prefix.
     acct.ledger.push({
       deltaCents: -flushCents,
@@ -195,4 +195,29 @@ export function simulateGrant(
 /** SUM(ledger.delta_cents) — the invariant's right-hand side. */
 export function ledgerSum(acct: Account): number {
   return acct.ledger.reduce((s, r) => s + r.deltaCents, 0);
+}
+
+// ─── Wallet fuel gauge (D4) ──────────────────────────────────────────────────
+//
+// The client renders a FUEL GAUGE, never a raw magnitude and never any reset/
+// recompute logic. The server computes a single integer percent from the
+// materialized balance and the reference anchor (snapshot of balance at the last
+// positive money-in). This keeps money magnitudes server-side and the client dumb.
+
+/**
+ * Wallet fill percent in [0, 100], server-computed:
+ *   percent = clamp(round(100 * balance / reference), 0, 100)
+ * reference is the anchor snapshotted at the last positive money-in (grant/purchase).
+ * Guards: reference <= 0 (never funded) → 0; negative balance → 0; a balance above
+ * the reference (a fresh grant not yet re-anchored) clamps to 100. Never throws,
+ * never non-finite.
+ */
+export function walletPercent(balanceCents: number, referenceCents: number): number {
+  if (!Number.isFinite(balanceCents) || !Number.isFinite(referenceCents)) return 0;
+  if (referenceCents <= 0) return 0;
+  if (balanceCents <= 0) return 0;
+  const pct = Math.round((100 * balanceCents) / referenceCents);
+  if (pct < 0) return 0;
+  if (pct > 100) return 100;
+  return pct;
 }

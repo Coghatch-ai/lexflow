@@ -1,34 +1,28 @@
 // api/lib/ai-metering.ts
 //
-// D3 (epic #50) — the DELIVERED-ONLY metering door for the AI call sites, wired
-// in SHADOW. Each AI surface (grade / explanation / tutor / coach / admin
-// generateExplanation) does two things through this module:
+// The DELIVERED-ONLY metering door for the AI call sites (D4, epic #50) — now
+// AUTHORITATIVE. Each AI surface (grade / explanation / tutor / coach / admin
+// generateExplanation) settles its spend AFTER the relay result is re-read
+// server-side (delivery is authoritative here, never client-asserted).
 //
-//   1. admissionRead(userId) — reads the unified balance at admission. In SHADOW
-//      it NEVER denies (observe-only); it only surfaces the figure for the
-//      reconcile metric. The OLD debit-at-admission rail (allowance.ts / credits.ts)
-//      stays authoritative and is UNCHANGED — this read is additive.
+// ATOMIC CONSUME+CHARGE (Codex #61, all 5 doors): every persisted-AI-output door now
+// routes through consumeAndCharge() below. The door opens ONE db.transaction, persists
+// its target write on that tx, and calls consumeAndCharge(tx=…) — which claims a
+// single-use ai_job_consumption marker BOUND to the target AND runs charge(tx=…) in
+// that same transaction. So the target write, the consume marker, and the ledger +
+// balance write all commit or roll back as ONE unit: a persisted AI output can never
+// outlive its charge, and one job can back at most one target (a replay onto a
+// DIFFERENT target is rejected; onto the SAME target it is an idempotent no-op).
 //
-//   2. settleDelivered({...}) — called AFTER the relay result is known (the door's
-//      finalize/settle proc re-reads the S3 result server-side). It computes the
-//      cost-of-goods (costFor(model,usage)) and calls the money core charge() with
-//      delivered=<real S3 delivery flag> and dryRun=<shadow>. In SHADOW charge()
-//      writes NOTHING; delivered:false is a total no-op. It then emits ONE
-//      reconciliation metric (would-charge vs the old debit) per source/model/action
-//      so parity can be judged from real post-deploy traffic — the gate before D4's
-//      enforce flip.
-//
-// SAFE CUTOVER BOUNDARY (Codex, exact order): (1) old system authoritative;
-// (2) this settleDelivered() observes delivered results, writes nothing (shadow);
-// (3) reconcile would-charge vs old debit. Steps 4 (flip authoritative) + 5
-// (remove old debit) are D4 — NOT here. Nothing in this file is authoritative.
+// The old split-persist + best-effort background-retry settle path is REMOVED: no door
+// persists AI output before charging any more, so the delivered-but-unsettled window it
+// guarded against no longer exists.
 
 import { sql } from "drizzle-orm";
-import { db } from "../db/client";
-import { charge, type ChargeResult } from "./credit-charge";
+import { TRPCError } from "@trpc/server";
+import { charge, type CreditTx } from "./credit-charge";
 import { assertExternalRefId } from "../../shared/domain/credit-reserved";
 import { costFor, type Usage } from "../../shared/domain/cost-of-goods";
-import { isOff, isShadow } from "./credits-mode";
 
 // Prod default model (CLAUDE.md: production runs OpenAI gpt-4o-mini). A door with
 // no per-task model override meters against this — kept in sync with the relay's
@@ -41,156 +35,99 @@ export function resolveMeteringModel(override?: string): string {
   return override !== undefined && override.length > 0 ? override : PROD_DEFAULT_MODEL;
 }
 
-/**
- * Read the unified materialized balance for a user (cents). Observe-only in D3 —
- * NEVER denies AND NEVER throws into the request path. The new money path is not
- * authoritative this slice, so a degraded/missing credit_balances read must not be
- * able to block enqueueing live work (shadow behaviour-neutrality — Codex F3). The
- * query is wrapped strictly best-effort: on ANY failure it logs (warn) and returns
- * a neutral 0 so the OLD authoritative rail runs unchanged. (Enforce-mode admission
- * denial is D4; in D3/shadow this can never deny or throw.)
- * Returns 0 when no balance row exists yet (first-write user) or on read failure.
- */
-export async function admissionRead(userId: string): Promise<number> {
-  try {
-    const [row] = await db
-      .select({ balance: sql<number>`coalesce(balance_cents, 0)` })
-      .from(sql`credit_balances`)
-      .where(sql`user_id = ${userId}::uuid`)
-      .limit(1);
-    return row ? Number(row.balance) : 0;
-  } catch (err) {
-    // Shadow observe must be behaviour-neutral — never propagate into the old path.
-    console.warn("[credits] shadow admissionRead failed (neutral 0)", { userId, err });
-    return 0;
-  }
-}
+// ── Atomic consume+charge (Codex #61 round 3) ─────────────────────────────────
+//
+// Closes two billing-integrity holes at once, both flagged HIGH:
+//  (1) REPLAY ACROSS TARGETS: a done jobId could be replayed with a different
+//      answer/question to persist AI output onto MANY records while charge()'s
+//      refId-idempotency blocked the extra charges → one paid job backing many
+//      outputs. Fixed by a DURABLE single-use marker (ai_job_consumption) keyed by
+//      the charge refId and BOUND to its one target: a second consume of the same
+//      jobId onto a DIFFERENT target is REJECTED; onto the SAME target it is an
+//      idempotent replay (persist + charge already committed once).
+//  (2) SPLIT PERSIST/SETTLE: the old path wrote the AI fields, THEN best-effort
+//      settled (a background retry on failure) → a crash before the retry left output
+//      persisted with no durable charge. Fixed by charging INSIDE the caller's tx
+//      (charge accepts params.tx), so the AI-field UPDATE/INSERT, the consume marker,
+//      and the charge() ledger+balance write all commit or roll back as ONE unit.
+//
+// The caller opens ONE db.transaction, persists the AI fields on `tx`, then calls
+// this with that same `tx`. On "first" it has claimed the marker AND charged; on
+// "replay" the marker already existed for the SAME target (idempotent no-op — the
+// prior tx already persisted+charged). A different-target replay THROWS (CONFLICT)
+// which rolls the caller's tx back, so nothing is persisted on a rejected replay.
 
-export interface SettleParams {
+export interface ConsumeAndChargeParams {
+  /** The caller's open transaction — persist + marker + charge share this ONE tx. */
+  readonly tx: CreditTx;
   readonly userId: string;
-  /** Per-door source (grade | explanation | tutor | coach) — attribution + mult. */
+  /** The relay jobId being consumed (stored on the marker for audit/forensics). */
+  readonly jobId: string;
+  /** The record the AI output is persisted onto (answerId / questionId). The marker
+   *  is BOUND to this — a replay of the same job onto a different target is rejected. */
+  readonly targetId: string;
   readonly source: string;
-  /** Sub-prefixed, user-unique idempotency key (e.g. `grade:<jobId>`). Must NOT
-   *  use a reserved money-core prefix — asserted before charge(). */
+  /** Idempotency identity shared by the marker (PK) AND charge() (`grade:<jobId>` …). */
   readonly refId: string;
-  /** Model the delivered work actually ran on (per-task override or prod default). */
   readonly model: string;
-  /** Delivered work measured — drives costFor() → charge()'s rawCents. */
   readonly usage: Usage;
-  /** Real delivery flag from the relay result (status:done). false → total no-op. */
-  readonly delivered: boolean;
-  /** The old rail's debit for this same action (units→cents 1:1) — reconcile RHS. */
-  readonly oldDebitCents: number;
-  /** Action label for the reconcile metric (e.g. "grade", "tutorAsk"). */
-  readonly action: string;
 }
 
 /**
- * D3 delivered-only settle for one AI door. Computes cost-of-goods, runs the money
- * core charge() (dryRun in shadow, no-op when undelivered), and emits the reconcile
- * metric. Returns the ChargeResult for the caller/tests. In OFF mode the whole door
- * is skipped.
- *
- * Charge-failure handling is MODE-DEPENDENT (Codex F4 — no baked-in fail-open):
- *   - SHADOW: a charge() throw is logged (warn, charge-LOST) + swallowed (returns
- *     null). A shadow charge is not authoritative, so it must never break a
- *     delivered user action.
- *   - ENFORCE (D4): a charge() throw MUST propagate — billing cannot silently skip
- *     on delivered output (fail-CLOSED). It is re-thrown so settlement can't deliver
- *     unbilled work. D4 gets correct enforce behaviour with no further change here.
+ * Claim the single-use job-consumption marker and charge, BOTH inside the caller's
+ * transaction. Returns "first" when this call claimed the marker and charged (the
+ * caller's persist is the one real persist), or "replay" when the same jobId was
+ * already consumed onto the SAME target (idempotent — persist+charge already done).
+ * THROWS a CONFLICT TRPCError when the same jobId is replayed onto a DIFFERENT
+ * target (rolls the caller's tx back → nothing persisted). NEVER swallows a charge
+ * failure: a charge() throw propagates and rolls the whole unit back, so persisted
+ * AI output can never outlive its charge (the split-settle hole is closed).
  */
-export async function settleDelivered(params: SettleParams): Promise<ChargeResult | null> {
-  if (isOff()) return null;
-  const { userId, source, refId, model, usage, delivered, oldDebitCents, action } = params;
-  // refId is caller-supplied (a door prefix) → must respect the reserved-prefix
-  // rules exactly like grant()/refund() do. Fail loud on a bad key (never at runtime
-  // in prod — this is a programming error caught by the door's own test/CI).
-  assertExternalRefId(refId, `settleDelivered(${source})`);
+export async function consumeAndCharge(
+  params: ConsumeAndChargeParams,
+): Promise<"first" | "replay"> {
+  const { tx, userId, jobId, targetId, source, refId, model, usage } = params;
+  assertExternalRefId(refId, `consumeAndCharge(${source})`);
 
-  const rawCents = costFor(model, usage);
-  const shadow = isShadow();
+  // Single-use claim: INSERT the marker keyed by refId. An empty RETURNING means the
+  // marker already exists (this jobId was consumed before) → inspect its bound target.
+  const claim = await tx.execute(sql`
+    INSERT INTO ai_job_consumption (ref_id, user_id, job_id, target_id, source, created_by, last_upd_by)
+    VALUES (
+      ${refId},
+      ${userId}::uuid,
+      ${jobId},
+      ${targetId},
+      ${source},
+      ${userId}::uuid,
+      ${userId}::uuid
+    )
+    ON CONFLICT (ref_id) DO NOTHING
+    RETURNING ref_id
+  `);
 
-  let result: ChargeResult;
-  try {
-    result = await charge({
-      scope: { userId },
-      source,
-      rawCents,
-      refId,
-      delivered,
-      dryRun: shadow,
-    });
-  } catch (err) {
-    if (!shadow) {
-      // ENFORCE: fail-CLOSED. A charge failure on delivered output must NOT be
-      // silently swallowed — propagate so settlement can't skip billing (D4).
-      console.error("[credits] enforce settle charge failed — propagating", {
-        source,
-        action,
-        refId,
-        err,
+  if ((claim.rows as unknown[]).length === 0) {
+    // Already consumed. Read the bound target: SAME target → idempotent replay
+    // (persist+charge already committed once); DIFFERENT target → REJECT the replay.
+    const existing = await tx.execute(sql`
+      SELECT target_id FROM ai_job_consumption
+      WHERE ref_id = ${refId} AND user_id = ${userId}::uuid
+    `);
+    const rows = existing.rows as Array<{ target_id: string }>;
+    const boundTarget = rows[0]?.target_id;
+    if (boundTarget !== targetId) {
+      throw new TRPCError({
+        code: "CONFLICT",
+        message: "Esta avaliação de IA já foi consumida por outro registro",
       });
-      throw err;
     }
-    // SHADOW: charge is not authoritative — log the lost shadow charge + swallow so a
-    // delivered request is never broken by the observe path.
-    console.warn("[credits] shadow settle charge LOST", { source, action, refId, err });
-    return null;
+    return "replay";
   }
 
-  emitReconcileMetric({
-    source,
-    model,
-    action,
-    delivered,
-    shadow,
-    rawCents,
-    wouldChargeCents: result.flushCents,
-    owedCents: result.owedCents,
-    oldDebitCents,
-    outcome: result.outcome,
-  });
-  return result;
-}
-
-export interface ReconcileMetric {
-  readonly source: string;
-  readonly model: string;
-  readonly action: string;
-  readonly delivered: boolean;
-  readonly shadow: boolean;
-  readonly rawCents: number;
-  /** Whole cents the new engine WOULD move this call (the shadow flush). */
-  readonly wouldChargeCents: number;
-  /** Fractional owed (raw × multiplier) — sub-cent audit. */
-  readonly owedCents: number;
-  /** The old debit-at-admission rail's charge for this same action (cents). */
-  readonly oldDebitCents: number;
-  readonly outcome: ChargeResult["outcome"];
-}
-
-/**
- * Emit ONE structured reconciliation record per settled AI action: the new
- * engine's would-charge vs the old debit, tagged by source/model/action. This is
- * the parity signal judged from real post-deploy traffic — the gate before D4's
- * enforce flip. Uses console.warn (NOT console.log — banned; warn/error only) so
- * it lands in CloudWatch as a structured line greppable by `metric=credits-reconcile`.
- */
-export function emitReconcileMetric(m: ReconcileMetric): void {
-  console.warn(
-    JSON.stringify({
-      metric: "credits-reconcile",
-      source: m.source,
-      model: m.model,
-      action: m.action,
-      delivered: m.delivered,
-      shadow: m.shadow,
-      rawCents: m.rawCents,
-      wouldChargeCents: m.wouldChargeCents,
-      owedCents: m.owedCents,
-      oldDebitCents: m.oldDebitCents,
-      deltaCents: m.wouldChargeCents - m.oldDebitCents,
-      outcome: m.outcome,
-    }),
-  );
+  // First consume: charge INSIDE the caller's tx so persist + marker + charge commit
+  // together. A charge() failure THROWS here → the whole tx rolls back (marker +
+  // persist undone), so nothing is delivered-but-unsettled. Idempotent by refId.
+  const rawCents = costFor(model, usage);
+  await charge({ scope: { userId }, source, rawCents, refId, delivered: true, tx });
+  return "first";
 }

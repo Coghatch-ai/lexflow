@@ -1,31 +1,12 @@
 // shared/domain/credits.ts
 //
-// Pay-as-you-go credits: the user buys credits and each AI action debits a
-// fixed amount. The ledger (credit_ledger) is the single source of truth —
-// balance = SUM(delta). Failed relay jobs are refunded idempotently.
-//
-// Costs are RATIOS anchored to the measured real cost per action on
-// gpt-5.4-mini (tutor ~0.23¢, coach ~0.29¢ — cost model on issue #48):
-// near-equal real cost, so near-equal credit cost. The BRL price per credit
-// is a pack-pricing decision made at purchase-flow time (aggressive pricing,
-// thin margin — owner directive), NOT hardcoded here.
-//
-// NOTE: `grade` (phase-2 discursive grading) was REMOVED from credits in S3
-// (#52) — it now draws the allowance_ledger (core AI action). Only non-core
-// actions live here: tutor (per-question buddy) + coach (weak-point analysis).
-
-export const CREDIT_COSTS = {
-  tutor: 1,
-  coach: 2,
-} as const;
-
-export type CreditAction = keyof typeof CREDIT_COSTS;
-
-// Ledger action tags beyond spends. NO signup grant — an automatic signup
-// grant is farmable (delete account → re-register → fresh users.id → another
-// grant, unbounded; maggie issue #126). Coupons are the only free-credit path.
-// `grade` was removed from CreditAction in S3 (#52); it now uses AllowanceAction.
-export type LedgerAction = CreditAction | "coupon_grant" | "admin_grant" | "refund";
+// Credit domain — coupon code helpers only, after the no-legacy cutover (D4, epic
+// #50). There is ONE unified money engine now (credit_balances/credit_ledger,
+// written solely by api/lib/credit-charge.ts). The old fixed per-action price table
+// is DELETED: spend cost is the measured cost-of-goods
+// (shared/domain/cost-of-goods.ts) × the per-source multiplier (credit_config),
+// metered post-delivery — never a hardcoded per-action price. Coupons remain the
+// only free-credit path (an automatic signup grant is farmable; maggie #126).
 
 // Human-typeable coupon code: XXXX-XXXX from an alphabet without lookalikes
 // (no I/O/0/1). Same format as maggie #126.

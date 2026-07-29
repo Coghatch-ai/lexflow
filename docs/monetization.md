@@ -1,188 +1,159 @@
 # Monetization model
 
 **This is the single authoritative monetization document for LexFlow.** The rule lives
-here — NOT in CLAUDE.md agent instructions. Per the owner directive (#50, superseding the
-earlier #49-era framing), this file holds everything in one place: the two-currency model,
-the verbatim owner business rules, the full build-slice plan, the acceptance criteria, the
-parked list, and the owner-parked open questions.
+here — NOT in CLAUDE.md agent instructions.
 
-**Status:** build-ready. Result of a fresh, multi-turn owner interview (2026-07-24)
-grounded in the current code. This document is the sole source of truth — no other
-monetization doc exists.
-
----
-
-## Model — TWO separate currencies (authoritative, #50)
-
-Two **separate currencies**. This split is the correction that drove the redo.
-
-- **ALLOWANCE covers CORE ONLY.** Core = **"AI explanation (1 and 2)"** — phase-1 (objective
-  question explanation) + phase-2 (discursive grading/explanation). **Nothing else.** The
-  subscription grants a monthly allowance for this; the free tier gets a small daily amount.
-  Core overflow = **buy MORE allowance**, never credits (the per-explanation cost is
-  predictable). Reset on **subscription anniversary**; rollover **one month max**.
-- **CREDITS cover EVERYTHING ELSE.** The interactive per-question buddy, the coach analysis,
-  and future features (e.g. a "researcher" that does not exist yet). This is the existing
-  pay-as-you-go `credit_ledger`, kept. Bought credits never expire.
-- **Per turn, not per profile.** Metering counts each AI turn/action individually.
-- **All prices/sizes are admin-editable DB table rows**, seeded by a proper hybrid
-  calculation from the eval cost — **NEVER hardcoded, never a "magic number".** No number is
-  in this document. Owner directive.
-- **Cached explanations are FREE.** A populated `oab_questions.ai_explanation` is served with
-  no LLM call → no allowance/credit charge. Only **live** LLM calls are metered.
-- **Free-tier daily entitlement, not an abuse cap.** Free users get **1 core AI use per day**
-  (calendar-day reset, America/Sao_Paulo). The old #49-era anti-abuse caps (`ai_usage_daily`)
-  are retired.
+**Status:** unified engine live (D1–D4, epic #50 — canonical target #57/#218). As of D4 the
+NO-LEGACY cutover is complete: there is ONE credit engine and no backward-compat scaffold.
+The earlier two-currency framing (separate allowance + pay-as-you-go rails, a fixed per-action
+price table, a free-tier daily counter, and a `CREDITS_MODE` shadow-migration rail) has been
+DELETED — this document supersedes it entirely.
 
 ---
 
-## Business rules / product facts (owner's own words, verbatim)
+## Model — ONE unified credit engine
 
-- _"CORE ARE THE FUNCTIONALITIES ARE: AI EXPLANATION (1 and 2) that is it. NOTHING MORE.
-  CREDITS = EVERYTHING ELSE"_
-- _"CREDITS ARE FOR SOMETHING ELSE, NOT FOR CORE FUNCTIONLITIES."_
-- _"buy more allowence, because is easy to know the average coast with more precision"_ (core
-  overflow = buy more allowance, not credits).
-- _"we need a proper credit calculation, not MAGIC NUMBERS. because, the ai explanation, after
-  while, we be solved already."_ (cached explanations fill up over time → cheaper to run).
-- _"I DONT WANT YOUR CALCULATION, I WANT A PROPER CALCULATION ... IS NOT YOUR CALL, WE NEED TO
-  BE ABLE TO EASILY CHANGE ON TABLE LEVEL"_ + _"i want the developer to proper do a clculation
-  based in real numbers and have a hybrid aproach, I have that already in other project."_
-- Free tier: _"free tier has one IA use a day."_
-- Rollover: _"only one month."_
-- Top-ups: _"user may ask new allowence credtis in the system, we can give for free"_ +
-  _"admin create a cupom to be used by the user and auto applied."_
-- Payment: _"dont connect with gateway yet, for now, only cupom"_ / _"build the code, dont
-  include any gateway yet"_.
-- Copy: _"DONT CHANGE COPY NOW"_ and (earlier standing) _"PLEASE REMOVE EVERYTHING FROM ANY
-  DOCUMENT ABOUT TUTOR"_ — code identifier `tutor` stays; only docs/copy avoid the word, and
-  copy is not touched this build.
+There is a SINGLE append-only money ledger and a SINGLE materialized balance per user.
 
----
+- **`credit_ledger`** — append-only signed rows. `kind ∈ {grant, purchase, refund,
+consumption, adjustment, expiry}`; `source` is an open string (`subscription | coupon |
+admin | purchase | grade | explanation | tutor | coach | …`). `delta_cents` is the signed
+  amount. `ref_id` is a GLOBAL unique idempotency key.
+- **`credit_balances`** — one row per user: `balance_cents` (authoritative whole-cent balance,
+  may be negative — real), `bag_cents` (off-ledger sub-cent fractional carry), `reference_cents`
+  (wallet-gauge anchor — snapshot of balance at the last positive money-in).
+- **`credit_charges`** — one row per settled charge, `ref_id` PK — the idempotency claim that
+  makes settlement safe to retry.
+- **`credit_config`** — admin knobs, no redeploy: `mult.<source>` (×100 billing multiplier),
+  `rollover.<source>` (0/1), `expiry_months.<source>` (int N).
 
-## Build plan
+**Invariant:** `balance_cents == SUM(credit_ledger.delta_cents)` per user, always. It holds
+because the SINGLE WRITER (`api/lib/credit-charge.ts`) mutates the balance row and appends the
+ledger row in ONE transaction, always via `INSERT … ON CONFLICT (user_id) DO UPDATE` (never a
+bare UPDATE). Raw ledger insert / bare balance UPDATE outside that file is illegal.
 
-### Scope (in)
-
-- **S1 — Subscription + allowance schema (+ migration).** A `subscriptions` entity (plan +
-  period + status) and a **month-grained allowance counter** for core AI (phase-1 explanation
-  - phase-2 grading). Reset on **subscription anniversary**; rollover **one month max**. Drop
-    the dead `ai_usage_daily` table + delete `api/lib/ai-quota.ts` (dormant since #49). Add
-    `TABLE_SCOPE` entries for every new table.
-- **S2 — Free tier daily counter (+ migration).** A fresh **daily** counter: free users get
-  **1 core AI use per day** (any core action), **calendar-day reset (America/Sao_Paulo)**.
-  This is a NEW counter — the retired `ai_usage_daily` is not reused.
-- **S3 — Spend engine + move grading onto allowance.** Core actions (phase-1 explanation +
-  phase-2 grading) draw the allowance; overflow requires buying **more allowance** (never
-  credits). Non-core (buddy, coach) stay on the existing `credit_ledger` via
-  `assertCredits`/`debitCredits`. **Move `grade` OFF credits onto the allowance rail.** Keep
-  the idempotent refund rail on both. Cached explanation (`oab_questions.ai_explanation`)
-  stays FREE — only LIVE LLM calls are metered.
-- **S4 — Coupon `kind` (allowance | credits | subscription).** Extend the coupon system so a
-  coupon carries a kind and grants allowance, credits, or a subscription period — admin picks
-  at mint time, auto-applied on redeem. Preserve the existing atomic-cap + per-user
-  replay-guard rails.
-- **S5 — Admin-editable pricing/config table.** All numbers (plan price, allowance size, pack
-  sizes, real-cost-per-unit) live as **editable DB rows**, changeable with no deploy, seeded
-  by a proper hybrid calculation from the eval cost. **No number is hardcoded and no number is
-  in this document.** Guard against going live unset.
-- **S6 — Subscription grant paths (no gateway).** Grant the paid plan via a **subscription
-  coupon** OR an **admin action** (both). The subscription entity is built now so a payment
-  gateway plugs in later.
-- **S7 — Frontend surfaces.** Show allowance-remaining (where core AI is used), credit balance
-  (where buddy/coach are used), a redeem-coupon input (all 3 kinds), and a billing/account
-  screen (plan + both balances + ledger). pt-BR. **Do NOT change any existing copy.**
-
-### Scope (out)
-
-- **Payment gateway (Mercado Pago / Stripe / IAP).** Owner: _"dont connect with gateway yet,
-  for now, only cupom"_ — build the engine, grant via coupon/admin, gateway is a later issue.
-  It is OUT by owner choice, not blocked.
-- **Buy-buttons / real purchase flow.** No gateway → no checkout this build. Only
-  redeem-coupon.
-- **Copy changes / "tutor" rename.** Owner: _"DONT CHANGE COPY NOW."_ Existing UI wording and
-  the code identifier `tutor` are untouched (rename is a separate parked slice).
-- **The "researcher" feature.** Named as a future credits consumer; not built here.
-- **Charging for cached explanations.** Cached `ai_explanation` views stay free.
-- **Concrete prices / allowance sizes.** Owner directive: a proper calculation, admin-editable,
-  not the designer's call.
-
-### Acceptance
-
-- **Currency split:** a phase-1 explanation and a phase-2 grade debit the **allowance**, never
-  `credit_ledger`; a buddy turn and a coach generation debit **`credit_ledger`**, never the
-  allowance. (Assert via ledger/counter row after each action.)
-- **grade moved:** `ai.grade` no longer calls `assertCredits`/`debitCredits`; it asserts/debits
-  the allowance. Regression test guards it.
-- **Free tier:** a free user's 2nd core AI action in the same America/Sao_Paulo calendar day is
-  refused; a paid subscriber is not.
-- **Overflow:** with allowance at 0 and a paid plan, a core action is refused with a
-  buy-more-allowance path (not a credit debit); a bought allowance top-up unblocks it.
-- **Rollover:** unused allowance carried into the next period is capped at one month's worth;
-  older expires. Bought credits never expire.
-- **Cached explanation:** viewing a question whose `ai_explanation` is already populated debits
-  **nothing** (no allowance, no credit).
-- **Coupon kinds:** an `allowance` coupon raises the allowance; a `credits` coupon raises the
-  credit balance; a `subscription` coupon activates a subscription period. Existing atomic-cap +
-  per-user replay guard still hold (double-redeem refused).
-- **Config table:** changing a price/size row changes behaviour with no redeploy; the system
-  refuses to serve a live price while the real-cost seed is unset. `[human check]` on the final
-  seeded numbers being sane (owner-owned).
-- **Dead code gone:** `ai_usage_daily` table dropped, `api/lib/ai-quota.ts` deleted; `pnpm
-check` + `pnpm lint` + `pnpm test` green.
-
-### Skill notes
-
-- `docs/conventions.md` — LOV/English-code-pt-BR-label; no-duplication;
-  business-rules-in-`shared/`; refactor playbook for `max-lines-per-function`.
-- `api/db/scope.ts` — every new user-owned table needs a `TABLE_SCOPE` entry (subscriptions,
-  allowance counter, free-daily counter are user-scoped; coupons stay global).
-- Money invariants (`api/lib/credits.ts` header): balance = SUM(delta), unique `ref_id`
-  idempotency, refund on failed relay job — the allowance rail must mirror these.
-- Migrations: `db:generate` → review SQL → `db:migrate`. Never hand-apply, never `db:push`.
-- No new dependency without approval. `console.warn/error` only, no `any`, no non-null `!`.
-- Provider/config numbers pattern: developer researches
-  `/Users/arthurnunes/Library/MRHEWBUC-LOCAL/maggie` and `Coghatch-ai/maggie#206` for the
-  table-level pricing + hybrid-cost approach (owner-provided reference; designer did NOT read it).
-
-### Applied recommendations
-
-| Decision                       | What was applied                                                                            | Why                                                                                     |
-| ------------------------------ | ------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| Free-tier daily reset timezone | America/Sao_Paulo                                                                           | Audience is Brazilian; owner said "calendar day, fixed timezone" without naming one.    |
-| Cached explanation billing     | Cached views stay FREE; only live LLM calls metered                                         | Matches the global-cache design + owner's "gets solved already" logic; owner confirmed. |
-| Credit system reuse            | Reuse `credit_ledger` + `assertCredits`/`debitCredits` for buddy/coach; move `grade` off it | Least churn; the shipped system already is this minus grading. Owner confirmed.         |
-| Money invariants on allowance  | Mirror ledger pattern (SUM balance, unique ref_id, idempotent refund)                       | Consistency with the proven credit rail.                                                |
-| Document carries NO numbers    | Only mechanism + formula documented                                                         | Owner directive, emphatic and repeated.                                                 |
+**"Allowance" is not a separate currency.** A subscription is a recurring monthly GRANT of
+credits (`kind=grant, source=subscription`) into the one ledger, presented as an entitlement.
+Coupons and purchases grant the same way. Allowance-vs-purchased is a `source`/`kind` reporting
+concern, not two balances.
 
 ---
 
-## Enforcement (current shipped state, pre-build)
+## Cost of a spend — cost-of-goods × multiplier (no fixed price table)
 
-The build plan above changes this. Recorded here as the starting point the slices modify.
+A spend cost is NOT a hardcoded per-action price. It is:
 
-- `api/lib/credits.ts` — `assertCredits` / `debitCredits` — the current spend gate.
-- `api/trpc/routers/ai.router.ts` (`tutorAsk`) — credits (non-core; stays on credits).
-- `api/trpc/routers/coach.router.ts` (`generate`) — credits (non-core; stays on credits).
-- `api/trpc/routers/ai.router.ts` (`grade`) — currently credits; **S3 moves it onto the
-  allowance rail** (core).
-- `ai_usage_daily` table + `api/lib/ai-quota.ts` — dormant; **S1 drops the table + deletes the
-  file**.
+```
+rawCents  = costFor(model, usage)          # shared/domain/cost-of-goods.ts — provider cost
+owedCents = applyMultiplier(rawCents, mult.<source>)   # × the per-source margin knob
+```
+
+The fractional `owedCents` accumulates in `bag_cents`; a whole cent flushes as one negative
+`consumption` ledger row + balance decrement (sub-cent charges never round to 0 or 1).
+
+Metering is **delivered-only**: the charge settles AFTER the relay result is re-read
+server-side (`api/lib/ai-metering.ts` → `settleDelivered` → `charge()`). An undelivered job
+(`status:error`) is never charged — so there is no debit-at-enqueue and no refund rail.
 
 ---
 
-## Later (parked)
+## Admission — read the balance, deny at zero (grace)
 
-- Payment gateway integration (Mercado Pago Pix+card / Stripe / IAP) + real checkout + in-app
-  cancel-at-period-end.
-- The "researcher" feature (a future credits consumer).
-- Copy pass / "tutor" → "AI explanation" rename across UI + code identifiers.
-- "Insufficient" empty-pool block message with a buy CTA (needs the gateway).
+`api/lib/admission.ts` `admit(userId)` is the SOLE spend-admission path:
 
-## Open questions (owner-parked by their own choice)
+- Reads `credit_balances.balance_cents`; admits while **> 0**.
+- **Grace-at-zero:** the request that spends the last cent reads a still-positive balance and
+  completes; the NEXT request reads `<= 0` and is denied.
+- **Fail-CLOSED burst:** on a balance-READ failure, admit at most `BURST=3` actions, then deny
+  (a DB blip can't become unbounded free work). A healthy read resets the burst budget.
+- **Non-spend door** (`admitNonSpend`): reads/history/config are fail-OPEN — never denied by a
+  billing read.
 
-- The exact numbers (plan price, allowance size, pack sizes, real-cost-per-unit) — owner-owned,
-  seeded from the eval cost via the developer's hybrid calculation. Blocks go-live pricing only,
-  not the engine build.
-- What "everything else / researcher" credits ultimately buy beyond buddy + coach — owner:
-  _"something I dont know yet."_ Does not block this build (credits engine is generic).
+---
+
+## charge-LOST retry — never lose a delivered charge, never double-charge
+
+Some finalize paths persist delivered output BEFORE settlement. So `settleDelivered()` NEVER
+throws into the request path: on a `charge()` failure it logs `[credits] charge-LOST … refId=…`
+and schedules ONE idempotent background retry, logging `charge-RECOVERED` on success. Because
+`charge()` is idempotent by `ref_id` (`credit_charges` PK), the retry can never double-charge —
+if the original tx actually committed, the retry is a replay no-op.
+
+---
+
+## Reset — per-source rollover / expiry (config-driven, append-only)
+
+Reset is per-source config, not one global rule (owner directive):
+
+- `rollover.<source>=1` → leftover carries; NO reset entry is ever written.
+- `rollover.<source>=0` + `expiry_months.<source>=N` → once the window elapses, ONE append-only
+  NEGATIVE `kind=expiry` row (deterministic `ref_id = user:<source>:<period>`) claws back ONLY
+  that source's own leftover (`SUM(delta_cents) WHERE source=<source>`, clamped ≥0) — never the
+  whole unified balance, so other sources' funds are untouched.
+
+`api/lib/credit-charge.ts` `expire()` is ACTIVE: a scheduled/period caller resolves the knobs
+and invokes it. Idempotent by the deterministic ref_id (re-running a period is a no-op).
+
+---
+
+## Wallet fuel gauge — server percent, dumb client
+
+`credits.wallet` returns `{ percent, periodEnd }`. `percent = clamp(round(100 * balance /
+reference), 0, 100)` is computed SERVER-side (`shared/domain/credit-money.ts` `walletPercent`).
+The client (web `WalletGauge` + mobile chips + both `BillingPage`s) renders a FUEL GAUGE only —
+never a raw magnitude (no cents/units reach the client) and never any reset/recompute logic.
+
+---
+
+## Funding paths
+
+- **Coupon** (`credits.redeem`) — the only user-facing top-up until a purchase flow exists.
+  Three kinds: `credits` (grant, source=coupon), `allowance` (grant, source=subscription via
+  `grantAllowance`), `subscription` (activates a period via `grantSubscription`). Two-rail
+  safety: atomic per-coupon cap + per-(coupon,user) replay guard, all in one tx.
+- **Subscription** (`grantSubscription`) — recurring monthly grant; period extends forward from
+  `max(current_period_end, now)`. Monthly units read from `pricing_config.monthly_allowance_units`.
+- **Admin grant** (`grantCredits` / admin `grantAllowance`) — manual top-up.
+- **Purchase / IAP** — NOT built yet; plugs in later as another `kind=purchase` writer through
+  the same one-writer tx. No new engine work (#57).
+
+No automatic signup grant — it is farmable (delete account → re-register → fresh grant). Coupons
+are the only free-credit path.
+
+---
+
+## Business rules (owner, verbatim intent)
+
+- Subscription = recurring monthly GRANT of credits into ONE unified append-only ledger,
+  presented as an "allowance" entitlement, reportable like any grant. One balance, one engine.
+- Reset: per-source `rollover.<source>` + `expiry_months.<source>`; expiry = append-only negative
+  `kind=expiry` row; rollover=true → no reset entry.
+- Refund kept as a real-but-DORMANT kind (delivery confirmed at settle → not the normal
+  correction path; an undelivered job is simply never charged).
+- Every mutation touches ledger + balance in ONE tx in ONE file that is the ONLY writer; balance
+  mutation always `INSERT … ON CONFLICT DO UPDATE`, never a bare UPDATE.
+
+---
+
+## Key modules
+
+| Concern                                    | Module                                        |
+| ------------------------------------------ | --------------------------------------------- |
+| Single writer (charge/grant/refund/expire) | `api/lib/credit-charge.ts`                    |
+| Pure money math + wallet percent           | `shared/domain/credit-money.ts`               |
+| Cost-of-goods table                        | `shared/domain/cost-of-goods.ts`              |
+| Reset policy (rollover/expiry)             | `shared/domain/credit-reset.ts`               |
+| Reserved ref_id prefixes                   | `shared/domain/credit-reserved.ts`            |
+| Delivered-only settle + charge-LOST retry  | `api/lib/ai-metering.ts`                      |
+| Admission (fail-closed burst, grace)       | `api/lib/admission.ts`                        |
+| Wallet endpoint + coupon redeem            | `api/trpc/routers/credits.router.ts`          |
+| Subscription grant                         | `api/lib/subscription.ts`                     |
+| Admin grant                                | `api/lib/credits.ts` / `api/lib/allowance.ts` |
+
+---
+
+## Parked (later, per #57)
+
+- IAP / store purchase grant (server-side pack map keyed by verified productId).
+- Admin monetization reports (the unified `source`/`kind` already makes everything reportable).
+- Multiplier tuning UI + per-source reset-policy admin UI over the `credit_config` knobs.

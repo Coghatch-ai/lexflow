@@ -6,6 +6,7 @@
 // not user-scoped.
 
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
 import { randomUUID } from "node:crypto";
 import { and, asc, eq, inArray, isNotNull, isNull, sql, type SQL } from "drizzle-orm";
 import { db } from "../../db/client";
@@ -23,11 +24,13 @@ import {
   aiExplanationSchema,
   buildExplainVariables,
   optionLetter,
+  parseExplainResponse,
   stripCorrectLetterFromWhyWrong,
 } from "../../../shared/domain/ai-eval";
 import { enqueueRelayJob, getRelayJob } from "../../lib/relay";
 import { resolveAiPrompt } from "../../lib/ai-prompts";
-import { admissionRead, resolveMeteringModel, settleDelivered } from "../../lib/ai-metering";
+import { admit } from "../../lib/admission";
+import { resolveMeteringModel, consumeAndCharge } from "../../lib/ai-metering";
 import { getAllConfigRows, upsertConfigRow } from "../../lib/pricing-config";
 import { grantSubscription } from "../../lib/subscription";
 import { grantAllowance } from "../../lib/allowance";
@@ -481,49 +484,42 @@ export const adminRouter = router({
       )
       .mutation(async ({ ctx, input }) => {
         const payload = resolveAiPrompt("oab-explain", buildExplainVariables(input));
-        // D3 shadow admission-read (epic #50): this door was UNMETERED before —
-        // observe-only, never denies; the delivered-only charge is in
-        // settleGeneration. No old debit rail existed here (oldDebitCents=0 there).
-        await admissionRead(ctx.userId);
+        // Admission: DENY at balance <= 0 (grace-at-zero). Fail-closed burst on read
+        // fail. Charge settles SERVER-SIDE on the consume/persist path
+        // (saveAiExplanation, keyed refId `explain:admin:<jobId>`) — NOT a separate
+        // client proc, so a delivered explanation cannot be saved without a charge.
+        await admit(ctx.userId);
         const jobId = await enqueueRelayJob(ctx.userId, payload);
         return { jobId };
       }),
 
-    // D3 (epic #50) — delivered-only SHADOW settle for the admin explanation door,
-    // which was previously UNMETERED (Codex: meter admin.generateExplanation). The
-    // client calls this after polling relay.job; it re-reads the result server-side
-    // (delivery authoritative) and fires the shadow charge + reconcile. oldDebit=0
-    // (no prior rail) so the metric surfaces the would-charge for a formerly-free
-    // action. Writes nothing in shadow.
-    settleGeneration: adminProcedure
-      .input(z.object({ jobId: z.string().uuid() }))
-      .mutation(async ({ ctx, input }) => {
-        const job = await getRelayJob(ctx.userId, input.jobId);
-        const delivered = job.status === "done";
-        const result = await settleDelivered({
-          userId: ctx.userId,
-          source: "explanation",
-          refId: `explain:admin:${input.jobId}`,
-          // Metering model MUST be server-derived (Codex F2): no client-supplied
-          // model may reach costFor() (an unknown string → rawCents=0 dodge under
-          // enforce). resolveMeteringModel() (no arg) → PROD_DEFAULT_MODEL.
-          model: resolveMeteringModel(),
-          usage: { kind: "tokens", amount: 2048 },
-          delivered,
-          oldDebitCents: 0,
-          action: "admin.generateExplanation",
-        });
-        return { settled: result?.outcome ?? "skipped" };
-      }),
-
-    // Persist an admin-reviewed AI explanation for a question. The explanation is
-    // generated via generateExplanation and sent here already parsed —
-    // client-asserted, Clerk-gated to admin role. Mirrors discursive saveAnswer.
-    // Defense-in-depth: re-strip the correct letter server-side in case the client
-    // preview did not (or an older client sent the payload before the fix).
+    // Persist an admin explanation for a question. TWO explicit paths (Codex #61
+    // round 3): AI-generated persistence is the DEFAULT and is fully server-verified,
+    // NEVER client-asserted; a manual edit is a SEPARATE explicit `manual: true` path
+    // that cannot carry generated output through an unbilled route.
+    //
+    // AI path (manual !== true — REQUIRES a jobId): the explanation text is DERIVED
+    // SERVER-SIDE from the relay job (client-sent `explanation` is IGNORED so it can
+    // neither forge the text nor skip the charge). We re-read the job (scoped to
+    // ctx.userId → a foreign job is pending/NOT-FOUND here), REQUIRE it be `done`
+    // BEFORE any write, parse the explanation from the relay result, strip the correct
+    // letter, persist, then settle `explain:admin:<jobId>` (delivered=true, idempotent
+    // by refId). A missing/random/pending jobId → reject, NOTHING persisted, NO charge.
+    //
+    // Manual path (manual === true, no jobId): an admin-authored edit — persists the
+    // client `explanation` (admin-role gated) with NO relay read and NO settle. It is
+    // opt-in and explicit, so it can never be the accidental unbilled route for freshly
+    // generated output (that route now requires a verified done job + always charges).
     saveAiExplanation: adminProcedure
-      .input(z.object({ id: z.string().min(1), explanation: aiExplanationSchema }))
-      .mutation(async ({ input }) => {
+      .input(
+        z.object({
+          id: z.string().min(1),
+          explanation: aiExplanationSchema,
+          jobId: z.string().uuid().optional(),
+          manual: z.literal(true).optional(),
+        }),
+      )
+      .mutation(async ({ ctx, input }) => {
         // Fetch options + correctAnswer to derive the correct letter for stripping.
         const [qRow] = await db
           .select({ options: oabQuestions.options, correctAnswer: oabQuestions.correctAnswer })
@@ -532,14 +528,72 @@ export const adminRouter = router({
           .limit(1);
         const letter =
           qRow !== undefined ? optionLetter(qRow.options, qRow.correctAnswer) : undefined;
-        const explanation = {
-          ...input.explanation,
-          whyWrong: stripCorrectLetterFromWhyWrong(input.explanation.whyWrong, letter),
-        };
-        await db
-          .update(oabQuestions)
-          .set({ aiExplanation: explanation, lastUpdAt: new Date().toISOString() })
-          .where(eq(oabQuestions.id, input.id));
+
+        // MANUAL EDIT — explicit, admin-authored, no AI delivery/charge.
+        if (input.manual === true) {
+          const explanation = {
+            ...input.explanation,
+            whyWrong: stripCorrectLetterFromWhyWrong(input.explanation.whyWrong, letter),
+          };
+          await db
+            .update(oabQuestions)
+            .set({ aiExplanation: explanation, lastUpdAt: new Date().toISOString() })
+            .where(eq(oabQuestions.id, input.id));
+          return { ok: true as const };
+        }
+
+        // AI-GENERATED PATH — jobId REQUIRED; explanation is server-derived + charged.
+        if (input.jobId === undefined) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "jobId obrigatório para salvar explicação gerada por IA",
+          });
+        }
+        const job = await getRelayJob(ctx.userId, input.jobId);
+        if (job.status === "pending") {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "A geração ainda está em andamento",
+          });
+        }
+        if (job.status === "error") {
+          throw new TRPCError({ code: "BAD_GATEWAY", message: job.error });
+        }
+        const raw = job.data as { text: string };
+        const derived = parseExplainResponse(raw.text, letter);
+        if (derived === null) {
+          throw new TRPCError({
+            code: "BAD_GATEWAY",
+            message: "A IA retornou um formato inesperado",
+          });
+        }
+        // ATOMIC persist + single-use consume + charge (Codex #61 round 3). The
+        // consume marker + charge + aiExplanation UPDATE run in ONE transaction, so a
+        // persisted explanation can never outlive its charge. The marker is BOUND to
+        // this question (input.id): a replay of the same jobId onto a DIFFERENT
+        // question is REJECTED (CONFLICT); onto the SAME question it is an idempotent
+        // no-op (persist + charge already committed once). refId `explain:admin:<jobId>`
+        // is shared by the marker (PK) and charge().
+        const jobId = input.jobId;
+        await db.transaction(async (tx) => {
+          const outcome = await consumeAndCharge({
+            tx,
+            userId: ctx.userId,
+            jobId,
+            targetId: input.id,
+            source: "explanation",
+            refId: `explain:admin:${jobId}`,
+            // Metering model MUST be server-derived: no client-supplied model may
+            // reach costFor() (an unknown string → rawCents=0 dodge).
+            model: resolveMeteringModel(),
+            usage: { kind: "tokens", amount: 2048 },
+          });
+          if (outcome === "replay") return; // already consumed onto this question.
+          await tx
+            .update(oabQuestions)
+            .set({ aiExplanation: derived, lastUpdAt: new Date().toISOString() })
+            .where(eq(oabQuestions.id, input.id));
+        });
         return { ok: true as const };
       }),
   }),

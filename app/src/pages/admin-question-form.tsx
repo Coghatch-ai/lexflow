@@ -101,7 +101,9 @@ function AiExplanationPanel({
       setPreview(parsed);
       const whyCorrect = extractWhyCorrect(rawText);
       if (whyCorrect !== null) onWhyCorrect(whyCorrect);
-      saveMutation.mutate({ id: questionId, explanation: parsed });
+      // jobId anchors SERVER-SIDE settlement inside saveAiExplanation
+      // (refId explain:admin:<jobId>): the charge fires on the persist path.
+      saveMutation.mutate({ id: questionId, explanation: parsed, jobId });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Falha ao gerar explicação');
     } finally {

@@ -13,8 +13,8 @@
 //      double-redeem never permanently burns a redemption slot.
 //
 // Coupon kinds (S4, issue #53):
-//   'credits'      — grants valueCredits to credit_ledger (legacy default)
-//   'allowance'    — grants valueUnits to allowance_ledger via grantAllowance
+//   'credits'      — grants valueCredits (source=coupon) to the unified ledger
+//   'allowance'    — grants valueUnits (source=subscription) via grantAllowance
 //   'subscription' — activates a subscription period via grantSubscription
 //
 // All three kinds go through the same atomic-cap + replay-guard rails.
@@ -30,14 +30,14 @@ import { TRPCError } from "@trpc/server";
 import { adminProcedure, protectedProcedure, router } from "../procedures";
 import { db } from "../../db/client";
 import { coupons, creditLedger, subscriptions } from "../../../drizzle/schema";
-import { getBalance, grantCredits } from "../../lib/credits";
-import { grantAllowance, getAllowanceBalance } from "../../lib/allowance";
+import { grantCredits } from "../../lib/credits";
+import { grantAllowance } from "../../lib/allowance";
 import { grantSubscription } from "../../lib/subscription";
 import { grant } from "../../lib/credit-charge";
+import { walletPercent } from "../../../shared/domain/credit-money";
 import {
   COUPON_ALPHABET,
   COUPON_CODE_REGEX,
-  CREDIT_COSTS,
   normalizeCouponCode,
 } from "../../../shared/domain/credits";
 import { assertExternalRefId } from "../../../shared/domain/credit-reserved";
@@ -163,28 +163,31 @@ async function redeemInTx(
 }
 
 export const creditsRouter = router({
-  // Current balance + the per-action price list (the client shows costs, never
-  // computes them).
-  balance: protectedProcedure.query(async ({ ctx }) => {
-    return { balance: await getBalance(ctx.userId), costs: CREDIT_COSTS };
-  }),
-
-  // Remaining allowance units for CORE AI (phase-1 explanation + phase-2 grading).
-  // Reuses getAllowanceBalance (SUM(delta) from allowance_ledger, paid path only).
-  // periodEnd: null when the user has no active subscription row.
-  // No config numbers exposed — balance is derived purely from the ledger.
-  allowanceBalance: protectedProcedure.query(
-    async ({ ctx }): Promise<{ balance: number; periodEnd: string | null }> => {
+  // Wallet fuel gauge (D4). The client renders a gauge — the server computes a
+  // single integer percent [0,100] from the materialized balance and the reference
+  // anchor. NO dollar/cents magnitude is returned to the client, and the client
+  // never recomputes reset/percent logic. periodEnd is the subscription window end
+  // (display only), or null for a free user.
+  wallet: protectedProcedure.query(
+    async ({ ctx }): Promise<{ percent: number; periodEnd: string | null }> => {
+      const [bal] = await db
+        .select({
+          balanceCents: sql<number>`coalesce(balance_cents, 0)`,
+          referenceCents: sql<number>`coalesce(reference_cents, 0)`,
+        })
+        .from(sql`credit_balances`)
+        .where(sql`user_id = ${ctx.userId}::uuid`)
+        .limit(1);
       const [sub] = await db
         .select({ currentPeriodEnd: subscriptions.currentPeriodEnd })
         .from(subscriptions)
         .where(eq(subscriptions.userId, ctx.userId))
         .limit(1);
-      const balance = await getAllowanceBalance(ctx.userId);
-      return {
-        balance,
-        periodEnd: sub?.currentPeriodEnd ?? null,
-      };
+      const percent = walletPercent(
+        bal ? Number(bal.balanceCents) : 0,
+        bal ? Number(bal.referenceCents) : 0,
+      );
+      return { percent, periodEnd: sub?.currentPeriodEnd ?? null };
     },
   ),
 

@@ -7,7 +7,7 @@
 // (invalid/exhausted/expired/already-redeemed).
 
 import { useState, type ReactElement } from "react";
-import { Coins } from "lucide-react";
+import { Fuel } from "lucide-react";
 import { trpc } from "../lib/trpc";
 import type { CouponKind } from "@shared/domain/coupons";
 
@@ -28,10 +28,12 @@ export function CreditsChip(): ReactElement | null {
   const [message, setMessage] = useState<{ tone: "pos" | "neg"; text: string } | null>(null);
 
   const utils = trpc.useUtils();
-  const balanceQ = trpc.credits.balance.useQuery();
+  const walletQ = trpc.credits.wallet.useQuery();
   const redeemMut = trpc.credits.redeem.useMutation();
 
-  if (balanceQ.data === undefined) return null;
+  if (walletQ.data === undefined) return null;
+  const pct = walletQ.data.percent;
+  const isLow = pct <= 15;
 
   function redeem(): void {
     const trimmed = code.trim();
@@ -43,7 +45,7 @@ export function CreditsChip(): ReactElement | null {
         onSuccess: ({ kind, granted }) => {
           setCode("");
           setMessage({ tone: "pos", text: kindMessage(kind, granted) });
-          void utils.credits.balance.invalidate();
+          void utils.credits.wallet.invalidate();
           void utils.credits.ledger.invalidate();
         },
         onError: (err) => {
@@ -61,10 +63,25 @@ export function CreditsChip(): ReactElement | null {
           setOpen(!open);
           setMessage(null);
         }}
-        className="flex items-center gap-1 rounded-full border border-line bg-surface px-2.5 py-1 text-xs font-semibold tnum text-ink active:opacity-70"
+        className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold tnum active:opacity-70 ${
+          isLow ? "border-red-300 bg-red-50 text-red-700" : "border-line bg-surface text-ink"
+        }`}
       >
-        <Coins className="h-3.5 w-3.5 text-seal" strokeWidth={1.75} />
-        {balanceQ.data.balance} créditos
+        <Fuel className="h-3.5 w-3.5 text-seal" strokeWidth={1.75} />
+        <span
+          className="inline-block h-1.5 w-10 overflow-hidden rounded-full bg-line"
+          role="progressbar"
+          aria-valuenow={pct}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-label="Saldo de IA"
+        >
+          <span
+            className={`block h-full rounded-full ${isLow ? "bg-red-500" : "bg-seal"}`}
+            style={{ width: `${String(pct)}%` }}
+          />
+        </span>
+        {pct}%
       </button>
       {open ? (
         <div className="flex items-center gap-1.5">

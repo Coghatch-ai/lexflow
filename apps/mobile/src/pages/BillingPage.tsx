@@ -4,15 +4,14 @@
 // Plan status, both balances (credits + allowance), redeem coupon,
 // credit ledger. pt-BR. No hardcoded prices.
 //
-// Reads:
-//   credits.balance            → {balance, costs}
+// Reads (D4 — one unified wallet):
+//   credits.wallet             → {percent: number, periodEnd: string | null} (fuel gauge)
 //   credits.ledger             → rows newest first (limit 50)
-//   credits.allowanceBalance   → {balance: number, periodEnd: string | null}  (#56)
-//   credits.subscriptionStatus → {plan, status, currentPeriodStart, currentPeriodEnd}  (#56)
+//   credits.subscriptionStatus → {plan, status, currentPeriodStart, currentPeriodEnd}
 //   credits.redeem             → mutation (all 3 coupon kinds)
 
 import { useState, type ReactElement } from "react";
-import { ArrowDownLeft, ArrowUpRight, CreditCard, Coins, Tag, Zap } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, CreditCard, Tag, Zap } from "lucide-react";
 import { trpc } from "../lib/trpc";
 import type { CouponKind } from "@shared/domain/coupons";
 
@@ -177,52 +176,45 @@ function PlanSection({ plan, status, periodEnd, isLoading }: PlanSectionProps): 
 
 // ── BalanceSection ────────────────────────────────────────────────────────────
 
-interface BalanceSectionProps {
-  creditBalance: number | undefined;
-  creditLoading: boolean;
-  allowanceBalance: number | undefined;
-  allowancePeriodEnd: string | null | undefined;
-  allowanceLoading: boolean;
+interface WalletSectionProps {
+  percent: number | undefined;
+  periodEnd: string | null | undefined;
+  isLoading: boolean;
 }
 
-function BalanceSection({
-  creditBalance,
-  creditLoading,
-  allowanceBalance,
-  allowancePeriodEnd,
-  allowanceLoading,
-}: BalanceSectionProps): ReactElement {
+// One unified wallet fuel gauge (D4). Server sends percent [0,100] only — no
+// magnitude reaches the client, no client-side reset/recompute.
+function WalletSection({ percent, periodEnd, isLoading }: WalletSectionProps): ReactElement {
+  const pct = percent ?? 0;
+  const isLow = percent !== undefined && percent <= 15;
   return (
-    <section className="grid grid-cols-2 gap-3">
-      <div className="rounded-xl border border-line bg-surface p-4 space-y-1">
-        <div className="flex items-center gap-1.5">
-          <Coins className="h-3.5 w-3.5 text-seal" strokeWidth={1.75} />
-          <p className="text-[0.7rem] font-semibold uppercase tracking-wide text-ink-mute">
-            Créditos
-          </p>
-        </div>
-        <p className="font-display text-3xl font-bold tnum leading-none text-ink">
-          {creditLoading ? "…" : (creditBalance ?? "—")}
-        </p>
-        <p className="text-[0.65rem] text-ink-mute">Assistente &amp; coach</p>
-      </div>
-
-      <div className="rounded-xl border border-line bg-surface p-4 space-y-1">
-        <div className="flex items-center gap-1.5">
-          <Zap className="h-3.5 w-3.5 text-ink-soft" strokeWidth={1.75} />
-          <p className="text-[0.7rem] font-semibold uppercase tracking-wide text-ink-mute">
-            IA Principal
-          </p>
-        </div>
-        <p className="font-display text-3xl font-bold tnum leading-none text-ink">
-          {allowanceLoading ? "…" : (allowanceBalance ?? 0)}
-        </p>
-        <p className="text-[0.65rem] text-ink-mute">
-          {allowancePeriodEnd != null
-            ? `Período até ${fmtDate(allowancePeriodEnd)}`
-            : "Para explicações e correções de fase 2"}
+    <section className="rounded-xl border border-line bg-surface p-4 space-y-2">
+      <div className="flex items-center gap-1.5">
+        <Zap className="h-3.5 w-3.5 text-seal" strokeWidth={1.75} />
+        <p className="text-[0.7rem] font-semibold uppercase tracking-wide text-ink-mute">
+          Saldo de IA
         </p>
       </div>
+      <div
+        className="h-3 w-full overflow-hidden rounded-full bg-paper border border-line"
+        role="progressbar"
+        aria-valuenow={pct}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-label="Saldo de IA"
+      >
+        <div
+          className={`h-full rounded-full ${isLow ? "bg-red-500" : "bg-seal"}`}
+          style={{ width: `${String(isLoading ? 0 : pct)}%` }}
+        />
+      </div>
+      <p className="text-[0.65rem] text-ink-mute">
+        {isLoading
+          ? "Carregando…"
+          : periodEnd != null
+            ? `${String(pct)}% — período até ${fmtDate(periodEnd)}`
+            : `${String(pct)}% do seu saldo de IA`}
+      </p>
     </section>
   );
 }
@@ -231,15 +223,13 @@ function BalanceSection({
 
 export function BillingPage(): ReactElement {
   const utils = trpc.useUtils();
-  const balanceQ = trpc.credits.balance.useQuery();
+  const walletQ = trpc.credits.wallet.useQuery();
   const ledgerQ = trpc.credits.ledger.useQuery();
-  const allowanceQ = trpc.credits.allowanceBalance.useQuery();
   const subscriptionQ = trpc.credits.subscriptionStatus.useQuery();
 
   function invalidate(): void {
-    void utils.credits.balance.invalidate();
+    void utils.credits.wallet.invalidate();
     void utils.credits.ledger.invalidate();
-    void utils.credits.allowanceBalance.invalidate();
     void utils.credits.subscriptionStatus.invalidate();
   }
 
@@ -254,12 +244,10 @@ export function BillingPage(): ReactElement {
         isLoading={subscriptionQ.isLoading}
       />
 
-      <BalanceSection
-        creditBalance={balanceQ.data?.balance}
-        creditLoading={balanceQ.isLoading}
-        allowanceBalance={allowanceQ.data?.balance}
-        allowancePeriodEnd={allowanceQ.data?.periodEnd}
-        allowanceLoading={allowanceQ.isLoading}
+      <WalletSection
+        percent={walletQ.data?.percent}
+        periodEnd={walletQ.data?.periodEnd}
+        isLoading={walletQ.isLoading}
       />
 
       {/* Redeem coupon */}

@@ -1,22 +1,25 @@
 // api/lib/credit-charge.ts
 //
-// THE SINGLE WRITER for the unified credit engine (D1, epic #50). Every mutation
-// of credit_ledger + credit_balances flows through charge()/grant() here, in ONE
-// transaction, so the invariant `balance_cents == SUM(credit_ledger.delta_cents)`
-// per user can never drift. Raw `db.insert(creditLedger)` / bare UPDATE of
-// credit_balances outside this file is ILLEGAL after D2 (grep guard in D2).
+// THE SINGLE WRITER for the unified credit engine (epic #50). Every mutation of
+// credit_ledger + credit_balances flows through charge()/grant()/refund()/expire()
+// here, in ONE transaction, so the invariant
+// `balance_cents == SUM(credit_ledger.delta_cents)` per user can never drift. Raw
+// `db.insert(creditLedger)` / bare UPDATE of credit_balances outside this file is
+// ILLEGAL — this is the ONLY writer.
 //
-// SHIPPED DORMANT (D1): fully implemented + tested, but NO call site invokes it
-// yet — D3 moves the AI call sites onto charge() in shadow. Nothing in the live
-// request path imports this module in D1.
+// AUTHORITATIVE (D4, no-legacy cutover): this is the SOLE billing engine. The old
+// debit-at-admission rails (the separate allowance rail table + the free-tier daily
+// counter table) are DELETED. Admission reads credit_balances
+// (api/lib/admission.ts); spend settles post-delivery through charge() here. There
+// is no shadow/dryRun mode and no legacy mirror — every write is real.
 //
 // Money rules (mirror shared/domain/credit-money.ts, which owns the arithmetic):
 //   - delivered:false  → universal no-op, NO transaction opened (undelivered work
 //     is never billed).
-//   - dryRun:true      → SHADOW: compute what WOULD happen, write NOTHING.
 //   - idempotency      → INSERT credit_charges … ON CONFLICT (ref_id) DO NOTHING
 //     RETURNING; empty RETURNING = replay → return early, bag does NOT
-//     re-accumulate, no ledger/balance mutation.
+//     re-accumulate, no ledger/balance mutation. This makes settlement SAFE to
+//     retry (charge-LOST): a re-run with the same ref_id can never double-charge.
 //   - sub-cent         → floor(bag+owed) < 1 → NO ledger row, only the bag
 //     remainder is persisted (still one balance upsert to carry the bag).
 //   - flush            → floor >= 1 → exactly ONE negative `consumption` ledger
@@ -27,19 +30,20 @@
 //     `FOR UPDATE` BEFORE the bag is read, so two concurrent delivered charges for
 //     one user can never read the same stale bag_cents and commit stale remainders
 //     (bag accrual+flush is serialized on the row lock, not raced in app code).
-//   - negative balance is kept REAL (admission gating is D4, not here).
+//   - negative balance is kept REAL (the last-cent request completes; the NEXT
+//     admission is denied by the balance read — grace-at-zero).
 //
 // ref_id NAMESPACE CONVENTION (invariant safety):
 //   credit_ledger.ref_id is a GLOBAL key shared by every writer (charge
-//   consumption rows, grant/purchase rows, and the legacy/backfill rails). A
-//   consumption row's ref_id is therefore NAMESPACED as `charge:<refId>` so it can
-//   NEVER collide with a grant/purchase/legacy/allowance ref_id that happens to
-//   reuse the same raw string. credit_charges still keys idempotency on the RAW
-//   refId (its own PK) — the namespace lives only on the ledger side. The paired
-//   ledger insert uses RETURNING and THROWS on an unexpected empty result so an
-//   unforeseen ref_id collision ROLLS BACK the whole tx instead of silently
-//   committing a balance debit with no ledger row (invariant break). Replay is
-//   owned SOLELY by the credit_charges claim above — NOT by the ledger insert.
+//   consumption rows + grant/purchase/refund rows). A consumption row's ref_id is
+//   therefore NAMESPACED as `charge:<refId>` so it can NEVER collide with a
+//   grant/purchase/refund ref_id that happens to reuse the same raw string.
+//   credit_charges still keys idempotency on the RAW refId (its own PK) — the
+//   namespace lives only on the ledger side. The paired ledger insert uses
+//   RETURNING and THROWS on an unexpected empty result so an unforeseen ref_id
+//   collision ROLLS BACK the whole tx instead of silently committing a balance
+//   debit with no ledger row (invariant break). Replay is owned SOLELY by the
+//   credit_charges claim above — NOT by the ledger insert.
 
 import { sql } from "drizzle-orm";
 import { db } from "../db/client";
@@ -85,6 +89,17 @@ function runInTx<T>(tx: CreditTx | undefined, body: (tx: CreditTx) => Promise<T>
   return db.transaction(body);
 }
 
+/**
+ * A read/write executor for the money-core queries: either the global `db` (a
+ * standalone read) or an active transaction `CreditTx`. multiplierFor/expire's
+ * config reads take this so, when a tx is in play, EVERY read + write of the
+ * atomic unit runs on ONE connection — the caller's transaction — instead of the
+ * config read silently reaching for a second connection via the global `db`
+ * (Codex #61 round 5: a hidden second connection inside the supposedly-atomic
+ * persist+consume-marker+charge unit).
+ */
+type CreditExec = CreditTx | typeof db;
+
 export interface ChargeParams {
   scope: ChargeScope;
   /** Open-string funding/spend source — drives the mult.<source> config lookup. */
@@ -95,14 +110,16 @@ export interface ChargeParams {
   refId: string;
   /** Was the underlying work delivered? false → universal no-op, no tx. */
   delivered: boolean;
-  /** Shadow mode — compute the outcome but write NOTHING (CREDITS_MODE=shadow). */
-  dryRun: boolean;
+  /** Optional caller transaction to JOIN so the charge commits/rolls back with the
+   *  caller's persist + job-consumption marker as ONE atomic unit (Codex #61 round 3:
+   *  persisted AI output must never outlive its charge). Omitted → own tx. */
+  tx?: CreditTx | undefined;
 }
 
 export interface ChargeResult {
-  /** "no-op" (undelivered), "replay" (ref already charged), "shadow" (dryRun), */
+  /** "no-op" (undelivered), "replay" (ref already charged), */
   /** "flushed" (a consumption row written), or "sub-cent" (bag only, no row). */
-  outcome: "no-op" | "replay" | "shadow" | "flushed" | "sub-cent";
+  outcome: "no-op" | "replay" | "flushed" | "sub-cent";
   /** Whole cents moved to the ledger this call (0 for no-op/replay/sub-cent). */
   flushCents: number;
   /** Fractional owed cents computed from raw × multiplier (audit/shadow). */
@@ -113,10 +130,14 @@ export interface ChargeResult {
  * Resolve the ×100 billing multiplier for a source from credit_config
  * (`mult.<source>`). Unlisted source → MULT_DEFAULT_X100 (100 = 1×). Read live
  * (uncached) so an admin knob change takes effect without a redeploy.
+ *
+ * Takes the ACTIVE executor (`exec`): charge() passes the transaction so the
+ * config read joins the same atomic unit as the charge writes — never a second
+ * connection via the global `db` while the caller's tx is open (Codex #61 r5).
  */
-async function multiplierFor(source: string): Promise<number> {
+async function multiplierFor(exec: CreditExec, source: string): Promise<number> {
   const key = `mult.${source}`;
-  const [row] = await db
+  const [row] = await exec
     .select({ value: creditConfig.valueInt })
     .from(creditConfig)
     .where(sql`${creditConfig.key} = ${key}`)
@@ -125,35 +146,27 @@ async function multiplierFor(source: string): Promise<number> {
 }
 
 /**
- * Meter a delivered charge against the user's materialized balance. DORMANT in
- * D1 (no call site). See file header for the full rule set. Concentrates ledger
- * + balance writes in this one transaction (the single writer).
+ * Meter a delivered charge against the user's materialized balance. AUTHORITATIVE
+ * (D4): the SOLE spend path. See file header for the full rule set. Concentrates
+ * ledger + balance writes in this one transaction (the single writer). Idempotent
+ * by ref_id (credit_charges PK), so a charge-LOST retry can never double-charge.
  */
 export async function charge(params: ChargeParams): Promise<ChargeResult> {
-  const { scope, source, rawCents, refId, delivered, dryRun } = params;
+  const { scope, source, rawCents, refId, delivered } = params;
 
   // delivered:false → never bill undelivered work; do not even open a tx.
   if (!delivered) {
     return { outcome: "no-op", flushCents: 0, owedCents: 0 };
   }
 
-  const multX100 = await multiplierFor(source);
-  const owedCents = applyMultiplier(rawCents, multX100);
+  return runInTx(params.tx, async (tx) => {
+    // Multiplier read runs on the ACTIVE executor (tx), so when a caller tx is
+    // supplied the config read joins the SAME atomic unit as the charge writes —
+    // one connection, never a second global-db handle inside the supposedly-atomic
+    // persist+consume-marker+charge unit (Codex #61 round 5).
+    const multX100 = await multiplierFor(tx, source);
+    const owedCents = applyMultiplier(rawCents, multX100);
 
-  // dryRun (shadow) → compute the would-be flush against the CURRENT bag, but
-  // write nothing. Read the bag to make the shadow figure realistic.
-  if (dryRun) {
-    const [bagRow] = await db
-      .select({ bag: sql<string>`coalesce(bag_cents, '0')` })
-      .from(sql`credit_balances`)
-      .where(sql`user_id = ${scope.userId}::uuid`)
-      .limit(1);
-    const bag = bagRow ? Number(bagRow.bag) : 0;
-    const { flushCents } = flushBag(bag, owedCents);
-    return { outcome: "shadow", flushCents, owedCents };
-  }
-
-  return db.transaction(async (tx) => {
     // Idempotency claim FIRST: an empty RETURNING = this refId already charged
     // (replay) → return early. The bag must NOT re-accumulate on replay.
     const claim = await tx.execute(sql`
@@ -224,7 +237,7 @@ export async function charge(params: ChargeParams): Promise<ChargeResult> {
 
     // Exactly ONE consumption row = the balance decrement, same tx. The ledger
     // ref_id is NAMESPACED (`charge:<refId>`) so it can never collide with a
-    // grant/purchase/legacy/allowance ref_id. FAIL LOUD on an unexpected empty
+    // grant/purchase/refund ref_id. FAIL LOUD on an unexpected empty
     // RETURNING: idempotency/replay is owned by the credit_charges claim above,
     // NOT here, so a missing ledger row means a real ref_id collision — throw to
     // ROLL BACK the whole tx rather than commit a balance debit with no ledger row.
@@ -256,31 +269,6 @@ export async function charge(params: ChargeParams): Promise<ChargeResult> {
   });
 }
 
-/**
- * OPTIONAL legacy-compat mirror written IN THE SAME grant tx (D2 cutover safety).
- * The old SPEND-admission rails stay authoritative until D3 and read the LEGACY
- * `allowance_ledger` table (SUM(delta)). A grant routed to the unified
- * `credit_ledger` would be invisible to that admission, breaking live paid
- * spending. So an allowance-source grant ALSO writes its legacy allowance_ledger
- * row here — inside the SAME one-writer tx, so the money core remains the ONLY
- * writer of that table's grant rows (raw `db.insert(allowanceLedger)` is now
- * illegal outside this file). The mirror is idempotent on the same ref_id, so a
- * grant can never double. It is a temporary COMPAT row: D3 retires the legacy
- * read and this mirror with it.
- */
-export interface LegacyMirror {
-  /** Only `allowance_ledger` is mirrored (its old admission read is table-local). */
-  table: "allowance_ledger";
-  /** Legacy action tag stored on the mirror row (e.g. monthly_grant / top_up). */
-  action: string;
-  /** Legacy signed units (positive money-in) — the old rail's own currency. */
-  units: number;
-  /** Legacy ref_id for the mirror row (its own unique index; may differ from the
-   *  unified ledger refId so the two indices never collide). */
-  refId: string;
-  note?: string | undefined;
-}
-
 export interface GrantParams {
   scope: ChargeScope;
   /** Positive cents to add (grant/purchase money-in). */
@@ -288,28 +276,24 @@ export interface GrantParams {
   source: string;
   refId: string;
   kind: "grant" | "purchase";
-  /** Legacy-compat mirror row written in the same tx (D2 cutover; see above). */
-  legacyMirror?: LegacyMirror | undefined;
   /** Optional caller transaction to JOIN (coupon atomic-cap unit); see CreditTx. */
   tx?: CreditTx | undefined;
 }
 
 /**
  * Money-IN through the single writer: one positive unified ledger row + balance
- * upsert + reference_cents anchor bump (+ an optional legacy-compat mirror row),
- * all in one tx, idempotent by ref_id. D2 routes subscription / coupon / purchase
- * / admin grants here — ALL grant-side ledger writes live in this one file.
+ * upsert + reference_cents anchor bump, all in one tx, idempotent by ref_id. All
+ * subscription / coupon / purchase / admin grants route here — ALL grant-side
+ * ledger writes live in this one file.
  */
 export async function grant(params: GrantParams): Promise<{ applied: boolean }> {
-  const { scope, cents, source, refId, kind, legacyMirror } = params;
+  const { scope, cents, source, refId, kind } = params;
   // RESERVED-PREFIX GUARD. grant() writes the caller's raw refId straight into the
   // GLOBAL credit_ledger.ref_id. A caller refId beginning with an internal
-  // namespace (`charge:` / `legacy_allowance:`) would shadow a later charge /
-  // backfill row on the same key, making that row's fail-loud insert no-op and
-  // roll back a legitimate write. Reject it at the money-core boundary (shared
-  // guard — same one grantCredits/coupon-redeem use).
+  // namespace (`charge:`) would shadow a later charge row on the same key, making
+  // that row's fail-loud insert no-op and roll back a legitimate write. Reject it
+  // at the money-core boundary (shared guard — same one coupon-redeem uses).
   assertExternalRefId(refId, "grant()");
-  if (legacyMirror !== undefined) assertExternalRefId(legacyMirror.refId, "grant() legacyMirror");
   return runInTx(params.tx, async (tx) => {
     const inserted = await tx.execute(sql`
       INSERT INTO credit_ledger (user_id, delta, action, delta_cents, kind, source, ref_id, created_by, last_upd_by)
@@ -349,24 +333,6 @@ export async function grant(params: GrantParams): Promise<{ applied: boolean }> 
         last_upd_at = now(),
         last_upd_by = ${scope.userId}::uuid
     `);
-    // Legacy-compat mirror (allowance_ledger) — SAME tx, idempotent on its ref_id.
-    // Keeps the pre-D3 SPEND admission (which reads allowance_ledger) able to see
-    // this grant, without a second raw writer outside the core.
-    if (legacyMirror !== undefined) {
-      await tx.execute(sql`
-        INSERT INTO allowance_ledger (user_id, delta, action, ref_id, note, created_by, last_upd_by)
-        VALUES (
-          ${scope.userId}::uuid,
-          ${legacyMirror.units},
-          ${legacyMirror.action},
-          ${legacyMirror.refId},
-          ${legacyMirror.note ?? null},
-          ${scope.userId}::uuid,
-          ${scope.userId}::uuid
-        )
-        ON CONFLICT (ref_id) DO NOTHING
-      `);
-    }
     return { applied: true };
   });
 }
@@ -378,26 +344,22 @@ export interface RefundParams {
   source: string;
   /** Idempotency key for the refund ledger row (e.g. `refund:<jobId>`). */
   refId: string;
-  /** Optional legacy-compat mirror (reverses the legacy spend row's own rail). */
-  legacyMirror?: LegacyMirror | undefined;
   /** Optional caller transaction to JOIN; see CreditTx. */
   tx?: CreditTx | undefined;
 }
 
 /**
  * DORMANT correction path — money BACK-IN through the single writer as
- * `kind=refund`. Delivery is confirmed by delivered-only charging (D3), so refund
- * is NOT the normal correction path; it survives only to reverse a legacy spend
- * whose relay job came back status:error before the delivered-only cutover. Kept
- * here so refund ledger writes are ALSO concentrated in the one money-core file
- * (raw refund inserts in credits.ts / allowance.ts are now illegal). Idempotent
- * by ref_id; balance upsert never bumps reference_cents (a refund is a correction,
- * not a fresh money-in anchor).
+ * `kind=refund`. Delivery is confirmed by delivered-only charging, so refund is
+ * NOT the normal correction path (an undelivered job is simply never charged). It
+ * survives as an admin/adjustment reversal primitive so refund ledger writes are
+ * ALSO concentrated in the one money-core file. Idempotent by ref_id; balance
+ * upsert never bumps reference_cents (a refund is a correction, not a fresh
+ * money-in anchor).
  */
 export async function refund(params: RefundParams): Promise<{ applied: boolean }> {
-  const { scope, cents, source, refId, legacyMirror } = params;
+  const { scope, cents, source, refId } = params;
   assertExternalRefId(refId, "refund()");
-  if (legacyMirror !== undefined) assertExternalRefId(legacyMirror.refId, "refund() legacyMirror");
   return runInTx(params.tx, async (tx) => {
     const inserted = await tx.execute(sql`
       INSERT INTO credit_ledger (user_id, delta, action, delta_cents, kind, source, ref_id, created_by, last_upd_by)
@@ -433,21 +395,6 @@ export async function refund(params: RefundParams): Promise<{ applied: boolean }
         last_upd_at = now(),
         last_upd_by = ${scope.userId}::uuid
     `);
-    if (legacyMirror !== undefined) {
-      await tx.execute(sql`
-        INSERT INTO allowance_ledger (user_id, delta, action, ref_id, note, created_by, last_upd_by)
-        VALUES (
-          ${scope.userId}::uuid,
-          ${legacyMirror.units},
-          ${legacyMirror.action},
-          ${legacyMirror.refId},
-          ${legacyMirror.note ?? null},
-          ${scope.userId}::uuid,
-          ${scope.userId}::uuid
-        )
-        ON CONFLICT (ref_id) DO NOTHING
-      `);
-    }
     return { applied: true };
   });
 }
@@ -485,35 +432,37 @@ export interface ExpireResult {
  * `SUM(credit_ledger.delta_cents) WHERE source = <source>` under the same balance
  * row lock, then clamped ≥0 (already-spent-down source loses only what remains).
  *
- * SHIPPED DORMANT (D2): the unified credit_balances/credit_ledger cannot reflect
- * TRUE consumption until live spend routes through charge() — that is D3. In D2
- * live spend is still the legacy debit-at-admission rail (allowance_ledger/
- * credit_ledger legacy rows), so a source's unified leftover is NOT yet its real
- * remaining balance. Therefore expire() MUST NOT be wired to any scheduled/live
- * activation against real balances in D2. It ships exactly like charge() shipped
- * dormant in D1: fully implemented, config-driven, unit-tested against the unified
- * model — but NO production/scheduled caller invokes it. ACTIVATION moves to D3,
- * after spend is unified. (Guard: api/lib/credit-charge-d2.test.ts asserts no live
- * caller of expire() exists yet.)
+ * ACTIVE (D4): now that spend routes through charge() (the unified balance IS the
+ * real remaining balance), expire() runs against live balances. A scheduled/period
+ * caller resolves the per-source knobs and invokes it; source/window-aware clawback
+ * keeps the invariant. Idempotent by the deterministic ref_id, so re-running a
+ * period is a no-op.
  */
 export async function expire(params: ExpireParams): Promise<ExpireResult> {
   const { scope, source, period, monthsElapsed } = params;
-  const [rolloverRow] = await db
-    .select({ value: creditConfig.valueInt })
-    .from(creditConfig)
-    .where(sql`${creditConfig.key} = ${rolloverKey(source)}`)
-    .limit(1);
-  const [expiryRow] = await db
-    .select({ value: creditConfig.valueInt })
-    .from(creditConfig)
-    .where(sql`${creditConfig.key} = ${expiryMonthsKey(source)}`)
-    .limit(1);
-  const policy = resolveResetPolicy(rolloverRow?.value, expiryRow?.value);
-  if (!shouldExpire(policy, monthsElapsed)) {
-    return { outcome: policy.rollover ? "rollover" : "not-due", expiredCents: 0 };
-  }
   const refId = expiryRefId(scope.userId, source, period);
   return db.transaction(async (tx) => {
+    // Config reads run on the ACTIVE tx executor, not the global `db`, so the
+    // policy read + the clawback write are ONE connection / ONE atomic unit
+    // (Codex #61 round 5). A rollover/not-due early-return simply rolls back an
+    // empty (no-write) tx.
+    const [rolloverRow] = await tx
+      .select({ value: creditConfig.valueInt })
+      .from(creditConfig)
+      .where(sql`${creditConfig.key} = ${rolloverKey(source)}`)
+      .limit(1);
+    const [expiryRow] = await tx
+      .select({ value: creditConfig.valueInt })
+      .from(creditConfig)
+      .where(sql`${creditConfig.key} = ${expiryMonthsKey(source)}`)
+      .limit(1);
+    const policy = resolveResetPolicy(rolloverRow?.value, expiryRow?.value);
+    if (!shouldExpire(policy, monthsElapsed)) {
+      return {
+        outcome: policy.rollover ? "rollover" : "not-due",
+        expiredCents: 0,
+      } satisfies ExpireResult;
+    }
     // Lock the balance row (create-if-missing then FOR UPDATE) BEFORE reading it,
     // so concurrent expiry / charge for the same user serialize on the row.
     await tx.execute(sql`
