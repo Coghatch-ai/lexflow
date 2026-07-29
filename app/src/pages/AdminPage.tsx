@@ -10,6 +10,7 @@ import { CsvImport } from './admin-csv-import';
 
 export { AdminAlgorithmPage } from './admin-algorithm-page';
 export { AdminCalendarPage } from './admin-calendar-page';
+export { AdminCouponsPage } from './admin-coupons-page';
 
 type QuestionsTab = 'list' | 'form' | 'import';
 

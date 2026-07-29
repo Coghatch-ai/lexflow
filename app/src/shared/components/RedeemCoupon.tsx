@@ -83,7 +83,6 @@ export default function RedeemCoupon({
             setSuccessMsg(null);
             setErrorMsg(null);
           }}
-          placeholder="XXXX-XXXX"
           maxLength={9}
           spellCheck={false}
           aria-label="Código do cupom"
