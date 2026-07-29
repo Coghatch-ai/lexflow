@@ -3,7 +3,7 @@
 // Unit tests for resolveAiPrompt provider/model threading.
 
 import { describe, expect, it } from "vitest";
-import { resolveAiPrompt } from "./ai-prompts";
+import { AI_PROMPTS, resolveAiPrompt, type PromptId } from "./ai-prompts";
 
 const explainVars = {
   questionText: "Q",
@@ -74,4 +74,28 @@ describe("oab-explain system prompt — whyCorrect opening mandate", () => {
     expect(mandateIdx).toBeGreaterThan(-1);
     expect(mandateIdx).toBeLessThan(whyWrongIdx);
   });
+});
+
+// Regression for #62: OpenAI's json_object format rejects the request (400) unless
+// the literal word "json" appears in the INPUT message. openaiComplete routes the
+// system prompt to `instructions` (which does NOT count) and the user prompt to
+// `input` — so every json:true prompt MUST carry "json" in its USER template, not
+// just in system. oab-grade lacked it and failed only under the OpenAI provider
+// (Gemini's response_mime_type masked the constraint). This guards grade + every
+// future json prompt against the same trap.
+describe("json:true prompts carry literal 'json' in the USER message (#62)", () => {
+  const promptIds = Object.keys(AI_PROMPTS) as PromptId[];
+
+  for (const id of promptIds) {
+    const tmpl: { json?: boolean; vars: readonly string[] } = AI_PROMPTS[id];
+    const effectiveJson = (tmpl.json ?? true) === true;
+    if (!effectiveJson) continue;
+
+    it(`${id}: resolved user text matches /json/i`, () => {
+      const vars = Object.fromEntries(tmpl.vars.map((v) => [v, "x"]));
+      const p = resolveAiPrompt(id, vars);
+      expect(p.json).toBe(true);
+      expect(p.user).toMatch(/json/i);
+    });
+  }
 });

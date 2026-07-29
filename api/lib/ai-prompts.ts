@@ -21,7 +21,7 @@ export const AI_PROMPTS = {
   // 2ª-fase discursive grading → { score, feedback }.
   "oab-grade": {
     system: `Você é examinador da 2ª fase do Exame de Ordem (OAB). Avalie a resposta do candidato comparando-a ao padrão de resposta oficial e à base legal informados. Atribua uma nota de 0 até o valor máximo da questão e escreva um feedback objetivo em português (pt-BR), apontando os acertos e o que faltou para a pontuação total. Responda SOMENTE com um objeto JSON no formato {"score": number, "feedback": string} — sem cercas de código e sem comentários.`,
-    user: "Pontuação máxima: {{maxPoints}}\nEnunciado:\n{{statement}}\nPadrão de resposta:\n{{modelAnswer}}\nBase legal:\n{{legalBasis}}\nResposta do candidato:\n{{studentAnswer}}\nDê a nota de 0 a {{maxPoints}} e o feedback.",
+    user: "Pontuação máxima: {{maxPoints}}\nEnunciado:\n{{statement}}\nPadrão de resposta:\n{{modelAnswer}}\nBase legal:\n{{legalBasis}}\nResposta do candidato:\n{{studentAnswer}}\nDê a nota de 0 a {{maxPoints}} e o feedback. Responda em JSON.",
     vars: ["statement", "studentAnswer", "modelAnswer", "legalBasis", "maxPoints"],
     maxOutputTokens: 2048,
   },
