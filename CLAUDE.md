@@ -6,6 +6,11 @@ Guidance for Claude Code working in this repo.
 the LOV/picklist rules (English code, pt-BR label), the no-duplication + business-rules-in-`shared/`
 rules, and the step-by-step refactor playbook.
 
+**Pushing anything under `drizzle/`? Read
+[.claude/library/migration-deploy-contract.md](.claude/library/migration-deploy-contract.md) first** —
+CI does NOT run migrations (manual `pnpm db:migrate` from a laptop; DB in a no-NAT VPC by design), so
+merge/deploy ≠ migrated. A push-guard hook blocks agent pushes of unapplied migrations.
+
 ## Project Overview
 
 **LexFlow** — a study platform for Brazilian legal exams (initial focus: OAB bar exam).
@@ -74,6 +79,7 @@ pnpm db:seed-lov  # Sync ONLY list_of_values picklists from shared/data/lov.ts (
                   # Use this for ANY LOV/disciplines/label change — NOT db:seed (see docs/conventions.md).
 pnpm db:create-user <clerk-user-id> [email] [name...]   # Manually create a local users row
 pnpm smoke        # End-to-end check of the data API against the DB (throwaway user, self-cleans)
+# NOTE: no e2e/uat script yet — framework UAT (/uat) is unavailable until one is added.
 ```
 
 ## Data API (tRPC routers)
@@ -129,6 +135,11 @@ smtp-*) — resolved at deploy by`template.yaml`, or fetched at runtime by the r
   See `infra/deploy-runbook.md` for bootstrap + custom domain steps.
 - **Deploy via GitHub Actions only** (`deploy-api.yml`, `deploy-app.yml`). NEVER `sam deploy` from a laptop.
 - **Migrations:** `db:generate` → review SQL → `db:migrate`. NEVER apply SQL manually to RDS.
+  CI does NOT run migrations (deploy ships code only; DB in a no-NAT VPC). Before pushing anything
+  under `drizzle/`, verify every migration is applied (`pnpm db:migrate` succeeded) — merge/deploy
+  ≠ migrated. A push-guard hook (`.claude/hooks/guard-migrate-push.mjs`) blocks agent pushes of
+  unapplied migrations via `drizzle/meta/_applied.json`. See
+  [.claude/library/migration-deploy-contract.md](.claude/library/migration-deploy-contract.md).
 
 ## GitHub — issue auto-close
 
@@ -169,6 +180,9 @@ the contract). Add durable, standing facts here — not slice-specific notes.
 - Import `@clerk/*` outside `app/src/auth/**` or `api/lib/auth-provider/**` (the auth adapter).
 - Commit `.env` or secrets (SSM for backend, GitHub Environment secrets for frontend).
 - Deploy manually or run `db:push`.
+- Push a new/edited `drizzle/*.sql` before it is applied (`pnpm db:migrate` succeeded) — merge/deploy
+  does NOT migrate (CI ships code only; DB in a no-NAT VPC). The push-guard hook enforces this for
+  agent pushes; the `needs-migration` label is only a soft reminder.
 - Use `console.log` (only `warn`/`error`), `any`, or non-null `!`.
 - Create a git branch without user approval.
 - Add or remove a dependency (`pnpm add`/`remove`/`install <pkg>`) without explicit approval —

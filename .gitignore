@@ -47,7 +47,14 @@ scripts/out/
 # Xenomoon autonomous-agent local state (machine-managed, churns constantly)
 .xenomoon/
 
+# Applied-migrations marker (per-machine local state; written at db:migrate, read
+# by the migrate push-guard). Not repo content — never commit.
+drizzle/meta/_applied.json
+
 # Eval harness outputs (promptfoo cache + results)
 evals/.promptfoo/
 evals/results/latest.json
 evals/node_modules/
+
+# Xenomoon Forge generated/working files — not repo content
+.claude/projects/
