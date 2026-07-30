@@ -1,5 +1,5 @@
 ---
-name: bug-triage
+name: p-bug-triage
 description: Triages a GitHub issue (or a described problem) for the Coghatch-ai/lexflow repo. Decides whether it is a real bug or a new request, applies the right label, and posts a pt-BR comment. For bugs it confirms it's being worked on; for new requests it gathers the info the next agent will need. Triage ONLY — never fixes code.
 tools: Bash, Read, Grep, Glob
 model: sonnet

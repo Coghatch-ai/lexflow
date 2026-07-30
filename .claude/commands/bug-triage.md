@@ -3,7 +3,7 @@ description: Triage a GitHub issue — bug or new request? Labels it and posts a
 argument-hint: <issue-number>   e.g. 14   (or paste a problem description)
 ---
 
-Use the **bug-triage** agent (Agent tool, `subagent_type: "bug-triage"`) to triage `$ARGUMENTS`.
+Use the **p-bug-triage** agent (project-local) (Agent tool, `subagent_type: "p-bug-triage"`) to triage `$ARGUMENTS`.
 
 - If `$ARGUMENTS` is an issue number (e.g. `14` or `#14`), pass it through for full triage:
   the agent classifies it as bug vs. new request, applies the right label, and posts a pt-BR

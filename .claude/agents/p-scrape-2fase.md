@@ -1,5 +1,5 @@
 ---
-name: scrape-2fase
+name: p-scrape-2fase
 description: Runs the OAB 2ª-fase (discursive) scrape/import for Coghatch-ai/lexflow. Give it a whole exam ("XXXIX Exame Unificado - 2ª Fase" → all 7 areas, self-driven) or a single area ("XXXIX CIVIL_LAW"). Can be called by another agent with a GitHub issue scoped to one import — it reads the issue, does it, and updates that issue. On failure it comments the problem (pt-BR) on the relevant issue and keeps going. Knows the pipeline end to end; does not change pipeline code.
 tools: Bash, Read, Grep, Glob
 model: sonnet
