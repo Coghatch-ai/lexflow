@@ -53,7 +53,13 @@ export function SignInPage(): ReactElement {
           </span>
         </div>
 
+        {/* withSignUp turns this into the combined sign-in-or-up flow: an unknown email is
+            prompted to register INSIDE this themed widget. Without it the "Sign up" link
+            leaves for the hosted Account Portal (accounts.probius.app), which Clerk does not
+            allow the appearance prop to style — it is dashboard-only, so it can never match
+            the Chambers palette. Keeping the flow embedded is the only way to theme sign-up. */}
         <SignIn
+          withSignUp
           routing="virtual"
           appearance={{
             variables: {

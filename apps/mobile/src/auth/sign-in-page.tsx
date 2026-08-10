@@ -17,7 +17,10 @@ export function SignInPage(): ReactElement {
 
       <p className="eyebrow mb-6 !text-seal">Prática OAB · uso interno</p>
 
+      {/* Combined sign-in-or-up, same reason as the web app: it keeps registration inside
+          this themed widget instead of handing off to the un-themeable Account Portal. */}
       <SignIn
+        withSignUp
         routing="virtual"
         appearance={{
           variables: {
