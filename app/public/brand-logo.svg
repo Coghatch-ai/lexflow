@@ -1,21 +1,24 @@
-<!-- Probius brand lockup — badge + wordmark. Derived from the existing favicon.svg (badge)
-     and og-image.svg (wordmark treatment) so all three stay one system.
-     Palette: ink #16161a, seal #d9ab53, ink-mute #6b6b75 — the Chambers palette used by the
-     app's Clerk <SignIn> appearance. Transparent background: reads on the light Clerk
-     Account Portal without a plate. -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 96" width="420" height="96">
-  <!-- badge: same geometry as favicon.svg, scaled to the cap height of the wordmark -->
-  <rect x="0" y="16" width="64" height="64" rx="14" fill="#16161a" />
-  <text x="30" y="52" text-anchor="middle" dominant-baseline="middle"
-        font-family="'Space Grotesk', 'Trebuchet MS', Arial, sans-serif"
-        font-size="36" font-weight="700" fill="#ffffff">P</text>
-  <circle cx="45" cy="36" r="4" fill="#d9ab53" />
+<!-- Probius brand lockup — scales mark + wordmark, matching what the app renders.
+     Mark: the lucide "scale" icon, path data copied verbatim from
+     node_modules/lucide-react/dist/esm/icons/scale.js (v0.453.0), drawn with lucide's
+     own stroke conventions (24x24 viewport, width 2, round cap/join).
+     Wordmark: Prob + ius, the seal split used in sign-in-page.tsx and og-image.svg.
+     Dark plate (#16161a = ink) because the mark is gold-on-dark in the product UI. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 112" width="420" height="112">
+  <rect width="420" height="112" fill="#16161a" />
 
-  <!-- wordmark: ink + seal split, matching og-image.svg line 11 -->
-  <text x="86" y="56" dominant-baseline="middle"
-        font-family="'Space Grotesk', 'Trebuchet MS', Arial, sans-serif"
-        font-size="44" font-weight="700" letter-spacing="-1" fill="#16161a">Prob<tspan fill="#d9ab53">ius</tspan></text>
+  <!-- lucide Scale, scaled 24 -> 44 and positioned on the wordmark's optical baseline -->
+  <g transform="translate(32,34) scale(1.833)" fill="none" stroke="#d9ab53"
+     stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z" />
+    <path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z" />
+    <path d="M7 21h10" />
+    <path d="M12 3v18" />
+    <path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2" />
+  </g>
 
-  <!-- gold rule: the same underline device as the OG image -->
-  <rect x="88" y="72" width="72" height="4" rx="2" fill="#d9ab53" />
+  <text x="112" y="58" dominant-baseline="middle"
+        font-family="'Space Grotesk', 'Trebuchet MS', Arial, sans-serif"
+        font-size="46" font-weight="700" letter-spacing="-1"
+        fill="#ffffff">Prob<tspan fill="#d9ab53">ius</tspan></text>
 </svg>
