@@ -1,0 +1,21 @@
+<!-- Probius brand lockup — badge + wordmark. Derived from the existing favicon.svg (badge)
+     and og-image.svg (wordmark treatment) so all three stay one system.
+     Palette: ink #16161a, seal #d9ab53, ink-mute #6b6b75 — the Chambers palette used by the
+     app's Clerk <SignIn> appearance. Transparent background: reads on the light Clerk
+     Account Portal without a plate. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 96" width="420" height="96">
+  <!-- badge: same geometry as favicon.svg, scaled to the cap height of the wordmark -->
+  <rect x="0" y="16" width="64" height="64" rx="14" fill="#16161a" />
+  <text x="30" y="52" text-anchor="middle" dominant-baseline="middle"
+        font-family="'Space Grotesk', 'Trebuchet MS', Arial, sans-serif"
+        font-size="36" font-weight="700" fill="#ffffff">P</text>
+  <circle cx="45" cy="36" r="4" fill="#d9ab53" />
+
+  <!-- wordmark: ink + seal split, matching og-image.svg line 11 -->
+  <text x="86" y="56" dominant-baseline="middle"
+        font-family="'Space Grotesk', 'Trebuchet MS', Arial, sans-serif"
+        font-size="44" font-weight="700" letter-spacing="-1" fill="#16161a">Prob<tspan fill="#d9ab53">ius</tspan></text>
+
+  <!-- gold rule: the same underline device as the OG image -->
+  <rect x="88" y="72" width="72" height="4" rx="2" fill="#d9ab53" />
+</svg>
