@@ -33,7 +33,17 @@ export const handler = async (
   event: APIGatewayProxyEventV2,
   context: Context,
 ): Promise<APIGatewayProxyStructuredResultV2> => {
-  const { method, path } = event.requestContext.http;
+  const { method } = event.requestContext.http;
+
+  // Path normalisation — do NOT use requestContext.http.path directly. The custom domain
+  // (api.probius.app) maps to a NAMED stage via a root ApiMapping, so that field arrives as
+  // "/prod/webhooks/clerk", while the {proxy+} catch-all exposes the stage-free remainder in
+  // pathParameters.proxy ("webhooks/clerk"). Matching the raw field meant POST /webhooks/clerk
+  // never equalled "/webhooks/clerk", fell through to tRPC and 404'd — so no user.created event
+  // has ever been processed and no users row was ever provisioned (issue #64). Prefer the proxy
+  // remainder; fall back to the raw path for non-catch-all invocations.
+  const proxy = event.pathParameters?.["proxy"];
+  const path = proxy === undefined ? event.requestContext.http.path : `/${proxy}`;
 
   if (method === "OPTIONS") {
     return { statusCode: 200, headers: CORS_HEADERS, body: "" };
