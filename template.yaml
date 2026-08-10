@@ -13,6 +13,14 @@ Globals:
     Timeout: 30
     MemorySize: 512
     Runtime: nodejs24.x
+    Environment:
+      Variables:
+        # Bump DEPLOY_REV to force a redeploy that re-resolves the non-versioned
+        # {{resolve:ssm}} secrets. CloudFormation does NOT change-detect them, and CI
+        # runs --no-fail-on-empty-changeset, so rotating an SSM value alone produces a
+        # GREEN deploy that leaves the Lambda on the OLD value. Bump this in the same
+        # commit as any secret rotation (clerk-jwt-key, db-password, …).
+        DEPLOY_REV: "clerk-prod-cutover-2026-08-05"
     Tags:
       Project: lexflow
       Environment: !Ref Environment

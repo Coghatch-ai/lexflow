@@ -39,6 +39,11 @@ export function SignInPage(): ReactElement {
         }}
       />
 
+      {/* Turnstile mount point — same reason as the web app: the prod Clerk instance
+          has bot protection on, and without this element Clerk uses an invisible
+          widget that blocks the first sign-in on a new device. */}
+      <div id="clerk-captcha" />
+
       <p className="mt-8 text-xs text-ink-mute">
         Powered by{" "}
         <a

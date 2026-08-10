@@ -75,6 +75,14 @@ export function SignInPage(): ReactElement {
           }}
         />
 
+        {/* Turnstile mount point. The prod Clerk instance has bot protection on
+            (user_settings.sign_up.captcha_enabled = true, widget "smart"). Without this
+            element Clerk falls back to an INVISIBLE widget that blocks suspected-bot
+            traffic — which silently breaks the first sign-in on a new device (the
+            Client-Trust path) and any sign-up. Dev instances run in test_mode and never
+            enforce it, so its absence only shows up in production. */}
+        <div id="clerk-captcha" />
+
         <p className="mt-8 text-xs text-ink-mute">
           Powered by{" "}
           <a
