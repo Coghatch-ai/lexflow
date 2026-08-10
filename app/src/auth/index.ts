@@ -6,6 +6,8 @@
 
 export { AuthProvider } from "./provider";
 export { SignInPage } from "./sign-in-page";
+export { SignUpPage } from "./sign-up-page";
+export { AUTH_ROUTES, clerkAppearance } from "./appearance";
 export { useSession } from "./use-session";
 export type { Session, SessionUser } from "./use-session";
 export { useGetToken } from "./use-token";

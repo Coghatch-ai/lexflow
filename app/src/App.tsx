@@ -1,6 +1,6 @@
 import type { ReactElement } from "react";
 import { Router, Switch, Route, Redirect } from "wouter";
-import { SignedIn, SignedOut, SignInPage } from "@/auth";
+import { SignedIn, SignedOut, SignInPage, SignUpPage, AUTH_ROUTES } from "@/auth";
 import Layout from "./components/Layout";
 import HomePage from "./pages/HomePage";
 import TestingPage from "./pages/TestingPage";
@@ -23,7 +23,17 @@ export default function App(): ReactElement {
   return (
     <>
       <SignedOut>
-        <SignInPage />
+        {/* Signed-out routing exists so the APP owns /sign-up. Clerk's footer link points here
+            (AUTH_ROUTES.signUp) instead of at the hosted Account Portal, which cannot be themed
+            from code. The catch-all Route MUST stay last: any unmatched path while signed out
+            falls through to sign-in, so a deep link to a protected page still lands somewhere
+            sensible rather than rendering blank. */}
+        <Router>
+          <Switch>
+            <Route path={AUTH_ROUTES.signUp} component={SignUpPage} />
+            <Route component={SignInPage} />
+          </Switch>
+        </Router>
       </SignedOut>
       <SignedIn>
         <Router>
