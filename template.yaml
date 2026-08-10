@@ -20,7 +20,7 @@ Globals:
         # runs --no-fail-on-empty-changeset, so rotating an SSM value alone produces a
         # GREEN deploy that leaves the Lambda on the OLD value. Bump this in the same
         # commit as any secret rotation (clerk-jwt-key, db-password, …).
-        DEPLOY_REV: "clerk-prod-cutover-2026-08-05"
+        DEPLOY_REV: "clerk-webhook-secret-2026-08-10"
     Tags:
       Project: lexflow
       Environment: !Ref Environment
