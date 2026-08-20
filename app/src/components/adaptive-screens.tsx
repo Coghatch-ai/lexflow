@@ -136,11 +136,13 @@ interface AdaptivePlayingProps {
   difficultyLov: Lov;
   onSelect: (answer: string) => void;
   onAnswer: () => void;
+  onRequestExit: () => void;
 }
 
 export function AdaptivePlaying({
   adaptive, totalQuestions, timer, currentQuestion, selectedAnswer,
   notesAndBookmarks, disciplineLov, examBoardLov, difficultyLov, onSelect, onAnswer,
+  onRequestExit,
 }: AdaptivePlayingProps): ReactElement {
   const { localNotes, bookmarkedIds, handleNoteChange, handleToggleBookmark } = notesAndBookmarks;
   return (
@@ -153,9 +155,17 @@ export function AdaptivePlaying({
             {difficultyLov.labelOf(adaptive.currentDifficulty)}
           </span>
         </div>
-        <div className="flex items-center gap-2 text-sm text-gray-600">
-          <Clock className="w-4 h-4" />
-          {Math.floor(timer / 60)}:{String(timer % 60).padStart(2, '0')}
+        <div className="flex items-center gap-4 text-sm text-gray-600">
+          <span className="flex items-center gap-2">
+            <Clock className="w-4 h-4" />
+            {Math.floor(timer / 60)}:{String(timer % 60).padStart(2, '0')}
+          </span>
+          <button
+            onClick={onRequestExit}
+            className="text-sm text-[#16161a] hover:text-[#26262c] font-medium transition"
+          >
+            Sair do simulado
+          </button>
         </div>
       </div>
 
@@ -205,10 +215,11 @@ interface AdaptiveFeedbackProps {
   currentQuestion: AdaptiveQuestion;
   difficultyLov: Lov;
   onNext: () => void;
+  onRequestExit: () => void;
 }
 
 export function AdaptiveFeedback({
-  adaptive, totalQuestions, lastCorrect, currentQuestion, difficultyLov, onNext,
+  adaptive, totalQuestions, lastCorrect, currentQuestion, difficultyLov, onNext, onRequestExit,
 }: AdaptiveFeedbackProps): ReactElement {
   const nextDiff = nextDifficulty(
     adaptive.currentDifficulty, adaptive.consecutiveCorrect, adaptive.consecutiveWrong
@@ -217,6 +228,21 @@ export function AdaptiveFeedback({
 
   return (
     <div className="space-y-4">
+      <div className="flex items-center justify-between bg-white rounded-xl p-4 shadow">
+        <div className="flex items-center gap-3">
+          <Brain className="w-5 h-5 text-[#16161a]" />
+          <span className="text-sm font-medium text-gray-700">
+            Questão {adaptive.totalAnswered} de {totalQuestions}
+          </span>
+        </div>
+        <button
+          onClick={onRequestExit}
+          className="text-sm text-[#16161a] hover:text-[#26262c] font-medium transition"
+        >
+          Sair do simulado
+        </button>
+      </div>
+
       <div className={`rounded-xl p-6 shadow ${lastCorrect === true ? 'bg-green-50 border-2 border-green-200' : 'bg-red-50 border-2 border-red-200'}`}>
         <div className="flex items-center gap-3 mb-4">
           {lastCorrect === true ? (

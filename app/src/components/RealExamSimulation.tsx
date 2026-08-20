@@ -1,17 +1,18 @@
 import { useState, useEffect, useCallback, type ReactElement } from 'react';
-import { Clock, AlertCircle, Flag, CheckCircle, XCircle, ArrowRightToLine } from 'lucide-react';
+import { Clock, AlertCircle, Flag, ArrowRightToLine } from 'lucide-react';
 import { useLov } from '../shared/hooks/use-lov';
 import { trpc } from '../shared/lib/trpc';
 import { shuffle } from '../shared/lib/shuffle';
 import { findNextUnanswered } from '../shared/lib/exam-queue';
 import ExamQuestionNav from './ExamQuestionNav';
 import ExamFinishDialog from './ExamFinishDialog';
-import { accuracyPct } from '@shared/domain/scoring';
+import ExamReview from './real-exam-review';
+import QuitTestDialog from './QuitTestDialog';
 import type { AiExplanation } from '@shared/domain/ai-eval';
 import { useNotesAndBookmarks, type NotesAndBookmarks } from '../shared/hooks/use-notes-bookmarks';
+import { useLeaveWarning } from '../shared/hooks/use-leave-warning';
 import QuestionCard from '@/shared/components/QuestionCard';
-import AiExplanationButton from '@/shared/components/AiExplanationButton';
-import { shouldShowExplanationToggle } from './real-exam-review-guards';
+import { type AnswerDraft, exitPrompt, processableAnswers, shouldPromptOnExit } from '../shared/lib/exit-rules';
 
 type Status = 'setup' | 'playing' | 'review' | 'finished';
 
@@ -117,13 +118,14 @@ interface ExamPlayingProps {
   onShowConfirmSubmit: () => void;
   onHideConfirmSubmit: () => void;
   onSubmit: () => void;
+  onRequestExit: () => void;
 }
 
 function ExamPlaying({
   questions, currentIndex, answers, flagged, postponed, timeLeft, showConfirmSubmit,
   notesAndBookmarks, disciplineLov, examBoardLov, canPostpone,
   onSelectAnswer, onSetIndex, onToggleFlag, onPostpone, onGoToUnanswered,
-  onShowConfirmSubmit, onHideConfirmSubmit, onSubmit,
+  onShowConfirmSubmit, onHideConfirmSubmit, onSubmit, onRequestExit,
 }: ExamPlayingProps): ReactElement {
   const { localNotes, bookmarkedIds, handleNoteChange, handleToggleBookmark } = notesAndBookmarks;
   const currentQuestion = questions[currentIndex];
@@ -183,6 +185,13 @@ function ExamPlaying({
             >
               <ArrowRightToLine className="w-4 h-4" />
               Responder depois
+            </button>
+            <button
+              onClick={onRequestExit}
+              className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm font-semibold hover:bg-gray-200 transition"
+              title="Sair da prova e processar as respostas já dadas"
+            >
+              Sair da prova
             </button>
             <button
               onClick={onShowConfirmSubmit}
@@ -246,122 +255,7 @@ function ExamPlaying({
   );
 }
 
-interface ExamReviewProps {
-  questions: ExamQuestion[];
-  answers: Map<number, string>;
-  timeLeft: number;
-  disciplineLov: Lov;
-  onReset: () => void;
-}
-
-interface QuestionReviewRowProps {
-  question: ExamQuestion;
-  idx: number;
-  userAnswer: string | undefined;
-  disciplineLov: Lov;
-}
-
-function QuestionReviewRow({ question, idx, userAnswer, disciplineLov }: QuestionReviewRowProps): ReactElement {
-  const isCorrect = userAnswer === question.correctAnswer;
-  const [expanded, setExpanded] = useState(false);
-  const showToggle = shouldShowExplanationToggle(isCorrect);
-  const rowCls = isCorrect ? 'bg-green-50 border-green-500' : userAnswer !== undefined ? 'bg-red-50 border-red-500' : 'bg-gray-50 border-gray-400';
-  return (
-    <div className={`p-3 rounded-lg border-l-4 ${rowCls}`}>
-      <div className="flex items-start justify-between">
-        <div className="flex-1">
-          <p className="font-medium text-gray-800 text-sm">
-            Questão {idx + 1} - {disciplineLov.labelOf(question.discipline)}
-          </p>
-          {!isCorrect && (
-            <div className="mt-1 text-xs">
-              <p className="text-red-600">Sua resposta: {userAnswer ?? 'Não respondida'}</p>
-              <p className="text-green-600">Correta: {question.correctAnswer}</p>
-            </div>
-          )}
-          {showToggle && (
-            <>
-              <button onClick={() => { setExpanded((v) => !v); }} className="mt-2 text-xs text-[#16161a] font-medium underline">
-                {expanded ? 'Ocultar explicação' : 'Ver explicação'}
-              </button>
-              {expanded && (
-                <div className="mt-2 bg-white rounded-lg p-3">
-                  <AiExplanationButton questionId={question.id} aiExplanation={question.aiExplanation} explanation={question.explanation} />
-                </div>
-              )}
-            </>
-          )}
-        </div>
-        {isCorrect ? <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" /> : <XCircle className="w-5 h-5 text-red-600 flex-shrink-0" />}
-      </div>
-    </div>
-  );
-}
-
-function ExamReview({ questions, answers, timeLeft, disciplineLov, onReset }: ExamReviewProps): ReactElement {
-  let correctCount = 0;
-  questions.forEach((q, idx) => {
-    if (answers.get(idx) === q.correctAnswer) correctCount++;
-  });
-  const accuracy = accuracyPct(correctCount, questions.length);
-  const timeUsed = EXAM_DURATION - timeLeft;
-
-  return (
-    <div className="space-y-6">
-      <div className="bg-gradient-to-r from-[#16161a] to-[#16161a] rounded-xl p-6 text-white">
-        <h3 className="text-2xl font-bold mb-2">Simulado Finalizado!</h3>
-        <p className="text-white/80">Veja como foi seu desempenho</p>
-      </div>
-
-      <div className="grid md:grid-cols-4 gap-4">
-        <div className="bg-white rounded-xl p-6 shadow text-center">
-          <div className="text-4xl font-bold text-[#16161a] mb-2">{accuracy}%</div>
-          <p className="text-gray-600">Acurácia</p>
-        </div>
-        <div className="bg-white rounded-xl p-6 shadow text-center">
-          <div className="text-4xl font-bold text-green-600 mb-2 flex items-center justify-center gap-2">
-            <CheckCircle className="w-8 h-8" />{correctCount}
-          </div>
-          <p className="text-gray-600">Acertos</p>
-        </div>
-        <div className="bg-white rounded-xl p-6 shadow text-center">
-          <div className="text-4xl font-bold text-red-600 mb-2 flex items-center justify-center gap-2">
-            <XCircle className="w-8 h-8" />{questions.length - correctCount}
-          </div>
-          <p className="text-gray-600">Erros</p>
-        </div>
-        <div className="bg-white rounded-xl p-6 shadow text-center">
-          <div className="text-4xl font-bold text-[#16161a] mb-2">{formatTime(timeUsed)}</div>
-          <p className="text-gray-600">Tempo Usado</p>
-        </div>
-      </div>
-
-      <div className="bg-white rounded-xl p-6 shadow">
-        <h4 className="text-lg font-bold text-[#16161a] mb-4">Revisão por Questão</h4>
-        <div className="space-y-2 max-h-[500px] overflow-y-auto">
-          {questions.map((q, idx) => (
-            <QuestionReviewRow
-              key={q.id}
-              question={q}
-              idx={idx}
-              userAnswer={answers.get(idx)}
-              disciplineLov={disciplineLov}
-            />
-          ))}
-        </div>
-      </div>
-
-      <button
-        onClick={onReset}
-        className="w-full bg-gradient-to-r from-[#26262c] to-[#26262c] text-white py-3 rounded-lg font-semibold hover:shadow-lg transition"
-      >
-        Fazer Outro Simulado Real
-      </button>
-    </div>
-  );
-}
-
-export default function RealExamSimulation(): ReactElement {
+export default function RealExamSimulation({ onExit }: { onExit: () => void }): ReactElement {
   const disciplineLov = useLov('DISCIPLINE');
   const examBoardLov = useLov('EXAM_BOARD');
   const [status, setStatus] = useState<Status>('setup');
@@ -373,6 +267,8 @@ export default function RealExamSimulation(): ReactElement {
   const [timeLeft, setTimeLeft] = useState(EXAM_DURATION);
   const [loading, setLoading] = useState(false);
   const [showConfirmSubmit, setShowConfirmSubmit] = useState(false);
+  // "Encerrar e processar" confirmation (BR-05.5) — the exam stays mounted behind it.
+  const [exitOpen, setExitOpen] = useState(false);
 
   const utils = trpc.useUtils();
   const recordMutation = trpc.sessions.record.useMutation({
@@ -432,19 +328,52 @@ export default function RealExamSimulation(): ReactElement {
     }
   };
 
+  // Every draft, answered or not — the review screen lists all 80 questions.
+  const drafts: AnswerDraft[] = questions.map((q, idx) => ({
+    questionId: q.id,
+    userAnswer: answers.get(idx) ?? '',
+    correct: answers.get(idx) === q.correctAnswer,
+    timeSpent: 0,
+  }));
+
+  // The single recording path of the exam: the normal "Encerrar", the 5h timer
+  // and "Sair da prova" all just move the status to 'review'. Only ANSWERED
+  // questions are recorded — a blank is never an error (BR-05.6 / BR-03).
   useEffect(() => {
     if (status !== 'review') return;
-    const log = questions.map((q, idx) => ({
-      questionId: q.id,
-      userAnswer: answers.get(idx) ?? '',
-      correct: answers.get(idx) === q.correctAnswer,
-      timeSpent: 0,
-    }));
+    const log = processableAnswers(
+      questions.map((q, idx) => ({
+        questionId: q.id,
+        userAnswer: answers.get(idx) ?? '',
+        correct: answers.get(idx) === q.correctAnswer,
+        timeSpent: 0,
+      })),
+    );
     if (log.length > 0) {
       recordMutation.mutate({ discipline: 'Prova Real', difficulty: 'hard', answers: log });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status]);
+
+  // Closing the tab or reloading during the exam warns first (BR-05.1).
+  useLeaveWarning(status === 'playing' && shouldPromptOnExit(answers.size));
+
+  // Leaving the exam asks first and warns it cannot be saved (BR-05.5); with
+  // nothing answered there is nothing to process, so it exits silently.
+  const requestExit = () => {
+    if (!shouldPromptOnExit(answers.size)) {
+      onExit();
+      return;
+    }
+    setExitOpen(true);
+  };
+
+  // "Encerrar e processar respostas": only moves to 'review'. The effect above
+  // is what records, so the exam still makes exactly ONE sessions.record call.
+  const handleQuitAndProcess = () => {
+    setExitOpen(false);
+    setStatus('review');
+  };
 
   const selectAnswer = (option: string) => {
     const newAnswers = new Map(answers);
@@ -488,27 +417,36 @@ export default function RealExamSimulation(): ReactElement {
 
   if (status === 'playing') {
     return (
-      <ExamPlaying
-        questions={questions}
-        currentIndex={currentIndex}
-        answers={answers}
-        flagged={flagged}
-        postponed={postponed}
-        timeLeft={timeLeft}
-        showConfirmSubmit={showConfirmSubmit}
-        notesAndBookmarks={notesAndBookmarks}
-        disciplineLov={disciplineLov}
-        examBoardLov={examBoardLov}
-        canPostpone={!answers.has(currentIndex) && findNextUnanswered(questions.length, currentIndex, answers) !== null}
-        onSelectAnswer={selectAnswer}
-        onSetIndex={setCurrentIndex}
-        onToggleFlag={toggleFlag}
-        onPostpone={postponeCurrent}
-        onGoToUnanswered={goToFirstUnanswered}
-        onShowConfirmSubmit={() => { setShowConfirmSubmit(true); }}
-        onHideConfirmSubmit={() => { setShowConfirmSubmit(false); }}
-        onSubmit={handleSubmit}
-      />
+      <>
+        <ExamPlaying
+          questions={questions}
+          currentIndex={currentIndex}
+          answers={answers}
+          flagged={flagged}
+          postponed={postponed}
+          timeLeft={timeLeft}
+          showConfirmSubmit={showConfirmSubmit}
+          notesAndBookmarks={notesAndBookmarks}
+          disciplineLov={disciplineLov}
+          examBoardLov={examBoardLov}
+          canPostpone={!answers.has(currentIndex) && findNextUnanswered(questions.length, currentIndex, answers) !== null}
+          onSelectAnswer={selectAnswer}
+          onSetIndex={setCurrentIndex}
+          onToggleFlag={toggleFlag}
+          onPostpone={postponeCurrent}
+          onGoToUnanswered={goToFirstUnanswered}
+          onShowConfirmSubmit={() => { setShowConfirmSubmit(true); }}
+          onHideConfirmSubmit={() => { setShowConfirmSubmit(false); }}
+          onSubmit={handleSubmit}
+          onRequestExit={requestExit}
+        />
+        <QuitTestDialog
+          open={exitOpen}
+          prompt={exitPrompt('real', answers.size, questions.length)}
+          onContinue={() => { setExitOpen(false); }}
+          onQuit={handleQuitAndProcess}
+        />
+      </>
     );
   }
 
@@ -517,7 +455,8 @@ export default function RealExamSimulation(): ReactElement {
       <ExamReview
         questions={questions}
         answers={answers}
-        timeLeft={timeLeft}
+        drafts={drafts}
+        timeUsedLabel={formatTime(EXAM_DURATION - timeLeft)}
         disciplineLov={disciplineLov}
         onReset={() => {
           setStatus('setup');

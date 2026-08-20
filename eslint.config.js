@@ -79,6 +79,9 @@ export default [
       "drizzle/meta/",
       // Eval harness (plain JS/YAML, own package, not part of the typed program).
       "evals/",
+      // Agent scratch (handoff reports + tool drafts). Git-ignored, never shipped,
+      // plain Node scripts outside the typed program.
+      ".xenomoon/",
       // Root tooling config (not part of the typed lint program).
       "*.config.js",
       "*.config.mjs",

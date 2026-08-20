@@ -5,6 +5,9 @@ import { trpc } from '../shared/lib/trpc';
 import { shuffle } from '../shared/lib/shuffle';
 import { nextDifficulty } from '@shared/domain/adaptive';
 import { useNotesAndBookmarks } from '../shared/hooks/use-notes-bookmarks';
+import { useLeaveWarning } from '../shared/hooks/use-leave-warning';
+import QuitTestDialog from './QuitTestDialog';
+import { exitPrompt, processableAnswers, shouldPromptOnExit } from '../shared/lib/exit-rules';
 import {
   type Difficulty,
   type AdaptiveQuestion,
@@ -26,7 +29,7 @@ const INITIAL_ADAPTIVE: AdaptiveState = {
   difficultyHistory: [],
 };
 
-export default function AdaptiveSimulation(): ReactElement {
+export default function AdaptiveSimulation({ onExit }: { onExit: () => void }): ReactElement {
   const { user } = useSession();
   const disciplineLov = useLov('DISCIPLINE');
   const examBoardLov = useLov('EXAM_BOARD');
@@ -46,6 +49,8 @@ export default function AdaptiveSimulation(): ReactElement {
   const [answerLog, setAnswerLog] = useState<
     { questionId: string; userAnswer: string; correct: boolean; timeSpent: number }[]
   >([]);
+  // "Sair e processar" confirmation (BR-05) — the run stays mounted behind it.
+  const [exitOpen, setExitOpen] = useState(false);
 
   const utils = trpc.useUtils();
   const recordMutation = trpc.sessions.record.useMutation({
@@ -119,6 +124,10 @@ export default function AdaptiveSimulation(): ReactElement {
     }
   };
 
+  const running = status === 'playing' || status === 'feedback';
+  // Closing the tab or reloading with answers already given warns first (BR-05.1).
+  useLeaveWarning(running && shouldPromptOnExit(answerLog.length));
+
   const finish = (
     log: { questionId: string; userAnswer: string; correct: boolean; timeSpent: number }[]
   ) => {
@@ -131,6 +140,37 @@ export default function AdaptiveSimulation(): ReactElement {
       });
     }
   };
+
+  // Leaving a running simulado asks first (BR-05.4); with nothing answered
+  // there is nothing to process, so the mode is left silently.
+  const requestExit = () => {
+    if (!shouldPromptOnExit(answerLog.length)) {
+      onExit();
+      return;
+    }
+    setExitOpen(true);
+  };
+
+  // "Sair e processar respostas": `finish` is the same path the normal end of
+  // the simulado takes. Unanswered questions are never recorded (BR-05.6 / BR-03).
+  const handleQuitAndProcess = () => {
+    setExitOpen(false);
+    const log = processableAnswers(answerLog);
+    if (log.length === 0) {
+      onExit();
+      return;
+    }
+    finish(log);
+  };
+
+  const quitDialog = (
+    <QuitTestDialog
+      open={exitOpen}
+      prompt={exitPrompt('adaptive', answerLog.length, totalQuestions)}
+      onContinue={() => { setExitOpen(false); }}
+      onQuit={handleQuitAndProcess}
+    />
+  );
 
   const handleAnswer = () => {
     if (!user || currentIndex >= questions.length) return;
@@ -193,32 +233,40 @@ export default function AdaptiveSimulation(): ReactElement {
 
   if (status === 'playing') {
     return (
-      <AdaptivePlaying
-        adaptive={adaptive}
-        totalQuestions={totalQuestions}
-        timer={timer}
-        currentQuestion={currentQuestion}
-        selectedAnswer={selectedAnswer}
-        notesAndBookmarks={notesAndBookmarks}
-        disciplineLov={disciplineLov}
-        examBoardLov={examBoardLov}
-        difficultyLov={difficultyLov}
-        onSelect={setSelectedAnswer}
-        onAnswer={handleAnswer}
-      />
+      <>
+        <AdaptivePlaying
+          adaptive={adaptive}
+          totalQuestions={totalQuestions}
+          timer={timer}
+          currentQuestion={currentQuestion}
+          selectedAnswer={selectedAnswer}
+          notesAndBookmarks={notesAndBookmarks}
+          disciplineLov={disciplineLov}
+          examBoardLov={examBoardLov}
+          difficultyLov={difficultyLov}
+          onSelect={setSelectedAnswer}
+          onAnswer={handleAnswer}
+          onRequestExit={requestExit}
+        />
+        {quitDialog}
+      </>
     );
   }
 
   if (status === 'feedback') {
     return (
-      <AdaptiveFeedback
-        adaptive={adaptive}
-        totalQuestions={totalQuestions}
-        lastCorrect={lastCorrect}
-        currentQuestion={currentQuestion}
-        difficultyLov={difficultyLov}
-        onNext={handleNext}
-      />
+      <>
+        <AdaptiveFeedback
+          adaptive={adaptive}
+          totalQuestions={totalQuestions}
+          lastCorrect={lastCorrect}
+          currentQuestion={currentQuestion}
+          difficultyLov={difficultyLov}
+          onNext={handleNext}
+          onRequestExit={requestExit}
+        />
+        {quitDialog}
+      </>
     );
   }
 
