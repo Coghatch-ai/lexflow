@@ -7,7 +7,7 @@ import SpacedRepetition from '../components/SpacedRepetition';
 import RealExamSimulation from '../components/RealExamSimulation';
 import { trpc } from '../shared/lib/trpc';
 import { shuffle } from '../shared/lib/shuffle';
-import { moveToEnd } from '../shared/lib/exam-queue';
+import { canPostponeGuard, moveToEnd } from '../shared/lib/exam-queue';
 import { useNotesAndBookmarks, type NotesAndBookmarks } from '../shared/hooks/use-notes-bookmarks';
 import { useLeaveWarning } from '../shared/hooks/use-leave-warning';
 import QuestionCard from '@/shared/components/QuestionCard';
@@ -15,12 +15,13 @@ import AiExplanationButton from '@/shared/components/AiExplanationButton';
 import QuitTestDialog from '../components/QuitTestDialog';
 import { exitPrompt, processableAnswers, shouldPromptOnExit } from '../shared/lib/exit-rules';
 import TestCompleted from './testing-completed';
-import { primaryLabel, primaryDisabled, canPostponeGuard } from './testing-flow-guards';
+import { primaryLabel, primaryDisabled } from './testing-flow-guards';
 import { ModeSelection, type Mode } from './testing-mode-selection';
 import {
   NO_ELIMINATIONS,
   clearForQuestion,
   eliminatedFor,
+  eliminationDropsAnswer,
   toggleElimination,
   type EliminationState,
 } from '../shared/lib/eliminations';
@@ -410,7 +411,7 @@ export default function TestingPage(): ReactElement {
   // no longer be the answer, so it drops the current selection.
   const handleToggleEliminate = (option: string) => {
     setEliminations((prev) => toggleElimination(prev, currentQuestion.id, option));
-    if (selectedAnswer === option) setSelectedAnswer('');
+    if (eliminationDropsAnswer(selectedAnswer, option)) setSelectedAnswer('');
   };
 
   // Moves the current question to the end of the queue without recording an

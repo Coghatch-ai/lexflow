@@ -127,3 +127,13 @@ export function consumeClick(latch: SwipeLatch): Readonly<{ latch: SwipeLatch; s
   if (!latch.swallowClick) return { latch, selects: true };
   return { latch: { origin: latch.origin, swallowClick: false }, selects: false };
 }
+
+/**
+ * Whether crossing out `option` must drop the answer already selected
+ * (BR-02.2): a crossed-out alternative can no longer be the chosen one.
+ * The rule lives here so the four answering screens share one definition
+ * instead of each re-writing `selectedAnswer === option` inline.
+ */
+export function eliminationDropsAnswer(selectedAnswer: string, option: string): boolean {
+  return selectedAnswer.length > 0 && selectedAnswer === option;
+}

@@ -1,5 +1,5 @@
 import type { ReactElement } from 'react';
-import { RotateCcw, ChevronRight, CheckCircle, XCircle, Calendar } from 'lucide-react';
+import { RotateCcw, ChevronRight, CheckCircle, XCircle, Calendar, ArrowRightToLine } from 'lucide-react';
 import { accuracyPct } from '@shared/domain/scoring';
 import type { AiExplanation } from '@shared/domain/ai-eval';
 import { type NotesAndBookmarks } from '../shared/hooks/use-notes-bookmarks';
@@ -92,14 +92,19 @@ interface SpacedPlayingProps {
   notesAndBookmarks: NotesAndBookmarks;
   disciplineLov: Lov;
   examBoardLov: Lov;
+  canPostpone: boolean;
+  eliminatedOptions: readonly string[];
   onSelect: (answer: string) => void;
+  onToggleEliminate: (option: string) => void;
+  onPostpone: () => void;
   onAnswer: () => void;
   onRequestExit: () => void;
 }
 
 export function SpacedPlaying({
   currentIndex, total, currentQuestion, selectedAnswer, notesAndBookmarks,
-  disciplineLov, examBoardLov, onSelect, onAnswer, onRequestExit,
+  disciplineLov, examBoardLov, canPostpone, eliminatedOptions,
+  onSelect, onToggleEliminate, onPostpone, onAnswer, onRequestExit,
 }: SpacedPlayingProps): ReactElement {
   const { localNotes, bookmarkedIds, handleNoteChange, handleToggleBookmark } = notesAndBookmarks;
   return (
@@ -132,16 +137,30 @@ export function SpacedPlaying({
           onNoteChange={(text) => { handleNoteChange(currentQuestion.id, text); }}
           isBookmarked={bookmarkedIds.has(currentQuestion.id)}
           onToggleBookmark={() => { handleToggleBookmark(currentQuestion.id); }}
+          eliminatedOptions={eliminatedOptions}
+          onToggleEliminate={onToggleEliminate}
         />
 
-        <button
-          onClick={onAnswer}
-          disabled={selectedAnswer.length === 0}
-          className="w-full bg-gradient-to-r from-[#26262c] to-[#26262c] text-white py-3 rounded-lg font-semibold hover:shadow-lg transition disabled:opacity-50 flex items-center justify-center gap-2"
-        >
-          Confirmar
-          <ChevronRight className="w-5 h-5" />
-        </button>
+        <div className="flex gap-3">
+          {canPostpone && (
+            <button
+              onClick={onPostpone}
+              title="Mover esta revisão para o fim da fila"
+              className="flex-1 bg-gray-200 text-gray-700 py-3 rounded-lg font-semibold hover:bg-gray-300 transition flex items-center justify-center gap-2"
+            >
+              <ArrowRightToLine className="w-5 h-5" />
+              Responder depois
+            </button>
+          )}
+          <button
+            onClick={onAnswer}
+            disabled={selectedAnswer.length === 0}
+            className="flex-1 bg-gradient-to-r from-[#26262c] to-[#26262c] text-white py-3 rounded-lg font-semibold hover:shadow-lg transition disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            Confirmar
+            <ChevronRight className="w-5 h-5" />
+          </button>
+        </div>
       </div>
     </div>
   );

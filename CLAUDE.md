@@ -93,19 +93,20 @@ issues via the relay → GitHub) is `adminProcedure`. The relay owns the secrets
 server-side prompts (`api/lib/ai-prompts.ts`).
 
 The whole bolt UI is now wired onto these routers (no more mock data). Navigation uses Wouter.
-Most pages pass full strict lint; `TestingPage`, `StudyPlanPage`, `AdminPage`, and the three
-simulation components are still quarantined (need `max-lines-per-function` refactoring per
-conventions.md playbook A/B/C before they can be un-quarantined).
+Every page/component passes full strict lint — there is **no per-file quarantine** in
+`eslint.config.js` any more. Big screens stay under `max-lines-per-function` by extraction
+(screen components + pure logic in `shared/lib/`) per conventions.md playbook A/B/C.
 
 ## POC deviations (intentional — differ from sharpmoney; revisit as the POC matures)
 
 1. **Tailwind 3, not 4.** The inherited bolt UI uses `@tailwind` directives +
    `tailwind.config.js` + the `lex-*` color tokens in `app/src/index.css`. Kept on 3 to
    preserve the design; convention default is Tailwind 4 via `@tailwindcss/vite`.
-2. **Partial lint quarantine.** Most pages/components now pass full strict lint. Still quarantined
-   (need `max-lines-per-function` refactoring): `TestingPage`, `StudyPlanPage`, `AdminPage`,
-   `AdaptiveSimulation`, `SpacedRepetition`, `RealExamSimulation`, `ErrorPatternAnalysis`. New code
-   (api/, drizzle/, shared/, scripts/, and all other frontend files) gets full sharpmoney strictness.
+2. **~~Partial lint quarantine~~ — resolved.** There is no per-file quarantine in
+   `eslint.config.js`; every file (api/, drizzle/, shared/, scripts/, app/, apps/mobile/) gets full
+   sharpmoney strictness. The only relaxation is category-level, not per-file: authored `.tsx` gets
+   `max-lines-per-function` 250 + `complexity` 25 (vs 100 / 15 for `.ts`) because JSX inflates both.
+   A screen that would exceed it is split per conventions.md playbook A/B/C, never exempted.
 3. **Two tsconfigs.** `tsconfig.api.json` (backend, max-strict: `noUncheckedIndexedAccess`,
    `exactOptionalPropertyTypes`) and `tsconfig.json` (frontend, POC-strict). Split because the
    import graph forces one strictness per program; frontend files can't use backend-only types.

@@ -9,22 +9,37 @@ Shared multiple-choice UI: **`app/src/shared/components/QuestionCard.tsx`** — 
 discipline/board line, question text, option buttons, optional bookmark toggle + notes textarea.
 The caller owns the card wrapper, header/timer and the action buttons. Props today:
 `options`, `selectedAnswer`, `onSelect`, `locked`, `correctAnswer`, `note`/`onNoteChange`,
-`isBookmarked`/`onToggleBookmark`.
+`isBookmarked`/`onToggleBookmark`, plus `eliminatedOptions`/`onToggleEliminate` (BR-02 cross-out;
+both optional — a screen that passes neither gets the pre-#66 card).
 
-Callers (the four MC test screens):
+Callers (the four MC test screens). Since #70 (epic #65 D2) **all four** have cross-out (BR-02)
+AND "Responder depois" (BR-03):
 
-| Screen              | File                                        | Notes                                                          |
-| ------------------- | ------------------------------------------- | -------------------------------------------------------------- |
-| Simulado Padrão     | `app/src/pages/TestingPage.tsx`             | two-step Conferir→Próxima; HAS "Responder depois"; quarantined |
-| Simulado Real       | `app/src/components/RealExamSimulation.tsx` | quarantined (max-lines-per-function)                           |
-| Repetição Espaçada  | `app/src/components/SpacedRepetition.tsx`   | quarantined                                                    |
-| Simulado Adaptativo | `app/src/components/adaptive-screens.tsx`   | driven by `AdaptiveSimulation.tsx` (quarantined)               |
+| Screen              | File                                        | Cross-out dies when                                      | "Responder depois" mechanics                                |
+| ------------------- | ------------------------------------------- | -------------------------------------------------------- | ----------------------------------------------------------- |
+| Simulado Padrão     | `app/src/pages/TestingPage.tsx`             | answer recorded; frozen at Conferir (`locked={checked}`) | `moveToEnd`, cursor stays                                   |
+| Simulado Real       | `app/src/components/RealExamSimulation.tsx` | exam leaves `playing` / reset                            | `findNextUnanswered` (cursor jumps; "Adiada" badge)         |
+| Repetição Espaçada  | `app/src/components/SpacedRepetition.tsx`   | answer recorded                                          | `moveToEnd` on the ≤5 review queue; SM-2 untouched          |
+| Simulado Adaptativo | `app/src/components/adaptive-screens.tsx`   | answer recorded                                          | `deferred` FIFO drained at the tail (`shouldServeDeferred`) |
+
+The three screens outside the Padrão have **no "checked" state** (feedback is a separate screen, and
+the real exam never reveals during the run), so they never pass `locked` — BR-02.5 ("after checking,
+the green/red highlight takes over") is vacuous there. In the real exam the cross-outs live for the
+WHOLE run, since an answer stays editable until the exam ends.
+
+Render/logic splits of the big screens: `real-exam-playing.tsx` + `real-exam-review.tsx`,
+`adaptive-screens.tsx` (render) + `adaptive-pool.ts` (pool, cursor, deferred FIFO),
+`spaced-screens.tsx`, `testing-completed.tsx`.
 
 Supporting pure modules (unit-tested with plain vitest, no RTL):
 
-- `app/src/shared/lib/exam-queue.ts` — `moveToEnd` (postpone in standard mode),
-  `findNextUnanswered` (postpone in real-exam mode). Never records a blank answer.
-- `app/src/pages/testing-flow-guards.ts` — `primaryLabel`, `primaryDisabled`, `canPostponeGuard`.
+- `app/src/shared/lib/exam-queue.ts` — `moveToEnd` (standard + spaced postpone),
+  `findNextUnanswered` (real-exam postpone), `canPostponeGuard`, `canPostponeAdaptive`,
+  `shouldServeDeferred` (adaptive deferred FIFO). Never records a blank answer.
+- `app/src/shared/lib/eliminations.ts` — cross-out state (`toggleElimination`, `eliminatedFor`,
+  `clearForQuestion`), `eliminationDropsAnswer` (BR-02.2), swipe/latch rules. Session-only: nothing
+  here reaches `sessions.record`, the stats or SM-2.
+- `app/src/pages/testing-flow-guards.ts` — `primaryLabel`, `primaryDisabled`.
 - `app/src/shared/hooks/use-notes-bookmarks.ts` — notes (debounced upsert) + bookmark toggle.
 - `app/src/shared/lib/shuffle.ts`, `shared/domain/scoring.ts` (`accuracyPct`).
 
@@ -40,6 +55,11 @@ Single immersive runner: **`apps/mobile/src/components/QuestionRunner.tsx`** —
 session on finish. Has the bookmark button; **no postpone today** (must answer to advance).
 State container: `apps/mobile/src/state/practice-context.ts`. Result: `ResultPage.tsx`.
 `FlashcardsPage.tsx` and `SavedPage.tsx` render options with their own local UI.
+
+**Mobile has NO cross-out (BR-02) yet — gap M1.** `QuestionRunner` renders no eliminate affordance
+and never imports `shared/lib/eliminations.ts`. The "**all four**" in the desktop section above is
+scoped to the desktop `QuestionCard` screens only, so BR-02.1 ("EVERY surface where a question is
+answered") is **not** satisfied product-wide until M1 lands.
 
 ## Backend touched by answering
 

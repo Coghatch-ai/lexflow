@@ -1,13 +1,22 @@
-import { useState, useEffect, useCallback, type ReactElement } from 'react';
+import { useState, useEffect, type ReactElement } from 'react';
 import { useSession } from '../auth';
 import { useLov } from '../shared/hooks/use-lov';
 import { trpc } from '../shared/lib/trpc';
-import { shuffle } from '../shared/lib/shuffle';
 import { nextDifficulty } from '@shared/domain/adaptive';
+import { mapAdaptiveRows, useAdaptivePool } from './adaptive-pool';
 import { useNotesAndBookmarks } from '../shared/hooks/use-notes-bookmarks';
 import { useLeaveWarning } from '../shared/hooks/use-leave-warning';
 import QuitTestDialog from './QuitTestDialog';
 import { exitPrompt, processableAnswers, shouldPromptOnExit } from '../shared/lib/exit-rules';
+import { canPostponeAdaptive, shouldServeDeferred } from '../shared/lib/exam-queue';
+import {
+  NO_ELIMINATIONS,
+  clearForQuestion,
+  eliminatedFor,
+  eliminationDropsAnswer,
+  toggleElimination,
+  type EliminationState,
+} from '../shared/lib/eliminations';
 import {
   type Difficulty,
   type AdaptiveQuestion,
@@ -37,11 +46,12 @@ export default function AdaptiveSimulation({ onExit }: { onExit: () => void }): 
   const [status, setStatus] = useState<Status>('setup');
   const [selectedDiscipline, setSelectedDiscipline] = useState('');
   const [totalQuestions, setTotalQuestions] = useState(10);
-  const [questions, setQuestions] = useState<AdaptiveQuestion[]>([]);
-  const [currentIndex, setCurrentIndex] = useState(0);
+  // The drawable pool, the served questions + cursor, and the deferred FIFO
+  // that "Responder depois" parks into (BR-03.1) — see ./adaptive-pool.
+  const pool = useAdaptivePool();
+  const { questions, currentIndex, deferred } = pool;
   const [selectedAnswer, setSelectedAnswer] = useState('');
   const [adaptive, setAdaptive] = useState<AdaptiveState>(INITIAL_ADAPTIVE);
-  const [questionPool, setQuestionPool] = useState<AdaptiveQuestion[]>([]);
   const [questionTime, setTimeSpent] = useState(0);
   const [timer, setTimer] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -49,6 +59,10 @@ export default function AdaptiveSimulation({ onExit }: { onExit: () => void }): 
   const [answerLog, setAnswerLog] = useState<
     { questionId: string; userAnswer: string; correct: boolean; timeSpent: number }[]
   >([]);
+  // Crossed-out alternatives (BR-02) — session-only, never recorded. Cleared
+  // per question once its answer is recorded; this screen has no "checked"
+  // state (feedback is a separate screen), so `locked` is never passed.
+  const [eliminations, setEliminations] = useState<EliminationState>(NO_ELIMINATIONS);
   // "Sair e processar" confirmation (BR-05) — the run stays mounted behind it.
   const [exitOpen, setExitOpen] = useState(false);
 
@@ -73,18 +87,6 @@ export default function AdaptiveSimulation({ onExit }: { onExit: () => void }): 
     }
   }, [status, currentIndex, questions.length]);
 
-  const fetchQuestion = useCallback(
-    (difficulty: Difficulty): AdaptiveQuestion | null => {
-      const answeredIds = questions.map((q) => q.id);
-      const unseen = questionPool.filter((q) => !answeredIds.includes(q.id));
-      const atDifficulty = unseen.filter((q) => q.difficulty === difficulty);
-      const fromPool = atDifficulty.length > 0 ? atDifficulty : unseen;
-      if (fromPool.length === 0) return null;
-      return fromPool.at(Math.floor(Math.random() * fromPool.length)) ?? null;
-    },
-    [questionPool, questions]
-  );
-
   const startSimulation = async () => {
     setLoading(true);
     try {
@@ -93,26 +95,13 @@ export default function AdaptiveSimulation({ onExit }: { onExit: () => void }): 
         limit: 100,
         phase: '1st',
       });
-      const mapped: AdaptiveQuestion[] = rows.map((r) => ({
-        id: r.id,
-        questionText: r.questionText,
-        options: shuffle(r.options),
-        correctAnswer: r.correctAnswer,
-        difficulty: r.difficulty as Difficulty,
-        discipline: r.discipline,
-        examBoard: r.examBoard,
-        explanation: r.explanation,
-        aiExplanation: r.aiExplanation ?? null,
-        legislationTitle: r.legislationTitle,
-      }));
-      setQuestionPool(mapped);
-      const pool = mapped.filter((q) => q.difficulty === 'medium');
-      const firstQuestion = (pool.length > 0 ? pool : mapped).at(0);
+      const mapped = mapAdaptiveRows(rows);
+      const firstQuestion = mapped.find((q) => q.difficulty === 'medium') ?? mapped.at(0);
       if (firstQuestion !== undefined) {
-        setQuestions([firstQuestion]);
+        pool.start(mapped, firstQuestion);
         setAnswerLog([]);
+        setEliminations(NO_ELIMINATIONS);
         setAdaptive({ ...INITIAL_ADAPTIVE, difficultyHistory: ['medium'] });
-        setCurrentIndex(0);
         setSelectedAnswer('');
         setTimeSpent(0);
         setTimer(0);
@@ -176,10 +165,13 @@ export default function AdaptiveSimulation({ onExit }: { onExit: () => void }): 
     if (!user || currentIndex >= questions.length) return;
     const correct = selectedAnswer === currentQuestion.correctAnswer;
     setLastCorrect(correct);
+    const totalTimeSpent = questionTime + pool.carriedFor(currentQuestion.id);
     setAnswerLog((log) => [
       ...log,
-      { questionId: currentQuestion.id, userAnswer: selectedAnswer, correct, timeSpent: questionTime },
+      { questionId: currentQuestion.id, userAnswer: selectedAnswer, correct, timeSpent: totalTimeSpent },
     ]);
+    // The answer is recorded — its cross-outs have served their purpose.
+    setEliminations((prev) => clearForQuestion(prev, currentQuestion.id));
     setAdaptive({
       currentDifficulty: adaptive.currentDifficulty,
       consecutiveCorrect: correct ? adaptive.consecutiveCorrect + 1 : 0,
@@ -191,27 +183,74 @@ export default function AdaptiveSimulation({ onExit }: { onExit: () => void }): 
     setStatus('feedback');
   };
 
+  // Cross out / restore an alternative (BR-02); crossing out the chosen one
+  // drops the selection (BR-02.2).
+  const handleToggleEliminate = (option: string) => {
+    setEliminations((prev) => toggleElimination(prev, currentQuestion.id, option));
+    if (eliminationDropsAnswer(selectedAnswer, option)) setSelectedAnswer('');
+  };
+
+  // "Responder depois" (BR-03.1) in a pool-driven simulado: park the question in
+  // the deferred FIFO and serve a substitute AT THE SAME DIFFICULTY — nothing was
+  // answered, so there is no signal for `nextDifficulty` and none of
+  // totalAnswered / consecutive* / difficultyHistory may move. No blank answer
+  // is ever recorded; the cross-outs travel with the question.
+  const handlePostpone = () => {
+    const substitute = pool.fetchQuestion(adaptive.currentDifficulty);
+    if (substitute === null) return;
+    pool.park(currentQuestion, questionTime);
+    pool.advance(substitute);
+    setSelectedAnswer('');
+    setTimeSpent(0);
+  };
+
+  // Put `question` on screen as the next one, at `difficulty` — one history
+  // entry per question served, whether it was drawn from the pool or came back
+  // from the deferred FIFO (a deferred question is fixed, so the level shown
+  // must be its own).
+  const advanceTo = (question: AdaptiveQuestion, difficulty: Difficulty) => {
+    setAdaptive((prev) => ({
+      ...prev,
+      currentDifficulty: difficulty,
+      difficultyHistory: [...prev.difficultyHistory, difficulty],
+    }));
+    pool.advance(question);
+    setSelectedAnswer('');
+    setTimeSpent(0);
+    setLastCorrect(null);
+    setStatus('playing');
+  };
+
+  // Serve the head of the deferred FIFO at the TAIL of the simulado — the
+  // remaining slots are down to the deferred count, or the pool ran dry.
+  const serveDeferred = (head: AdaptiveQuestion) => {
+    pool.dropHead();
+    advanceTo(head, head.difficulty);
+  };
+
   const handleNext = () => {
     if (adaptive.totalAnswered >= totalQuestions) {
       finish(answerLog);
       return;
     }
+    const head = pool.head;
+    const drain = shouldServeDeferred({
+      totalAnswered: adaptive.totalAnswered, totalQuestions,
+      deferredCount: deferred.length, poolExhausted: !pool.hasUnseen,
+    });
+    if (head !== undefined && drain) {
+      serveDeferred(head);
+      return;
+    }
     const nextDiff = nextDifficulty(
       adaptive.currentDifficulty, adaptive.consecutiveCorrect, adaptive.consecutiveWrong
     );
-    const nextQuestion = fetchQuestion(nextDiff);
+    const nextQuestion = pool.fetchQuestion(nextDiff);
     if (nextQuestion !== null) {
-      setAdaptive((prev) => ({
-        ...prev,
-        currentDifficulty: nextDiff,
-        difficultyHistory: [...prev.difficultyHistory, nextDiff],
-      }));
-      setQuestions((prev) => [...prev, nextQuestion]);
-      setCurrentIndex((prev) => prev + 1);
-      setSelectedAnswer('');
-      setTimeSpent(0);
-      setLastCorrect(null);
-      setStatus('playing');
+      advanceTo(nextQuestion, nextDiff);
+    } else if (head !== undefined) {
+      // Pool dry but questions still owed: the deferred FIFO is what is left.
+      serveDeferred(head);
     } else {
       finish(answerLog);
     }
@@ -244,7 +283,16 @@ export default function AdaptiveSimulation({ onExit }: { onExit: () => void }): 
           disciplineLov={disciplineLov}
           examBoardLov={examBoardLov}
           difficultyLov={difficultyLov}
+          canPostpone={canPostponeAdaptive({
+            totalAnswered: adaptive.totalAnswered,
+            totalQuestions,
+            deferredCount: deferred.length,
+            hasReplacement: pool.hasUnseen,
+          })}
+          eliminatedOptions={eliminatedFor(eliminations, currentQuestion.id)}
           onSelect={setSelectedAnswer}
+          onToggleEliminate={handleToggleEliminate}
+          onPostpone={handlePostpone}
           onAnswer={handleAnswer}
           onRequestExit={requestExit}
         />
@@ -276,8 +324,9 @@ export default function AdaptiveSimulation({ onExit }: { onExit: () => void }): 
       timer={timer}
       onReset={() => {
         setStatus('setup');
-        setQuestions([]);
         setAdaptive(INITIAL_ADAPTIVE);
+        setEliminations(NO_ELIMINATIONS);
+        pool.reset();
       }}
     />
   );

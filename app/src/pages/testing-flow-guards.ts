@@ -31,16 +31,6 @@ export function primaryDisabled({
   return !checked && selected.length === 0;
 }
 
-/**
- * Whether the "Responder depois" (postpone) button should be available.
- * Only before the check step AND when there are more questions in the queue.
- */
-export function canPostponeGuard({
-  checked,
-  hasMoreQuestions,
-}: {
-  checked: boolean;
-  hasMoreQuestions: boolean;
-}): boolean {
-  return !checked && hasMoreQuestions;
-}
+// `canPostponeGuard` moved to ../shared/lib/exam-queue in #70 (D2): the
+// simulation components under components/ need it too and must not import
+// from pages/.

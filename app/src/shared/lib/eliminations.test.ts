@@ -6,6 +6,7 @@ import {
   clearForQuestion,
   consumeClick,
   eliminatedFor,
+  eliminationDropsAnswer,
   endSwipe,
   isEliminated,
   isEliminationSwipe,
@@ -193,5 +194,22 @@ describe("swipe latch", () => {
     expect(endSwipe(startSwipe(0, 0), 59, 0).crossOut).toBe(false);
     expect(endSwipe(startSwipe(0, 0), 60, 0).crossOut).toBe(true);
     expect(endSwipe(startSwipe(0, 0), 30, 0, 20).crossOut).toBe(true);
+  });
+});
+
+describe("eliminationDropsAnswer", () => {
+  it("drops the answer when the crossed-out option is the chosen one", () => {
+    expect(eliminationDropsAnswer("B", "B")).toBe(true);
+  });
+
+  it("keeps the answer when another option is crossed out", () => {
+    expect(eliminationDropsAnswer("B", "D")).toBe(false);
+  });
+
+  it("is false with no answer selected (empty string never matches)", () => {
+    expect(eliminationDropsAnswer("", "B")).toBe(false);
+    // Guards the degenerate case: an empty option text must not "drop" a
+    // non-answer just because two empty strings are equal.
+    expect(eliminationDropsAnswer("", "")).toBe(false);
   });
 });

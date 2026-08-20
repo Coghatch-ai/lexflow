@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactElement } from 'react';
+import { useEffect, useRef, useState, type ReactElement } from 'react';
 import { useSession } from '../auth';
 import { useLov } from '../shared/hooks/use-lov';
 import { trpc } from '../shared/lib/trpc';
@@ -7,6 +7,15 @@ import { useNotesAndBookmarks } from '../shared/hooks/use-notes-bookmarks';
 import { useLeaveWarning } from '../shared/hooks/use-leave-warning';
 import QuitTestDialog from './QuitTestDialog';
 import { exitPrompt, processableAnswers, shouldPromptOnExit } from '../shared/lib/exit-rules';
+import { moveToEnd } from '../shared/lib/exam-queue';
+import {
+  NO_ELIMINATIONS,
+  clearForQuestion,
+  eliminatedFor,
+  eliminationDropsAnswer,
+  toggleElimination,
+  type EliminationState,
+} from '../shared/lib/eliminations';
 import {
   type ReviewItem,
   SpacedDone,
@@ -46,8 +55,16 @@ export default function SpacedRepetition({ onExit }: { onExit: () => void }): Re
   const [answerLog, setAnswerLog] = useState<
     { questionId: string; userAnswer: string; correct: boolean; timeSpent: number }[]
   >([]);
+  // Crossed-out alternatives (BR-02) — session-only, never recorded, never fed
+  // to SM-2. Cleared per question once its answer is recorded; this screen has
+  // no "checked" state, so `locked` is never passed to the card.
+  const [eliminations, setEliminations] = useState<EliminationState>(NO_ELIMINATIONS);
   // "Sair e processar" confirmation (BR-05) — the review stays mounted behind it.
   const [exitOpen, setExitOpen] = useState(false);
+
+  // Time already spent on a review postponed via "Responder depois", keyed by
+  // question id and re-added when the review is finally answered.
+  const carriedTimeRef = useRef<Map<string, number>>(new Map());
 
   // Map the review queue into session state only while in 'loading' status and
   // never against an in-flight fetch: background refetches (window focus after
@@ -102,15 +119,18 @@ export default function SpacedRepetition({ onExit }: { onExit: () => void }): Re
     }
     setNextIntervalDays(displayInterval);
 
+    const totalTimeSpent = questionTime + (carriedTimeRef.current.get(currentQuestion.id) ?? 0);
     setAnswerLog((log) => [
       ...log,
       {
         questionId: currentQuestion.id,
         userAnswer: selectedAnswer,
         correct,
-        timeSpent: questionTime,
+        timeSpent: totalTimeSpent,
       },
     ]);
+    // The answer is recorded — its cross-outs have served their purpose.
+    setEliminations((prev) => clearForQuestion(prev, currentQuestion.id));
 
     if (correct) setSessionCorrect((c) => c + 1);
     setSessionTotal((t) => t + 1);
@@ -158,6 +178,28 @@ export default function SpacedRepetition({ onExit }: { onExit: () => void }): Re
     />
   );
 
+  // Cross out / restore an alternative (BR-02). Crossing out the chosen one
+  // drops the selection (BR-02.2); nothing here reaches sessions.record or SM-2.
+  const handleToggleEliminate = (option: string) => {
+    setEliminations((prev) => toggleElimination(prev, currentQuestion.id, option));
+    if (eliminationDropsAnswer(selectedAnswer, option)) setSelectedAnswer('');
+  };
+
+  // "Responder depois" (BR-03.1): the review queue is a materialized ≤5 array,
+  // so "end of the queue" is literal — `moveToEnd` with `currentIndex` staying
+  // put, exactly like the Simulado Padrão. NO answer is recorded, so SM-2 is
+  // untouched: only sessions.record moves a card's schedule.
+  const handlePostpone = () => {
+    if (currentIndex >= reviewQuestions.length - 1) return;
+    carriedTimeRef.current.set(
+      currentQuestion.id,
+      (carriedTimeRef.current.get(currentQuestion.id) ?? 0) + questionTime,
+    );
+    setReviewQuestions((prev) => moveToEnd(prev, currentIndex));
+    setSelectedAnswer('');
+    setTimeSpent(0);
+  };
+
   const handleNext = () => {
     if (currentIndex + 1 >= reviewQuestions.length) {
       setStatus('done');
@@ -200,7 +242,11 @@ export default function SpacedRepetition({ onExit }: { onExit: () => void }): Re
           notesAndBookmarks={notesAndBookmarks}
           disciplineLov={disciplineLov}
           examBoardLov={examBoardLov}
+          canPostpone={currentIndex < reviewQuestions.length - 1}
+          eliminatedOptions={eliminatedFor(eliminations, currentQuestion.id)}
           onSelect={setSelectedAnswer}
+          onToggleEliminate={handleToggleEliminate}
+          onPostpone={handlePostpone}
           onAnswer={handleAnswer}
           onRequestExit={requestExit}
         />
@@ -237,6 +283,8 @@ export default function SpacedRepetition({ onExit }: { onExit: () => void }): Re
         setAnswerLog([]);
         setSessionCorrect(0);
         setSessionTotal(0);
+        setEliminations(NO_ELIMINATIONS);
+        carriedTimeRef.current = new Map();
       }}
     />
   );
