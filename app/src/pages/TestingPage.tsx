@@ -13,8 +13,15 @@ import { useNotesAndBookmarks, type NotesAndBookmarks } from '../shared/hooks/us
 import QuestionCard from '@/shared/components/QuestionCard';
 import AiExplanationButton from '@/shared/components/AiExplanationButton';
 import { primaryLabel, primaryDisabled, canPostponeGuard } from './testing-flow-guards';
+import { ModeSelection, type Mode } from './testing-mode-selection';
+import {
+  NO_ELIMINATIONS,
+  clearForQuestion,
+  eliminatedFor,
+  toggleElimination,
+  type EliminationState,
+} from '../shared/lib/eliminations';
 
-type Mode = 'standard' | 'adaptive' | 'spaced' | 'real';
 type QuestionStatus = 'not-started' | 'in-progress' | 'completed';
 
 type TestQuestion = {
@@ -37,62 +44,6 @@ interface Answer {
 }
 
 type Lov = { options: { code: string; value: string }[]; labelOf: (code: string) => string };
-
-interface ModeSelectionProps {
-  onSelect: (mode: Mode) => void;
-}
-
-function ModeSelection({ onSelect }: ModeSelectionProps): ReactElement {
-  return (
-    <div className="space-y-6">
-      <div className="bg-gradient-to-r from-[#16161a] to-[#26262c] rounded-xl p-6 text-white">
-        <h3 className="text-xl font-bold mb-2">Escolha o Modo de Estudo</h3>
-        <p className="text-white/80">Selecione o tipo de simulado que melhor atende suas necessidades</p>
-      </div>
-
-      <div className="grid md:grid-cols-2 gap-4">
-        <button
-          onClick={() => { onSelect('standard'); }}
-          className="bg-white rounded-xl p-6 shadow hover:shadow-lg transition text-left border-2 border-transparent hover:border-[#16161a]"
-        >
-          <div className="bg-[#26262c] p-3 rounded-lg w-fit mb-4"><BookOpen className="w-6 h-6 text-white" /></div>
-          <h4 className="text-lg font-bold text-[#16161a] mb-2">Simulado Padrão</h4>
-          <p className="text-sm text-gray-600">10 questões com filtros por disciplina, banca e dificuldade. Feedback imediato.</p>
-        </button>
-
-        <button
-          onClick={() => { onSelect('adaptive'); }}
-          className="bg-white rounded-xl p-6 shadow hover:shadow-lg transition text-left border-2 border-transparent hover:border-[#16161a]"
-        >
-          <div className="bg-[#16161a] p-3 rounded-lg w-fit mb-4"><span className="text-white text-xl font-bold">A</span></div>
-          <h4 className="text-lg font-bold text-[#16161a] mb-2">Simulado Adaptativo</h4>
-          <p className="text-sm text-gray-600">Dificuldade ajusta automaticamente conforme seu desempenho em tempo real.</p>
-          <span className="inline-block mt-2 text-xs font-bold text-[#16161a] bg-[#16161a]/10 px-2 py-1 rounded">INTELIGENTE</span>
-        </button>
-
-        <button
-          onClick={() => { onSelect('spaced'); }}
-          className="bg-white rounded-xl p-6 shadow hover:shadow-lg transition text-left border-2 border-transparent hover:border-[#16161a]"
-        >
-          <div className="bg-[#26262c] p-3 rounded-lg w-fit mb-4"><span className="text-white text-xl font-bold">R</span></div>
-          <h4 className="text-lg font-bold text-[#16161a] mb-2">Revisão Espaçada</h4>
-          <p className="text-sm text-gray-600">Revise questões nos intervalos ideais para maximizar retenção a longo prazo.</p>
-          <span className="inline-block mt-2 text-xs font-bold text-[#26262c] bg-[#26262c]/10 px-2 py-1 rounded">RETENÇÃO</span>
-        </button>
-
-        <button
-          onClick={() => { onSelect('real'); }}
-          className="bg-white rounded-xl p-6 shadow hover:shadow-lg transition text-left border-2 border-transparent hover:border-red-400"
-        >
-          <div className="bg-red-600 p-3 rounded-lg w-fit mb-4"><span className="text-white text-xl font-bold">P</span></div>
-          <h4 className="text-lg font-bold text-[#16161a] mb-2">Simulado Prova Real</h4>
-          <p className="text-sm text-gray-600">80 questões, 5 horas, sem feedback. Simule as condições reais do exame.</p>
-          <span className="inline-block mt-2 text-xs font-bold text-red-600 bg-red-50 px-2 py-1 rounded">INTENSO</span>
-        </button>
-      </div>
-    </div>
-  );
-}
 
 interface NotStartedProps {
   discipline: string;
@@ -188,12 +139,15 @@ interface InProgressProps {
   onNext: () => void;
   canPostpone: boolean;
   onPostpone: () => void;
+  eliminatedOptions: readonly string[];
+  onToggleEliminate: (option: string) => void;
 }
 
 function InProgress({
   currentQuestion, currentIndex, totalAnswered, totalQuestions, timer, selectedAnswer,
   checked, onCheck,
   notesAndBookmarks, disciplineLov, examBoardLov, onBack, onSelect, onNext, canPostpone, onPostpone,
+  eliminatedOptions, onToggleEliminate,
 }: InProgressProps): ReactElement {
   const { localNotes, bookmarkedIds, handleNoteChange, handleToggleBookmark } = notesAndBookmarks;
   const progress = (totalAnswered / (totalQuestions > 0 ? totalQuestions : 1)) * 100;
@@ -241,6 +195,8 @@ function InProgress({
           onToggleBookmark={() => { handleToggleBookmark(currentQuestion.id); }}
           locked={checked}
           correctAnswer={currentQuestion.correctAnswer}
+          eliminatedOptions={eliminatedOptions}
+          onToggleEliminate={onToggleEliminate}
         />
 
         {checked && (<>
@@ -382,6 +338,8 @@ export default function TestingPage(): ReactElement {
   const [loading, setLoading] = useState(false);
   const [timeSpent, setTimeSpent] = useState(0);
   const [timer, setTimer] = useState(0);
+  // Crossed-out alternatives (BR-02) — session-only, never recorded.
+  const [eliminations, setEliminations] = useState<EliminationState>(NO_ELIMINATIONS);
 
   const [discipline, setDiscipline] = useState('');
   const [examBoard, setExamBoard] = useState('');
@@ -437,6 +395,7 @@ export default function TestingPage(): ReactElement {
       setChecked(false);
       setTimeSpent(0);
       setTimer(0);
+      setEliminations(NO_ELIMINATIONS);
       carriedTimeRef.current = new Map();
     } finally {
       setLoading(false);
@@ -454,6 +413,8 @@ export default function TestingPage(): ReactElement {
       { questionId: currentQuestion.id, userAnswer: selectedAnswer, correct, timeSpent: totalTimeSpent },
     ];
     setAnswers(updated);
+    // The answer is recorded — its cross-outs have served their purpose.
+    setEliminations((prev) => clearForQuestion(prev, currentQuestion.id));
 
     if (currentIndex + 1 >= questions.length) {
       setStatus('completed');
@@ -468,6 +429,13 @@ export default function TestingPage(): ReactElement {
       setChecked(false);
       setTimeSpent(0);
     }
+  };
+
+  // Cross out / restore an alternative (BR-02). A crossed-out alternative can
+  // no longer be the answer, so it drops the current selection.
+  const handleToggleEliminate = (option: string) => {
+    setEliminations((prev) => toggleElimination(prev, currentQuestion.id, option));
+    if (selectedAnswer === option) setSelectedAnswer('');
   };
 
   // Moves the current question to the end of the queue without recording an
@@ -523,6 +491,8 @@ export default function TestingPage(): ReactElement {
         onNext={handleNext}
         canPostpone={canPostponeGuard({ checked, hasMoreQuestions: currentIndex < questions.length - 1 })}
         onPostpone={handlePostpone}
+        eliminatedOptions={eliminatedFor(eliminations, currentQuestion.id)}
+        onToggleEliminate={handleToggleEliminate}
       />
     );
   }
