@@ -165,14 +165,16 @@ with `gh issue view <n> --json labels` before reporting the issue done.
 
 ## Business rules / product facts
 
-Authoritative product intent every agent must honor (analyst, builder, tester read this as
-the contract). Add durable, standing facts here — not slice-specific notes.
+Authoritative product intent every agent must honor (analyst, builder, tester read these as
+the contract) lives in the project library — this file is only the index:
 
-- `oab_questions.{discipline,exam_board,difficulty,phase}` MUST store the English LOV code,
-  never the pt-BR label. Any importer (`scripts/seed-from-csv.ts`, `scripts/seed.ts`) MUST
-  map label→code before insert and throw on an unmapped label — never write a raw scraper
-  label. (History: the CSV seed wrote raw pt-BR discipline labels → the code-keyed filter
-  matched 0 rows; issue #46.)
+- **[.claude/library/README.md](.claude/library/README.md)** — library index (functionality → rule → code).
+- **[.claude/library/kb-business/](.claude/library/kb-business/README.md)** — functional definitions,
+  ONE FILE PER FUNCTIONALITY: BR-01 LOV codes · BR-02 descartar alternativas · BR-03 responder depois ·
+  BR-04 bookmarks · BR-05 salvar progresso / sair e processar a test in progress.
+- **[.claude/library/answering-surfaces.md](.claude/library/answering-surfaces.md)** — map of every screen
+  where a question is answered (desktop `QuestionCard` screens, mobile `QuestionRunner`), the life of a
+  test run (start → answer → leave → `sessions.record`) + the backend it touches.
 
 ## NEVER
 
