@@ -8,7 +8,7 @@
 //
 // Two entry points, one body: there is no parallel recording path that could
 // skip SM-2, skip the answer rows, or leave the in-flight `exam_drafts` row
-// behind. When `draftId` is supplied the draft row is DELETED as the FIRST
+// behind. When a `DraftClaim` is supplied the draft row is DELETED as the FIRST
 // statement of the transaction, `RETURNING id`, and zero rows aborts the whole
 // transaction (`DraftAlreadyConsumedError`). That ordering is what makes the
 // delete a real mutex between the client (timer hits zero) and the server (lazy
@@ -31,9 +31,11 @@ import type { AnswerDraft } from "../../shared/domain/exam-draft";
 export type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /**
- * The draft named by `draftId` was already consumed by a concurrent recorder —
- * the transaction rolled back and NOTHING was written. It is a benign race, not
- * a bug: the run was already turned into a session by whoever won. Callers
+ * The claim matched no row: the draft was already consumed by a concurrent
+ * recorder, OR it moved on (another tab saved/touched it, so the token this
+ * caller carried is stale). Either way the transaction rolled back and NOTHING
+ * was written. It is a benign race, not a bug: the run is safe — already a
+ * session, or still live with fresher answers than the caller had. Callers
  * decide how to answer it (settleRealRun: "not settled"; sessions.record:
  * CONFLICT), which is why it is a named class and not a bare Error.
  */
@@ -44,22 +46,37 @@ export class DraftAlreadyConsumedError extends Error {
   }
 }
 
+/**
+ * The in-flight draft this recording consumes — AND the terms on which it may
+ * be consumed. The two variants are ONE type on purpose: an id can never travel
+ * without saying what it expects the row's state to be.
+ *
+ *   `{ id, lastSavedAt }` — the normal claim. `lastSavedAt` is the `last_saved_at`
+ *     the caller BASED ITS DECISION ON (the same optimistic token
+ *     `examDrafts.save`/`touch` use). The claiming delete only matches while the
+ *     row still carries it, so a run that MOVED between the caller's read and
+ *     this transaction — another tab saved, the student came back, the heartbeat
+ *     landed — is not force-submitted with the caller's older answers: 0 rows ⇒
+ *     `DraftAlreadyConsumedError`, exactly like losing the race.
+ *
+ *   `{ id, force: true }` — claim the row whatever its state. ONE caller is
+ *     entitled to it: `examDrafts.startReal`, where BR-05.5 says asking for a
+ *     new prova real settles the pending one however fresh it is (token-guarding
+ *     it would let a heartbeat strand the student behind an old real draft that
+ *     has no resume/discard path). It is a separate variant, and not an omitted
+ *     field, because an UNCONDITIONAL claim must be a deliberate word in the
+ *     source — an optional token is claimed unconditionally by forgetting it,
+ *     which is the exact shape review #80 rejected on the browser path.
+ */
+export type DraftClaim = { id: string; lastSavedAt: string } | { id: string; force: true };
+
 export type RecordSessionInput = {
   discipline: string;
   difficulty: "easy" | "medium" | "hard";
   /** At least one; blank answers are filtered out BEFORE this call. */
   answers: AnswerDraft[];
   /** In-flight exam draft to consume, deleted inside this transaction. */
-  draftId?: string | undefined;
-  /**
-   * The `last_saved_at` the caller BASED ITS DECISION ON — the same optimistic
-   * token `examDrafts.save`/`touch` use. When supplied, the claiming delete only
-   * matches while the row still carries it, so a run the student came back to
-   * (a `save`/`touch` landed between the caller's read and this transaction) is
-   * NOT force-submitted: 0 rows ⇒ `DraftAlreadyConsumedError`, exactly like
-   * losing the race. Omit it to claim the row whatever its state.
-   */
-  draftLastSavedAt?: string | undefined;
+  draft?: DraftClaim | undefined;
 };
 
 /**
@@ -83,23 +100,24 @@ export async function recordSession(
   const correct = input.answers.filter((a) => a.correct).length;
 
   // FIRST statement: claim the run by deleting it. Scoped by user_id so a forged
-  // id cannot consume another student's draft, and — when the caller passed the
-  // token it read — by `last_saved_at`, so the claim only lands on the row the
-  // caller actually judged. 0 rows ⇒ someone else recorded this run, or the
-  // student came back and refreshed it — abort before a single write lands.
-  if (input.draftId !== undefined) {
-    const expectedToken = input.draftLastSavedAt;
+  // id cannot consume another student's draft, and — unless the caller asked for
+  // the `force` variant — by `last_saved_at`, so the claim only lands on the row
+  // the caller actually judged. 0 rows ⇒ someone else recorded this run, or it
+  // moved on (another tab saved, the student came back) — abort before a single
+  // write lands.
+  const claim = input.draft;
+  if (claim !== undefined) {
     const [claimed] = await tx
       .delete(examDrafts)
       .where(
         and(
-          eq(examDrafts.id, input.draftId),
+          eq(examDrafts.id, claim.id),
           eq(examDrafts.userId, userId),
-          expectedToken === undefined ? undefined : eq(examDrafts.lastSavedAt, expectedToken),
+          "force" in claim ? undefined : eq(examDrafts.lastSavedAt, claim.lastSavedAt),
         ),
       )
       .returning({ id: examDrafts.id });
-    if (claimed === undefined) throw new DraftAlreadyConsumedError(input.draftId);
+    if (claimed === undefined) throw new DraftAlreadyConsumedError(claim.id);
   }
 
   const [session] = await tx

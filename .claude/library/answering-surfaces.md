@@ -148,6 +148,15 @@ answered") is **not** satisfied product-wide until M1 lands.
 - `recordSession` (`api/lib/record-session.ts`) é o corpo único de gravação; `sessions.record` e
   `settleRealRun` são as **duas entradas**. O `DELETE` do rascunho é a primeira instrução da
   transação e funciona como mutex: quem chega depois apaga 0 linhas e desiste sem escrever nada.
+- Esse `DELETE` também **carrega o token** (`DraftClaim`): quem processa um rascunho manda
+  `{ id, lastSavedAt }` — o `last_saved_at` que aquela aba observou —, nunca o id sozinho. O id
+  de-duplica, o token detecta obsolescência: sem ele, a aba A que terminou a corrida apagaria a
+  linha que a aba B (o **mesmo** aluno em outro aparelho) acabou de salvar e gravaria as respostas
+  velhas de A. Com ele, a reivindicação de A casa 0 linhas ⇒ `CONFLICT`, com o rascunho e as
+  respostas de B intactos. Quando as telas S2b/S2c/S2d chamarem `sessions.record` para uma corrida
+  persistida, elas **precisam** mandar o token do último `save`/`touch`/`get`. A única exceção é
+  `examDrafts.startReal` (variante `{ id, force: true }`): pedir uma nova prova real liquida a
+  pendente por mais fresca que esteja (BR-05.5).
 
 ## Functional definitions attached to these surfaces
 

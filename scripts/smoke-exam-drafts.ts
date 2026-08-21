@@ -12,10 +12,13 @@
 // settlements of the same abandoned prova real, which is the only way to prove
 // the draft delete really is the mutex that keeps one run to one session — plus
 // (k), which proves `discard` cannot be used as a back door to destroy a prova
-// real whose answers still owe a session, and (l)+(m), which prove a settlement
-// holding a STALE read cannot claim a run the student came back to — (l) on the
-// branch that records a session, (m) on the zero-answer branch that only
-// deletes, where a wrong claim erases the run without leaving any trace at all.
+// real whose answers still owe a session, and (l)+(m)+(n), which prove a caller
+// holding a STALE read cannot claim a run that moved under it — (l) on the
+// settlement branch that records a session, (m) on the zero-answer branch that
+// only deletes (where a wrong claim erases the run without leaving any trace at
+// all), and (n) on the CLIENT submit path, where the two racers are two tabs of
+// the SAME student and the draft id alone de-duplicates without detecting
+// staleness.
 
 import { eq, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
@@ -23,6 +26,7 @@ import { appRouter } from "../api/trpc/router";
 import { settleRealRun } from "../api/lib/settle-real-run";
 import { examDrafts, studySessions, userAnswers, users } from "../drizzle/schema";
 import {
+  assertStaleClientSubmitNeverClaims,
   assertStaleSettlementNeverForceSubmits,
   assertStaleZeroAnswerSettlementNeverDeletes,
 } from "./smoke-exam-drafts-stale";
@@ -364,7 +368,9 @@ async function assertConcurrentSettlementRecordsOnce(
   console.warn("[smoke] (j) two concurrent settlements → exactly ONE session OK");
 }
 
-/** (d) sessions.record with draftId records the session AND consumes the draft. */
+/** (d) sessions.record with a draft claim records the session AND consumes the
+ *  draft. The claim is `{ id, lastSavedAt }` — the token the owning tab last
+ *  observed travels WITH the id, always; (n) proves what that refuses. */
 async function assertRecordConsumesDraft(
   db: SmokeDb,
   caller: SmokeCaller,
@@ -375,21 +381,27 @@ async function assertRecordConsumesDraft(
   const [first] = questions;
   if (first === undefined) throw new Error("[smoke] exam_drafts needs at least one question");
 
+  // The token as the tab that owns this run holds it: its latest save/get.
+  const live = await caller.examDrafts.get({ mode: "standard" });
+  check(live?.id === draftId, "(d) the live standard draft is not the run (a) created");
+  if (live === null) throw new Error("unreachable");
+  const draft = { id: draftId, lastSavedAt: live.lastSavedAt };
+
   const rec = await caller.sessions.record({
     discipline: first.discipline,
     difficulty: "medium",
     answers: [
       { questionId: first.id, userAnswer: first.options[0] ?? "A", correct: true, timeSpent: 20 },
     ],
-    draftId,
+    draft,
   });
-  check(rec.sessionId.length > 0, "sessions.record with draftId returned no session");
+  check(rec.sessionId.length > 0, "sessions.record with a draft claim returned no session");
   check(
     (await countRows(db, examDrafts, userId)) === 0,
     "the in-flight draft survived the recording transaction",
   );
 
-  // Replaying the SAME draftId (the client's timer firing after the server
+  // Replaying the SAME claim (the client's timer firing after the server
   // already settled the run) must write nothing at all — CONFLICT, not a
   // second session with a second set of answers.
   const sessionsAfterFirst = await countRows(db, studySessions, userId);
@@ -401,7 +413,7 @@ async function assertRecordConsumesDraft(
       answers: [
         { questionId: first.id, userAnswer: first.options[0] ?? "A", correct: true, timeSpent: 20 },
       ],
-      draftId,
+      draft,
     }),
   );
   check(replayed, "recording an ALREADY consumed draft was accepted a second time");
@@ -413,7 +425,7 @@ async function assertRecordConsumesDraft(
     (await countRows(db, userAnswers, userId)) === answersAfterFirst,
     "the refused replay still wrote user_answers (rollback did not happen)",
   );
-  console.warn("[smoke] (d) sessions.record(draftId) → 1 session, replay → CONFLICT + rollback OK");
+  console.warn("[smoke] (d) sessions.record(draft) → 1 session, replay → CONFLICT + rollback OK");
 }
 
 /** (e) an abandoned prova real is settled server-side: ≥1 answer records ONE
@@ -524,8 +536,9 @@ export async function smokeExamDrafts(opts: {
   await assertConcurrentSettlementRecordsOnce(db, userId, questions);
   await assertStaleSettlementNeverForceSubmits(db, caller, userId, questions);
   await assertStaleZeroAnswerSettlementNeverDeletes(db, caller, userId, questions);
+  await assertStaleClientSubmitNeverClaims(db, caller, userId, questions);
 
   // Belt and braces: nothing this block created may outlive it.
   await db.delete(examDrafts).where(eq(examDrafts.userId, userId));
-  console.warn("[smoke] ✓ exam_drafts (a)–(m) OK");
+  console.warn("[smoke] ✓ exam_drafts (a)–(n) OK");
 }

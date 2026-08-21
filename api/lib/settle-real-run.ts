@@ -39,7 +39,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { db } from "../db/client";
 import { examDrafts, oabQuestions } from "../../drizzle/schema";
 import { loadSm2Config } from "./sm2";
-import { DraftAlreadyConsumedError, recordSession } from "./record-session";
+import { type DraftClaim, DraftAlreadyConsumedError, recordSession } from "./record-session";
 import { answersForRecord, isRealRunAbandoned, reconcileRun } from "../../shared/domain/exam-draft";
 
 /** What the abandoned prova real is filed under — identical to what the browser
@@ -103,8 +103,12 @@ export async function settleReadRealRun(
   });
   if (!force && !abandoned) return NOT_SETTLED;
 
-  // The token this settlement judged. `force` claims the row whatever its state.
-  const expectedToken = force ? undefined : draft.lastSavedAt;
+  // How this settlement claims the row: with the token it judged, or — on
+  // `force` (startReal, BR-05.5) — whatever the row's state. One value, used by
+  // BOTH branches below, so the two claims can never disagree about the terms.
+  const claim: DraftClaim = force
+    ? { id: draft.id, force: true }
+    : { id: draft.id, lastSavedAt: draft.lastSavedAt };
 
   const survivors = await liveQuestionIds(draft.questionIds);
   const reconciled = reconcileRun(
@@ -121,9 +125,9 @@ export async function settleReadRealRun(
       .delete(examDrafts)
       .where(
         and(
-          eq(examDrafts.id, draft.id),
+          eq(examDrafts.id, claim.id),
           eq(examDrafts.userId, userId),
-          expectedToken === undefined ? undefined : eq(examDrafts.lastSavedAt, expectedToken),
+          "force" in claim ? undefined : eq(examDrafts.lastSavedAt, claim.lastSavedAt),
         ),
       )
       .returning({ id: examDrafts.id });
@@ -140,8 +144,7 @@ export async function settleReadRealRun(
           discipline: REAL_EXAM_DISCIPLINE,
           difficulty: REAL_EXAM_DIFFICULTY,
           answers,
-          draftId: draft.id,
-          draftLastSavedAt: expectedToken,
+          draft: claim,
         },
         sm2Config,
       ),
