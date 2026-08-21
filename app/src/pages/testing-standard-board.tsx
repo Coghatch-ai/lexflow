@@ -10,6 +10,12 @@
 // `handleSaveAndExit` / `handleQuitAndProcess`, never inside `QuitTestDialog`
 // or `RunGuardProvider` (both are presentation and cannot wait on a promise).
 // While one runs, `busy` disables every action so there is no second entry.
+//
+// A failed exit puts the run BACK on screen, so the student clicks again —
+// that retry is safe by construction, not by a disabled button: answers are
+// built with `appendAnswer` and recorded through `dedupeAnswers`, one entry per
+// question, last word wins. Every failure is shown (`persistence.failure`);
+// clicking into silence is what produced the double-count in the first place.
 
 import { useEffect, useRef, useState, type ReactElement } from 'react';
 import { useSession } from '../auth';
@@ -27,10 +33,10 @@ import {
   shouldPromptOnExit,
   type AnswerDraft,
 } from '../shared/lib/exit-rules';
-import type { DraftClaim } from '../shared/lib/run-persistence';
+import { appendAnswer, dedupeAnswers, type DraftClaim } from '../shared/lib/run-persistence';
 import TestCompleted from './testing-completed';
 import StandardQuestion from './testing-standard-question';
-import RunConflictDialog from './testing-run-conflict';
+import RunOverlays from './testing-run-overlays';
 import type { StandardRunStart, TestQuestion } from './testing-standard-types';
 import {
   NO_ELIMINATIONS,
@@ -142,7 +148,11 @@ export default function StandardBoard({
           start.filters.difficulty !== ''
             ? (start.filters.difficulty as 'easy' | 'medium' | 'hard')
             : 'medium',
-        answers: finalAnswers,
+        // One answer per question, always — the last word wins. A retry after
+        // a failed recording re-enters through here and must never write the
+        // same question twice (two `user_answers` rows, an 11-of-10 run, SM-2
+        // stepped twice).
+        answers: dedupeAnswers(finalAnswers),
         // Criterion 5: a persisted run is NEVER recorded without its claim, or
         // the draft would survive its own session and come back as "Continuar".
         ...(claim !== undefined ? { draft: claim } : {}),
@@ -159,10 +169,15 @@ export default function StandardBoard({
     if (!user || currentIndex >= questions.length || busy) return;
     const correct = selectedAnswer === currentQuestion.correctAnswer;
     const totalTimeSpent = timeSpent + (carriedTimeRef.current.get(currentQuestion.id) ?? 0);
-    const updated: AnswerDraft[] = [
-      ...answers,
-      { questionId: currentQuestion.id, userAnswer: selectedAnswer, correct, timeSpent: totalTimeSpent },
-    ];
+    // `appendAnswer`, never a spread: after a failed recording the run comes
+    // back on screen with this question ALREADY in `answers`, and the second
+    // click must overwrite that entry instead of adding a twin.
+    const updated: AnswerDraft[] = appendAnswer(answers, {
+      questionId: currentQuestion.id,
+      userAnswer: selectedAnswer,
+      correct,
+      timeSpent: totalTimeSpent,
+    });
     setAnswers(updated);
     // The answer is recorded — its cross-outs have served their purpose.
     setEliminations((prev) => clearForQuestion(prev, currentQuestion.id));
@@ -205,15 +220,12 @@ export default function StandardBoard({
     const carried = carriedTimeRef.current.get(currentQuestion.id) ?? 0;
     const finalAnswers = processableAnswers(
       checked
-        ? [
-          ...answers,
-          {
-            questionId: currentQuestion.id,
-            userAnswer: selectedAnswer,
-            correct: selectedAnswer === currentQuestion.correctAnswer,
-            timeSpent: timeSpent + carried,
-          },
-        ]
+        ? appendAnswer(answers, {
+          questionId: currentQuestion.id,
+          userAnswer: selectedAnswer,
+          correct: selectedAnswer === currentQuestion.correctAnswer,
+          timeSpent: timeSpent + carried,
+        })
         : answers,
     );
     if (finalAnswers.length === 0) {
@@ -288,15 +300,6 @@ export default function StandardBoard({
     setTimeSpent(0);
   };
 
-  const handleDiscardConflict = async (): Promise<void> => {
-    if (persistence.conflict?.discardTarget === 'server') {
-      await persistence.discardSaved();
-      onRestart();
-      return;
-    }
-    onExitToModes();
-  };
-
   if (finished) {
     return (
       <TestCompleted
@@ -341,14 +344,13 @@ export default function StandardBoard({
         onQuit={() => { void handleQuitAndProcess(); }}
         onSave={() => { void handleSaveAndExit(); }}
       />
-      {persistence.conflict !== null && (
-        <RunConflictDialog
-          conflict={persistence.conflict}
-          busy={busy}
-          onReload={onReloadFromServer}
-          onDiscard={() => { void handleDiscardConflict(); }}
-        />
-      )}
+      <RunOverlays
+        persistence={persistence}
+        busy={busy}
+        onReload={onReloadFromServer}
+        onRestart={onRestart}
+        onExitToModes={onExitToModes}
+      />
     </>
   );
 }

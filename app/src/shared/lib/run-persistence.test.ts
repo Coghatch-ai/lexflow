@@ -1,12 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { moveToEnd } from "./exam-queue";
 import {
+  appendAnswer,
   claimFor,
+  claimOutcomeFor,
   conflictFor,
+  dedupeAnswers,
   isConflictError,
   persistedDraftOf,
   resumableFor,
   resumeStateFrom,
+  saveFailureFor,
   standardDraftPayload,
   type PersistedDraft,
   type StandardRunState,
@@ -285,5 +289,102 @@ describe("resumableFor", () => {
   it("is null while the list is still loading", () => {
     expect(resumableFor(undefined, "standard")).toBeNull();
     expect(resumableFor([], "standard")).toBeNull();
+  });
+});
+
+// The retry that produced two `user_answers` rows for the same question: a
+// non-CONFLICT failure puts the run back on screen with the answer ALREADY in
+// `answers`, the student clicks "Finalizar" again, and the payload grows.
+describe("appendAnswer / dedupeAnswers", () => {
+  it("a second Finalizar overwrites the question's answer instead of adding a twin", () => {
+    const nine = ["q1", "q2", "q3", "q4", "q5", "q6", "q7", "q8", "q9"].map((id) => answer(id));
+    // First click: the last question joins the payload…
+    const firstClick = appendAnswer(nine, answer("q10", "B", 30));
+    // …the recording fails (offline/500/401), the run comes back, second click.
+    const retry = appendAnswer(firstClick, answer("q10", "B", 47));
+
+    expect(retry).toHaveLength(10);
+    expect(retry.filter((a) => a.questionId === "q10")).toHaveLength(1);
+    // A run of 10 must never record 11 — that was `totalQuestions: 11`.
+    expect(new Set(retry.map((a) => a.questionId)).size).toBe(retry.length);
+  });
+
+  it("keeps the LAST word on a question (the retry's own timing)", () => {
+    const retried = appendAnswer([answer("q1", "A", 12)], answer("q1", "C", 40));
+    expect(retried).toEqual([{ questionId: "q1", userAnswer: "C", correct: true, timeSpent: 40 }]);
+  });
+
+  it("replaces in place — the answered order (BR-03 postpones) survives", () => {
+    const answers = [answer("q1"), answer("q3"), answer("q2")];
+    const again = appendAnswer(answers, answer("q3", "D", 99));
+    expect(again.map((a) => a.questionId)).toEqual(["q1", "q3", "q2"]);
+  });
+
+  it("appends a question that is not in the run yet", () => {
+    const grown = appendAnswer([answer("q1")], answer("q2"));
+    expect(grown.map((a) => a.questionId)).toEqual(["q1", "q2"]);
+  });
+
+  it("dedupes a payload built anywhere else, and is idempotent", () => {
+    const duplicated = [answer("q1", "A", 10), answer("q2"), answer("q1", "B", 20)];
+    const once = dedupeAnswers(duplicated);
+    expect(once.map((a) => a.questionId)).toEqual(["q1", "q2"]);
+    expect(once[0]?.userAnswer).toBe("B");
+    expect(dedupeAnswers(once)).toEqual(once);
+  });
+});
+
+// Criterion 5: a persisted run is NEVER recorded without its claim, or the
+// draft survives its own session and comes back as "Continuar".
+describe("claimOutcomeFor", () => {
+  it("records with the claim once both halves are known", () => {
+    const outcome = claimOutcomeFor("draft-1", PG_TOKEN);
+    expect(outcome.ok).toBe(true);
+    expect(outcome.claim).toEqual({ id: "draft-1", lastSavedAt: PG_TOKEN });
+    expect(outcome.failure).toBeNull();
+  });
+
+  it("refuses to record a PERSISTED run whose id was never learned", () => {
+    const outcome = claimOutcomeFor(null, PG_TOKEN);
+    expect(outcome.ok).toBe(false);
+    expect(outcome.claim).toBeUndefined();
+    expect(outcome.failure?.kind).toBe("claim");
+  });
+
+  it("records a run that was never persisted, with no claim at all", () => {
+    const outcome = claimOutcomeFor(null, null);
+    expect(outcome.ok).toBe(true);
+    expect(outcome.claim).toBeUndefined();
+    expect(outcome.failure).toBeNull();
+  });
+});
+
+// A failed exit used to be 100% silent: the student clicked and nothing moved.
+describe("saveFailureFor", () => {
+  it("tells a dead tunnel apart from an expired session", () => {
+    const offline = saveFailureFor({ data: null, message: "Failed to fetch" });
+    const auth = saveFailureFor({ data: { code: "UNAUTHORIZED" } });
+    expect(offline.kind).toBe("offline");
+    expect(offline.title).toContain("conexão");
+    expect(auth.kind).toBe("auth");
+    expect(auth.title).toContain("sessão");
+    expect(auth.title).not.toBe(offline.title);
+  });
+
+  it("treats a 403 as the same expired-credentials problem", () => {
+    expect(saveFailureFor({ data: { code: "FORBIDDEN" } }).kind).toBe("auth");
+  });
+
+  it("has its own copy for a server that answered and refused", () => {
+    expect(saveFailureFor({ data: { code: "INTERNAL_SERVER_ERROR" } }).kind).toBe("server");
+  });
+
+  it("never returns an empty message, whatever it was handed", () => {
+    for (const thrown of [null, undefined, "boom", new Error("boom"), { data: {} }]) {
+      const failure = saveFailureFor(thrown);
+      expect(failure.title.length).toBeGreaterThan(0);
+      expect(failure.body.length).toBeGreaterThan(0);
+      expect(failure.dismissLabel.length).toBeGreaterThan(0);
+    }
   });
 });

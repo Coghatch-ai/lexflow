@@ -206,6 +206,35 @@ export function claimFor(draftId: string | null, token: string | null): DraftCla
   return { id: draftId, lastSavedAt: token };
 }
 
+/** What a flush concluded about the claim it must hand `sessions.record`. */
+export interface ClaimOutcome {
+  /** False = do NOT record: the run is persisted but its claim is unknown. */
+  ok: boolean;
+  claim: DraftClaim | undefined;
+  /** The pt-BR message to show when `ok` is false. */
+  failure: RunSaveFailure | null;
+}
+
+/**
+ * Whether a flushed run may be recorded, and with which claim.
+ *
+ * A run with a token IS on the server, so recording it WITHOUT the claim is
+ * never acceptable: `sessions.record` would write the session and leave the
+ * draft alive on top of it, and the student would be offered "Continuar" for a
+ * run already processed (criterion 5). The id can go missing on its own — it
+ * is learned by a second read after the first `save`, and that read can fail —
+ * so the honest answer there is "not now", never a claimless recording.
+ *
+ * A run with no token was never persisted (nothing to claim, nothing to
+ * orphan): recording it without a claim is the normal, correct path.
+ */
+export function claimOutcomeFor(draftId: string | null, token: string | null): ClaimOutcome {
+  if (token === null || token.length === 0) return { ok: true, claim: undefined, failure: null };
+  const claim = claimFor(draftId, token);
+  if (claim === undefined) return { ok: false, claim: undefined, failure: runSaveFailure("claim") };
+  return { ok: true, claim, failure: null };
+}
+
 /** Which copy of a CONFLICT the student is looking at. */
 export type RunConflictKind = "remote" | "live";
 
@@ -268,6 +297,101 @@ export function isConflictError(error: unknown): boolean {
   const data: unknown = (error as { data?: unknown }).data;
   if (typeof data !== "object" || data === null) return false;
   return (data as { code?: unknown }).code === "CONFLICT";
+}
+
+/**
+ * Why an EXIT could not complete. A CONFLICT is not here — it has its own
+ * dialog with its own two choices (`conflictFor`); these are the failures that
+ * used to be swallowed into a dead button.
+ */
+export type RunSaveFailureKind = "offline" | "auth" | "claim" | "server";
+
+export interface RunSaveFailure {
+  kind: RunSaveFailureKind;
+  title: string;
+  body: string;
+  /** Closing the message is the retry: the run is still on screen. */
+  dismissLabel: string;
+}
+
+const RUN_SAVE_FAILURES: Record<RunSaveFailureKind, RunSaveFailure> = {
+  offline: {
+    kind: "offline",
+    title: "Sem conexão com o servidor.",
+    body: "Nada foi perdido: suas respostas continuam nesta aba. Verifique a conexão e tente de novo.",
+    dismissLabel: "Tentar de novo",
+  },
+  auth: {
+    kind: "auth",
+    title: "Sua sessão expirou.",
+    body: "Entre de novo nesta aba para salvar e processar o teste. Nada foi perdido: suas respostas continuam aqui.",
+    dismissLabel: "Entendi",
+  },
+  claim: {
+    kind: "claim",
+    title: "Não foi possível confirmar o teste salvo.",
+    body: "O teste salvo não pôde ser identificado, então nada foi processado — para não deixar uma cópia viva por cima do resultado. Tente de novo em instantes.",
+    dismissLabel: "Tentar de novo",
+  },
+  server: {
+    kind: "server",
+    title: "Não foi possível salvar agora.",
+    body: "O servidor recusou o salvamento. Suas respostas continuam nesta aba — tente de novo em instantes.",
+    dismissLabel: "Tentar de novo",
+  },
+};
+
+/** The pt-BR copy of one failure kind. */
+export function runSaveFailure(kind: RunSaveFailureKind): RunSaveFailure {
+  return RUN_SAVE_FAILURES[kind];
+}
+
+function errorCodeOf(error: unknown): string | null {
+  if (typeof error !== "object" || error === null) return null;
+  const data: unknown = (error as { data?: unknown }).data;
+  if (typeof data !== "object" || data === null) return null;
+  const code: unknown = (data as { code?: unknown }).code;
+  return typeof code === "string" ? code : null;
+}
+
+/**
+ * Which message a failed exit deserves. An expired token is NOT the same
+ * problem as a dead tunnel — the first needs signing in again, the second
+ * needs waiting — so they never share a message.
+ *
+ * No `data.code` at all means the request never reached tRPC (offline, DNS,
+ * CORS): a client-side `TRPCClientError` carries `data: null`.
+ */
+export function saveFailureFor(error: unknown): RunSaveFailure {
+  const code = errorCodeOf(error);
+  if (code === "UNAUTHORIZED" || code === "FORBIDDEN") return runSaveFailure("auth");
+  if (code === null) return runSaveFailure("offline");
+  return runSaveFailure("server");
+}
+
+/**
+ * The answers of a run with AT MOST ONE entry per question, last write wins,
+ * queue order preserved.
+ *
+ * The invariant is structural, not a button state: a run holds one answer per
+ * question, so a retry after a failed recording (the exit handler rolls the
+ * run back on screen and the student clicks again) can never grow the payload.
+ * Recording the same question twice would write two `user_answers` rows, count
+ * 11 questions in a run of 10 and step the SM-2 schedule twice.
+ */
+export function dedupeAnswers(answers: readonly AnswerDraft[]): AnswerDraft[] {
+  const byQuestion = new Map<string, AnswerDraft>();
+  for (const answer of answers) byQuestion.set(answer.questionId, answer);
+  return [...byQuestion.values()];
+}
+
+/**
+ * Adds a confirmed answer to a run, REPLACING any answer that question already
+ * has (in place, so the queue order the student answered in survives). This is
+ * the only way the screens build the payload — see `dedupeAnswers`.
+ */
+export function appendAnswer(answers: readonly AnswerDraft[], answer: AnswerDraft): AnswerDraft[] {
+  return dedupeAnswers([...answers, answer]);
 }
 
 /** One entry of `examDrafts.list` — the "Continuar (n/N)" of a mode card. */

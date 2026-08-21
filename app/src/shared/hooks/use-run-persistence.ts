@@ -17,19 +17,24 @@ import { useEffect, useRef, useState, type MutableRefObject } from "react";
 import { trpc } from "../lib/trpc";
 import { createSaveScheduler, type SaveScheduler } from "../lib/save-scheduler";
 import {
-  claimFor,
+  claimOutcomeFor,
   conflictFor,
   isConflictError,
   persistedDraftOf,
+  saveFailureFor,
   standardDraftPayload,
   type DraftClaim,
   type RunConflict,
+  type RunSaveFailure,
   type StandardRunState,
 } from "../lib/run-persistence";
 
 /** What an exit handler needs before it may record or navigate. */
 export interface FlushOutcome {
-  /** False = CONFLICT: record NOTHING and leave the run on screen. */
+  /**
+   * False = record NOTHING and leave the run on screen. Either a CONFLICT (its
+   * own dialog) or a failure the student was just told about — never silence.
+   */
   ok: boolean;
   /** The `{ id, lastSavedAt }` pair — undefined if never persisted. */
   claim: DraftClaim | undefined;
@@ -42,13 +47,20 @@ export interface RunPersistence {
   flush: () => Promise<FlushOutcome>;
   /** The conflict dialog the screen must render, or null. */
   conflict: RunConflict | null;
+  /** The failure message the screen must render after a failed EXIT, or null. */
+  failure: RunSaveFailure | null;
+  /** The student read the failure message — closing it is the retry. */
+  dismissFailure: () => void;
   /** Take ownership of the row a resume rehydrated from. */
   adopt: (draftId: string, token: string) => void;
   /** The run left this tab (processed, saved-and-exited, discarded). */
   close: () => void;
   /** "Descartar o salvo" — drops the server's row for this mode. */
   discardSaved: () => Promise<void>;
-  /** Surface a CONFLICT raised by a call this hook did not make. */
+  /**
+   * Surface an error raised by a call this hook did not make (the recording
+   * itself): a CONFLICT as its dialog, anything else as a failure message.
+   */
   reportError: (error: unknown) => void;
 }
 
@@ -59,8 +71,11 @@ interface PersistenceRefs {
   /** Whether the FAILING save carried a token — picks the conflict copy. */
   hadToken: MutableRefObject<boolean>;
   send: MutableRefObject<() => Promise<string>>;
+  /** Reads the row id back from the server; resolves even when it cannot. */
+  learnDraftId: MutableRefObject<() => Promise<void>>;
   scheduler: MutableRefObject<SaveScheduler<string> | null>;
   setConflict: (conflict: RunConflict | null) => void;
+  setFailure: (failure: RunSaveFailure | null) => void;
 }
 
 /**
@@ -72,6 +87,19 @@ function raiseIfConflict(refs: PersistenceRefs, error: unknown): void {
   if (!isConflictError(error)) return;
   refs.scheduler.current?.close();
   refs.setConflict(conflictFor(refs.hadToken.current));
+}
+
+/**
+ * A CONFLICT gets its dialog; anything else gets a message. The BACKGROUND
+ * autosave stays silent on purpose (the next debounce retries it) — this runs
+ * only where the student is waiting on an exit and nothing else would move.
+ */
+function raiseFailure(refs: PersistenceRefs, error: unknown): void {
+  if (isConflictError(error)) {
+    raiseIfConflict(refs, error);
+    return;
+  }
+  refs.setFailure(saveFailureFor(error));
 }
 
 function schedulerOf(refs: PersistenceRefs): SaveScheduler<string> {
@@ -93,11 +121,24 @@ function forgetIdentity(refs: PersistenceRefs): void {
 }
 
 async function flushRun(refs: PersistenceRefs): Promise<FlushOutcome> {
+  // A new attempt starts clean: the message on screen is about THIS click.
+  refs.setFailure(null);
   const result = await schedulerOf(refs).flush();
-  if (!result.ok) return { ok: false, claim: undefined };
+  if (!result.ok) {
+    raiseFailure(refs, result.error);
+    return { ok: false, claim: undefined };
+  }
+  // The row is on the server but its id was never learned (the read after the
+  // first save failed): one last try before deciding, because recording
+  // without the claim would leave the draft alive on top of the session.
+  if (refs.token.current !== null && refs.draftId.current === null) {
+    await refs.learnDraftId.current();
+  }
   // The claim is built on the token the flush LANDED with, never on the one
   // the screen was holding when the student clicked.
-  return { ok: true, claim: claimFor(refs.draftId.current, refs.token.current) };
+  const outcome = claimOutcomeFor(refs.draftId.current, refs.token.current);
+  if (!outcome.ok) refs.setFailure(outcome.failure);
+  return { ok: outcome.ok, claim: outcome.claim };
 }
 
 /** The run as the SCREEN knows it — the token is the hook's business, not its. */
@@ -112,6 +153,7 @@ export function useRunPersistence(snapshot: () => RunSnapshot | null): RunPersis
   const saveMutation = trpc.examDrafts.save.useMutation();
   const discardMutation = trpc.examDrafts.discard.useMutation();
   const [conflict, setConflict] = useState<RunConflict | null>(null);
+  const [failure, setFailure] = useState<RunSaveFailure | null>(null);
 
   const snapshotRef = useRef(snapshot);
   snapshotRef.current = snapshot;
@@ -123,14 +165,29 @@ export function useRunPersistence(snapshot: () => RunSnapshot | null): RunPersis
   const tokenRef = useRef<string | null>(null);
   const hadTokenRef = useRef(false);
   const sendRef = useRef<() => Promise<string>>(() => Promise.resolve(""));
+  const learnDraftIdRef = useRef<() => Promise<void>>(() => Promise.resolve());
   const schedulerRef = useRef<SaveScheduler<string> | null>(null);
   const refs: PersistenceRefs = {
     draftId: draftIdRef,
     token: tokenRef,
     hadToken: hadTokenRef,
     send: sendRef,
+    learnDraftId: learnDraftIdRef,
     scheduler: schedulerRef,
     setConflict,
+    setFailure,
+  };
+
+  // `save` returns the token but not the row id, and `sessions.record` needs
+  // BOTH. Swallows its own failure: the id is retried right before it is
+  // actually needed (`flushRun`), and a background save must not die for it.
+  refs.learnDraftId.current = async (): Promise<void> => {
+    try {
+      const row = persistedDraftOf(await utils.examDrafts.get.fetch({ mode: "standard" }));
+      if (row !== null) refs.draftId.current = row.id;
+    } catch {
+      // Left null on purpose — `flushRun` decides what a missing id means.
+    }
   };
 
   refs.send.current = async (): Promise<string> => {
@@ -142,12 +199,10 @@ export function useRunPersistence(snapshot: () => RunSnapshot | null): RunPersis
     );
     // Written the instant the mutation resolves, verbatim.
     refs.token.current = saved.lastSavedAt;
-    // `save` returns the token but not the row id, and `sessions.record` needs
-    // BOTH. One extra read per run, right after the insert that created it.
-    if (refs.draftId.current === null) {
-      const row = persistedDraftOf(await utils.examDrafts.get.fetch({ mode: "standard" }));
-      if (row !== null) refs.draftId.current = row.id;
-    }
+    // One extra read per run, right after the insert that created it. It is
+    // best-effort HERE (the save itself already landed); the exit path tries
+    // again and refuses to record without it.
+    if (refs.draftId.current === null) await refs.learnDraftId.current();
     return saved.lastSavedAt;
   };
 
@@ -179,6 +234,10 @@ export function useRunPersistence(snapshot: () => RunSnapshot | null): RunPersis
     },
     flush: (): Promise<FlushOutcome> => flushRun(refs),
     conflict,
+    failure,
+    dismissFailure: (): void => {
+      setFailure(null);
+    },
     adopt: (draftId: string, token: string): void => {
       refs.draftId.current = draftId;
       refs.token.current = token;
@@ -194,7 +253,7 @@ export function useRunPersistence(snapshot: () => RunSnapshot | null): RunPersis
       setConflict(null);
     },
     reportError: (error: unknown): void => {
-      raiseIfConflict(refs, error);
+      raiseFailure(refs, error);
     },
   };
 }

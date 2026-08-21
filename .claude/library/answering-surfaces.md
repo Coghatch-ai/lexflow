@@ -222,6 +222,21 @@ answered") is **not** satisfied product-wide until M1 lands.
 - **Não salvam nada** (por contrato, BR-02.3 / D8): adiar, descartar alternativa, `Conferir`,
   bookmark e nota. Logo `checked` conta como respondida no diálogo mas **não** é persistida — o
   "(n/N)" do card pode mostrar 1 a menos. É desenho, não bug.
+- **Falha NÃO-CONFLICT numa saída aparece na tela** (`saveFailureFor` + `RunFailureDialog`, via
+  `persistence.failure`): offline, sessão expirada (`UNAUTHORIZED`/`FORBIDDEN`) e recusa do
+  servidor têm cópias pt-BR diferentes, porque a ação do aluno é diferente em cada uma. O autosave
+  de fundo continua **mudo** de propósito — quem retenta ali é o próximo debounce. Silêncio só
+  existe onde há retry automático.
+- **A retentativa depois de uma falha é idempotente por construção**, não por botão desabilitado:
+  a saída que falha devolve a corrida para a tela com a resposta JÁ em `answers`, então toda
+  montagem de payload passa por `appendAnswer` e toda gravação por `dedupeAnswers`
+  (`run-persistence.ts`) — uma entrada por `questionId`, a última vale. Sem isso o segundo clique
+  em "Finalizar" grava 2 linhas em `user_answers` para a mesma questão, `totalQuestions: 11` numa
+  corrida de 10 e SM-2 aplicado duas vezes.
+- **Corrida persistida nunca grava sem claim** (aceite 5): o id da linha é aprendido por um
+  `examDrafts.get` depois do 1º `save`; se aquele read falhar, o flush **tenta de novo** e, se
+  ainda faltar, `claimOutcomeFor` devolve `ok: false` com mensagem — em vez de gravar sem `draft`
+  e deixar o rascunho vivo por cima da própria sessão.
 
 ## Functional definitions attached to these surfaces
 
