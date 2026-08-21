@@ -6,6 +6,7 @@ import { nextDifficulty } from '@shared/domain/adaptive';
 import { mapAdaptiveRows, useAdaptivePool } from './adaptive-pool';
 import { useNotesAndBookmarks } from '../shared/hooks/use-notes-bookmarks';
 import { useLeaveWarning } from '../shared/hooks/use-leave-warning';
+import { useRegisterRun } from '../shared/run-guard-context';
 import QuitTestDialog from './QuitTestDialog';
 import { exitPrompt, processableAnswers, shouldPromptOnExit } from '../shared/lib/exit-rules';
 import { canPostponeAdaptive, shouldServeDeferred } from '../shared/lib/exam-queue';
@@ -116,6 +117,9 @@ export default function AdaptiveSimulation({ onExit }: { onExit: () => void }): 
   const running = status === 'playing' || status === 'feedback';
   // Closing the tab or reloading with answers already given warns first (BR-05.1).
   useLeaveWarning(running && shouldPromptOnExit(answerLog.length));
+  // Leaving through the sidebar asks the same question (slice S1b).
+  useRegisterRun({ mode: 'adaptive', running, answeredCount: answerLog.length, totalQuestions },
+    () => { handleQuitAndProcess(); });
 
   const finish = (
     log: { questionId: string; userAnswer: string; correct: boolean; timeSpent: number }[]
@@ -154,10 +158,8 @@ export default function AdaptiveSimulation({ onExit }: { onExit: () => void }): 
 
   const quitDialog = (
     <QuitTestDialog
-      open={exitOpen}
-      prompt={exitPrompt('adaptive', answerLog.length, totalQuestions)}
-      onContinue={() => { setExitOpen(false); }}
-      onQuit={handleQuitAndProcess}
+      open={exitOpen} prompt={exitPrompt('adaptive', answerLog.length, totalQuestions)}
+      onContinue={() => { setExitOpen(false); }} onQuit={handleQuitAndProcess}
     />
   );
 

@@ -10,6 +10,7 @@ import { shuffle } from '../shared/lib/shuffle';
 import { canPostponeGuard, moveToEnd } from '../shared/lib/exam-queue';
 import { useNotesAndBookmarks, type NotesAndBookmarks } from '../shared/hooks/use-notes-bookmarks';
 import { useLeaveWarning } from '../shared/hooks/use-leave-warning';
+import { useRegisterRun } from '../shared/run-guard-context';
 import QuestionCard from '@/shared/components/QuestionCard';
 import AiExplanationButton from '@/shared/components/AiExplanationButton';
 import QuitTestDialog from '../components/QuitTestDialog';
@@ -289,6 +290,14 @@ export default function TestingPage(): ReactElement {
 
   // Closing the tab or reloading with answers already given warns first (BR-05.1).
   useLeaveWarning(status === 'in-progress' && shouldPromptOnExit(answeredCount));
+
+  // Leaving through the sidebar asks the same question (slice S1b). Registered
+  // before the early returns below (rules of hooks); `handleQuitAndProcess` is
+  // only READ when the dialog is confirmed, never during this render.
+  useRegisterRun(
+    { mode: 'standard', running: status === 'in-progress', answeredCount, totalQuestions: questions.length },
+    () => { handleQuitAndProcess(); },
+  );
 
   if (mode === 'adaptive') return <AdaptiveSimulation onExit={() => { setMode(null); }} />;
   if (mode === 'spaced') return <SpacedRepetition onExit={() => { setMode(null); }} />;

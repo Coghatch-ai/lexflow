@@ -10,6 +10,7 @@ import QuitTestDialog from './QuitTestDialog';
 import type { AiExplanation } from '@shared/domain/ai-eval';
 import { useNotesAndBookmarks } from '../shared/hooks/use-notes-bookmarks';
 import { useLeaveWarning } from '../shared/hooks/use-leave-warning';
+import { useRegisterRun } from '../shared/run-guard-context';
 import { type AnswerDraft, exitPrompt, processableAnswers, shouldPromptOnExit } from '../shared/lib/exit-rules';
 import {
   NO_ELIMINATIONS,
@@ -209,6 +210,12 @@ export default function RealExamSimulation({ onExit }: { onExit: () => void }): 
 
   // Closing the tab or reloading during the exam warns first (BR-05.1).
   useLeaveWarning(status === 'playing' && shouldPromptOnExit(answers.size));
+  // Leaving through the sidebar asks the same question, with the prova real
+  // warning (BR-05.5), and processes through the same 'review' path (slice S1b).
+  useRegisterRun(
+    { mode: 'real', running: status === 'playing', answeredCount: answers.size, totalQuestions: questions.length },
+    () => { handleQuitAndProcess(); },
+  );
 
   // Leaving the exam asks first and warns it cannot be saved (BR-05.5); with
   // nothing answered there is nothing to process, so it exits silently.

@@ -5,6 +5,7 @@ import { trpc } from '../shared/lib/trpc';
 import { shuffle } from '../shared/lib/shuffle';
 import { useNotesAndBookmarks } from '../shared/hooks/use-notes-bookmarks';
 import { useLeaveWarning } from '../shared/hooks/use-leave-warning';
+import { useRegisterRun } from '../shared/run-guard-context';
 import QuitTestDialog from './QuitTestDialog';
 import { exitPrompt, processableAnswers, shouldPromptOnExit } from '../shared/lib/exit-rules';
 import { moveToEnd } from '../shared/lib/exam-queue';
@@ -140,6 +141,11 @@ export default function SpacedRepetition({ onExit }: { onExit: () => void }): Re
   const running = status === 'playing' || status === 'feedback';
   // Closing the tab or reloading with reviews already answered warns first (BR-05.1).
   useLeaveWarning(running && shouldPromptOnExit(answerLog.length));
+  // Leaving through the sidebar asks the same question (slice S1b).
+  useRegisterRun(
+    { mode: 'spaced', running, answeredCount: answerLog.length, totalQuestions: reviewQuestions.length },
+    () => { handleQuitAndProcess(); },
+  );
 
   // Leaving a running review asks first (BR-05.4); with nothing answered there
   // is nothing to process, so the mode is left silently.

@@ -2,6 +2,7 @@ import { useState, type ReactElement } from 'react';
 import { useLocation } from 'wouter';
 import { useSession } from '../auth';
 import { trpc } from '../shared/lib/trpc';
+import { useRunGuard } from '../shared/run-guard-context';
 import {
   Home,
   BookOpen,
@@ -63,6 +64,9 @@ export default function Layout({ children }: LayoutProps): ReactElement {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [location, navigate] = useLocation();
   const { user, signOut } = useSession();
+  // Leaving a test still running asks first (BR-05.1, slice S1b): every exit
+  // from this sidebar goes through the guard instead of navigating directly.
+  const { requestLeave } = useRunGuard();
   const me = trpc.users.me.useQuery();
   const isAdmin = me.data?.role === 'admin';
 
@@ -106,8 +110,8 @@ export default function Layout({ children }: LayoutProps): ReactElement {
                 <button
                   key={item.path}
                   onClick={() => {
-                    navigate(item.path);
                     setSidebarOpen(false);
+                    requestLeave(() => { navigate(item.path); }, item.path);
                   }}
                   aria-current={active ? 'page' : undefined}
                   className={`group relative w-full flex items-center gap-3 rounded-lg pl-4 pr-3 py-2.5 text-sm transition-colors ${
@@ -135,7 +139,10 @@ export default function Layout({ children }: LayoutProps): ReactElement {
                   return (
                     <button
                       key={item.path}
-                      onClick={() => { navigate(item.path); setSidebarOpen(false); }}
+                      onClick={() => {
+                        setSidebarOpen(false);
+                        requestLeave(() => { navigate(item.path); }, item.path);
+                      }}
                       aria-current={active ? 'page' : undefined}
                       className={`group relative w-full flex items-center gap-3 rounded-lg pl-4 pr-3 py-2.5 text-sm transition-colors ${
                         active
@@ -169,8 +176,10 @@ export default function Layout({ children }: LayoutProps): ReactElement {
                 <p className="truncate text-[0.7rem] text-ink-mute">{user?.email}</p>
               </div>
             </div>
+            {/* Logout is the third silent-discard exit in this file: it also asks
+                first, with targetPath null (it matches no route). */}
             <button
-              onClick={() => { signOut(); }}
+              onClick={() => { requestLeave(() => { signOut(); }, null); }}
               className="mt-1 flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-ink-mute transition-colors hover:bg-[#b04638]/20 hover:text-[#e9a59c]"
             >
               <LogOut className="w-[18px] h-[18px]" />
