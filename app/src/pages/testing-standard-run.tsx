@@ -10,7 +10,7 @@
 
 import { useEffect, useRef, useState, type ReactElement } from 'react';
 import { useLov } from '../shared/hooks/use-lov';
-import { trpc } from '../shared/lib/trpc';
+import { FRESH_READ, trpc } from '../shared/lib/trpc';
 import { persistedDraftOf, resumeStateFrom } from '../shared/lib/run-persistence';
 import StandardSetup from './testing-standard-setup';
 import StandardBoard from './testing-standard-board';
@@ -79,7 +79,13 @@ export default function StandardRun({ intent, onExitToModes }: StandardRunProps)
     try {
       // `persistedDraftOf` restores the `| null` this program cannot infer —
       // see its comment; without it the "no saved run" branch is dead code.
-      const draft = persistedDraftOf(await utils.examDrafts.get.fetch({ mode: 'standard' }));
+      //
+      // `FRESH_READ` because this read is also the CONFLICT's "Recarregar do
+      // servidor": under the client's 5-minute default it would rehydrate from
+      // the same cached copy that produced the conflict, forever.
+      const draft = persistedDraftOf(
+        await utils.examDrafts.get.fetch({ mode: 'standard' }, FRESH_READ),
+      );
       if (draft === null) return;
       const rows = await utils.questions.byIds.fetch({ ids: draft.questionIds });
       const state = resumeStateFrom(draft, rows.map(toTestQuestion));
@@ -87,7 +93,7 @@ export default function StandardRun({ intent, onExitToModes }: StandardRunProps)
         // Nothing survived in the catalog: the row cannot be resumed and must
         // not be recorded either (`user_answers` has an FK to `oab_questions`).
         await discardMutation.mutateAsync({ mode: 'standard' });
-        await utils.examDrafts.list.invalidate();
+        await utils.examDrafts.invalidate();
         setNotice(ALL_DROPPED_NOTICE);
         return;
       }

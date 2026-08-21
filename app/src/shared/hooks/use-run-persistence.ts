@@ -14,9 +14,10 @@
 // tree and open a stale-closure window between the save and the recording.
 
 import { useEffect, useRef, useState, type MutableRefObject } from "react";
-import { trpc } from "../lib/trpc";
+import { FRESH_READ, trpc } from "../lib/trpc";
 import { createSaveScheduler, type SaveScheduler } from "../lib/save-scheduler";
 import {
+  adoptableDraftId,
   claimOutcomeFor,
   conflictFor,
   isConflictError,
@@ -181,10 +182,19 @@ export function useRunPersistence(snapshot: () => RunSnapshot | null): RunPersis
   // `save` returns the token but not the row id, and `sessions.record` needs
   // BOTH. Swallows its own failure: the id is retried right before it is
   // actually needed (`flushRun`), and a background save must not die for it.
+  //
+  // `FRESH_READ` is load-bearing, not hygiene: under the client's 5-minute
+  // default this `fetch` resolves from the CACHE, so the retry in `flushRun`
+  // would keep re-reading the answer from BEFORE the row existed and the run
+  // could never be processed. `adoptableDraftId` is the second half — it only
+  // takes an id off a row that still carries the token this tab just wrote.
   refs.learnDraftId.current = async (): Promise<void> => {
     try {
-      const row = persistedDraftOf(await utils.examDrafts.get.fetch({ mode: "standard" }));
-      if (row !== null) refs.draftId.current = row.id;
+      const row = persistedDraftOf(
+        await utils.examDrafts.get.fetch({ mode: "standard" }, FRESH_READ),
+      );
+      const id = adoptableDraftId(row, refs.token.current);
+      if (id !== null) refs.draftId.current = id;
     } catch {
       // Left null on purpose — `flushRun` decides what a missing id means.
     }
@@ -248,7 +258,9 @@ export function useRunPersistence(snapshot: () => RunSnapshot | null): RunPersis
     },
     discardSaved: async (): Promise<void> => {
       await discardMutation.mutateAsync({ mode: "standard" });
-      await utils.examDrafts.list.invalidate();
+      // The WHOLE router, never just `list`: `get` is what a resume reads, and
+      // leaving it cached serves a row this call just deleted.
+      await utils.examDrafts.invalidate();
       forgetIdentity(refs);
       setConflict(null);
     },

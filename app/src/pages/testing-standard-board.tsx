@@ -87,8 +87,10 @@ export default function StandardBoard({
     onSuccess: () => {
       void utils.stats.invalidate();
       void utils.sessions.invalidate();
-      // The draft died in the same transaction — the card must stop offering it.
-      void utils.examDrafts.list.invalidate();
+      // The draft died in the same transaction — the card must stop offering
+      // it, and `get` must stop handing the dead row to the NEXT run's
+      // `learnDraftId` (a stale id there claims zero rows = a false CONFLICT).
+      void utils.examDrafts.invalidate();
     },
   });
 
@@ -261,7 +263,7 @@ export default function StandardBoard({
       return false;
     }
     persistence.close();
-    void utils.examDrafts.list.invalidate();
+    void utils.examDrafts.invalidate();
     setExitOpen(false);
     onExitToModes();
     return true;

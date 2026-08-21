@@ -34,7 +34,9 @@ export function ModeSelection({ onSelect }: ModeSelectionProps): ReactElement {
 
   const discardSaved = async (): Promise<void> => {
     await discardMutation.mutateAsync({ mode: 'standard' });
-    await utils.examDrafts.list.invalidate();
+    // The whole router: `get` caches the row this call just deleted, and the
+    // run started right after would read it back as if it were alive.
+    await utils.examDrafts.invalidate();
     setAsking(false);
     onSelect('standard', 'new');
   };
@@ -71,7 +73,7 @@ export function ModeSelection({ onSelect }: ModeSelectionProps): ReactElement {
                 Continuar {progress}
               </button>
               <button
-                onClick={() => { void discardMutation.mutateAsync({ mode: 'standard' }).then(() => utils.examDrafts.list.invalidate()); }}
+                onClick={() => { void discardMutation.mutateAsync({ mode: 'standard' }).then(() => utils.examDrafts.invalidate()); }}
                 className="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg text-sm font-semibold hover:bg-gray-300 transition"
               >
                 Descartar

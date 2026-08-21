@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { moveToEnd } from "./exam-queue";
 import {
+  adoptableDraftId,
   appendAnswer,
   claimFor,
   claimOutcomeFor,
@@ -356,6 +357,49 @@ describe("claimOutcomeFor", () => {
     expect(outcome.ok).toBe(true);
     expect(outcome.claim).toBeUndefined();
     expect(outcome.failure).toBeNull();
+  });
+});
+
+// The id read back after a save is only MINE while the row still carries the
+// token that save returned. Adopting any other row pairs a foreign id with our
+// token, the claiming DELETE matches zero rows, and the student is told the run
+// "foi continuado em outro aparelho" — a CONFLICT nobody caused.
+describe("adoptableDraftId", () => {
+  const OTHER_TOKEN = "2026-08-21 14:31:58.884001+00";
+
+  it("adopts the row this tab just wrote", () => {
+    expect(adoptableDraftId(draft({ id: "draft-1" }), PG_TOKEN)).toBe("draft-1");
+  });
+
+  it("refuses a row written by someone else — no id, so no FALSE conflict", () => {
+    // The regression: `sessions.record` deleted row A, a new run wrote row B,
+    // and the read handed A back. Adopting A's id claimed zero rows.
+    expect(adoptableDraftId(draft({ id: "row-A", lastSavedAt: OTHER_TOKEN }), PG_TOKEN)).toBeNull();
+  });
+
+  it("refuses when the read found no row at all", () => {
+    expect(adoptableDraftId(null, PG_TOKEN)).toBeNull();
+  });
+
+  it("refuses before this tab has written anything (no token to match against)", () => {
+    expect(adoptableDraftId(draft(), null)).toBeNull();
+    expect(adoptableDraftId(draft(), "")).toBeNull();
+  });
+
+  it("matches the token VERBATIM — a normalised copy is not the same row", () => {
+    const normalised = new Date(PG_TOKEN).toISOString();
+    expect(adoptableDraftId(draft(), normalised)).toBeNull();
+    expect(adoptableDraftId(draft({ lastSavedAt: normalised }), PG_TOKEN)).toBeNull();
+  });
+
+  it("hands a refusal to claimOutcomeFor as 'try again', never as a wrong claim", () => {
+    // The two halves together: refusing costs a retry, adopting the wrong row
+    // costs the student their answers behind a conflict dialog that loops.
+    const foreign = adoptableDraftId(draft({ id: "row-A", lastSavedAt: OTHER_TOKEN }), PG_TOKEN);
+    const outcome = claimOutcomeFor(foreign, PG_TOKEN);
+    expect(outcome.ok).toBe(false);
+    expect(outcome.claim).toBeUndefined();
+    expect(outcome.failure?.kind).toBe("claim");
   });
 });
 

@@ -2,7 +2,7 @@ import { useCallback, useMemo, useRef, useState, type ReactElement, type ReactNo
 import { useLocation } from 'wouter';
 import QuitTestDialog from './QuitTestDialog';
 import { RunGuardContext, type RegisteredRun, type RunGuardValue } from '../shared/run-guard-context';
-import { decideNavigation, pickActiveRun } from '../shared/lib/run-guard';
+import { decideNavigation, guardSaveOutcome, pickActiveRun } from '../shared/lib/run-guard';
 import type { ExitPrompt } from '../shared/lib/exit-rules';
 
 // Navigation guard for a test still running (BR-05.1, epic #67 slice S1b).
@@ -71,8 +71,13 @@ export default function RunGuardProvider({ children }: { children: ReactNode }):
 
   // "Salvar e sair" (BR-05.3, slice S2b). The flush lives in the SCREEN's
   // handler, not here — this only waits for it, because navigating first would
-  // unmount the screen that has to show a CONFLICT. `true` runs the pending
-  // navigation; `false` keeps the dialog up and the screen takes over.
+  // unmount the screen that has to show a CONFLICT.
+  //
+  // What happens to THIS dialog afterwards is `guardSaveOutcome`, and on a
+  // failed save it closes too: it is `z-50` and painted after the screen, so
+  // leaving it up buries the failure/CONFLICT dialog the screen just raised
+  // behind its own backdrop. The student then sees the unchanged dialog and
+  // clicks into the void — the very symptom this slice removed elsewhere.
   const handleSave = (): void => {
     if (pending === null) return;
     const save = registryRef.current.get(pending.id)?.save;
@@ -85,11 +90,15 @@ export default function RunGuardProvider({ children }: { children: ReactNode }):
     void save().then(
       (saved) => {
         setBusy(false);
-        if (!saved) return;
-        setPending(null);
-        next();
+        const outcome = guardSaveOutcome(saved);
+        if (outcome.closeDialog) setPending(null);
+        if (outcome.navigate) next();
       },
       () => {
+        // A REJECTION is not a reported failure: the screen showed nothing, so
+        // the dialog stays as the only thing left to click (busy is cleared,
+        // so the retry is live). `handleSaveAndExit` resolves false instead of
+        // throwing, so this is the unreachable-by-design branch.
         setBusy(false);
       },
     );

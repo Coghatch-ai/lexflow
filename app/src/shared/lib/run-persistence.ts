@@ -106,6 +106,27 @@ export function persistedDraftOf(row: PersistedDraft | null | undefined): Persis
   return row ?? null;
 }
 
+/**
+ * The id this tab may adopt from a row read back by `examDrafts.get`, or null.
+ *
+ * The id is only ever learned by re-reading the row right after a save, so the
+ * row is MINE exactly when it still carries the token that save returned. Any
+ * other row belongs to someone else's write — a copy continued on another
+ * device, or (before `FRESH_READ`) a cached row this tab already consumed
+ * through `sessions.record`. Adopting one of those pairs a foreign id with our
+ * token: the claiming DELETE matches zero rows and the student is shown a
+ * CONFLICT ("continuado em outro aparelho") for a run nobody else touched.
+ *
+ * Refusing is never a loss — the run stays on screen, `claimOutcomeFor` asks
+ * for a retry, and the next save raises the REAL conflict if there is one.
+ */
+export function adoptableDraftId(row: PersistedDraft | null, token: string | null): string | null {
+  if (row === null || token === null || token.length === 0) return null;
+  // Verbatim string comparison — see the file header: the token is raw PG text
+  // and any normalisation on either side silently stops it from matching.
+  return row.lastSavedAt === token ? row.id : null;
+}
+
 /** What the screen must put back on the board to continue the run. */
 export type ResumeState<Q> =
   | { discard: true; dropped: number }

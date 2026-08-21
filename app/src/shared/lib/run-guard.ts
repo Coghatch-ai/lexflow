@@ -44,6 +44,34 @@ export function pickActiveRun(runs: readonly RunRegistration[]): RunRegistration
   return runs.find((run) => isRunGuarded(run)) ?? null;
 }
 
+/** What the guard does with its own dialog once the screen's `save()` settled. */
+export interface GuardSaveOutcome {
+  /** The pending navigation only runs for a run that is safely on the server. */
+  navigate: boolean;
+  /**
+   * ALWAYS true — including on a failed save.
+   *
+   * The guard's dialog is `fixed inset-0 z-50` and is rendered AFTER the
+   * screen, so while it is up it sits over the failure and CONFLICT dialogs
+   * the screen raises to say why the save did not land. Keeping it open on
+   * `false` handed the student the same dialog again with no word about the
+   * error, and clicking it a second time did nothing visible — exactly the
+   * silent failure this slice exists to remove.
+   *
+   * Dropping the pending navigation with it is deliberate and matches "sair e
+   * processar": nothing was saved, so nothing may leave the run.
+   */
+  closeDialog: boolean;
+}
+
+/**
+ * The guard's half of "Salvar e sair" (BR-05.3): navigate only when the screen
+ * reported a saved run, and always get out of the screen's way.
+ */
+export function guardSaveOutcome(saved: boolean): GuardSaveOutcome {
+  return { navigate: saved, closeDialog: true };
+}
+
 /**
  * The decision taken AT CLICK TIME by the navigation guard.
  *

@@ -237,6 +237,21 @@ answered") is **not** satisfied product-wide until M1 lands.
   `examDrafts.get` depois do 1º `save`; se aquele read falhar, o flush **tenta de novo** e, se
   ainda faltar, `claimOutcomeFor` devolve `ok: false` com mensagem — em vez de gravar sem `draft`
   e deixar o rascunho vivo por cima da própria sessão.
+- **Todo `examDrafts.get` é lido com `FRESH_READ` (`staleTime: 0`, `shared/lib/trpc.ts`)** e todo
+  `discard`/`record` invalida o **router inteiro** (`utils.examDrafts.invalidate()`), nunca só
+  `list`. `utils.…get.fetch()` é `fetchQuery`: sob o `staleTime` padrão de 5 min ele responde do
+  **cache** e não chega ao servidor — a "tentativa de novo" do flush devolveria o `null` de antes
+  da linha existir (corrida impossível de processar por 5 min) e um "Recarregar do servidor"
+  reidrataria a mesma cópia que causou o conflito, em laço.
+- **O id só é adotado da linha que ainda carrega o token deste save** (`adoptableDraftId`): id de
+  qualquer outra linha + nosso token ⇒ o DELETE reivindicador casa 0 linhas ⇒ CONFLICT `remote`
+  ("continuado em outro aparelho") numa corrida que ninguém tocou. Recusar custa uma retentativa;
+  adotar errado custa as respostas do aluno.
+- **Nenhum diálogo da corrida nasce coberto.** `RunConflictDialog`/`RunFailureDialog` são `z-[60]`
+  contra o `z-50` do `QuitTestDialog`, porque o `RunGuardProvider` pinta a cópia dele **depois** de
+  `{children}` (em z-index igual, quem vem depois no DOM ganha); e o guard **fecha** o próprio
+  diálogo quando o `save()` da tela devolve `false` (`guardSaveOutcome`), para a mensagem de erro
+  não ficar atrás do backdrop dele. Sair pela barra lateral e sair pela tela mostram a mesma falha.
 
 ## Functional definitions attached to these surfaces
 

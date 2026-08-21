@@ -24,7 +24,10 @@ export default function RunConflictDialog({
   onDiscard,
 }: RunConflictDialogProps): ReactElement {
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+    // `z-[60]` for the same reason as RunFailureDialog: at the `z-50` both used
+    // to share, the guard's QuitTestDialog paints later and covers this one —
+    // and a background autosave can raise a CONFLICT while that dialog is open.
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
       <div className="bg-white rounded-xl p-6 max-w-md w-full shadow-2xl">
         <div className="flex items-start gap-3 mb-4">
           <AlertCircle className="w-6 h-6 text-amber-600 flex-shrink-0 mt-0.5" />

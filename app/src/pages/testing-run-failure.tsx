@@ -25,7 +25,11 @@ export default function RunFailureDialog({
   onDismiss,
 }: RunFailureDialogProps): ReactElement {
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+    // `z-[60]`, above the `z-50` of QuitTestDialog: the navigation guard renders
+    // ITS copy of that dialog after the whole tree, so at equal z-index the guard
+    // wins on DOM order and this message is born behind a backdrop. It explains
+    // why the guard's own action failed — it can never be the covered one.
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
       <div className="bg-white rounded-xl p-6 max-w-md w-full shadow-2xl">
         <div className="flex items-start gap-3 mb-4">
           <WifiOff className="w-6 h-6 text-red-600 flex-shrink-0 mt-0.5" />
