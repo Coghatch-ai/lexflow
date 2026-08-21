@@ -24,6 +24,19 @@ export const queryClient = new QueryClient({
   },
 });
 
+/**
+ * Per-call override for a read whose ANSWER decides identity or existence —
+ * "which draft row is mine", "is the relay job done" — as opposed to one that
+ * merely paints a list.
+ *
+ * `utils.x.fetch()` is `fetchQuery`: while the entry is fresh under the
+ * 5-minute default above, it resolves from the CACHE and never reaches the
+ * server. For a poll that means it never finishes; for `examDrafts.get` it meant
+ * a deleted row kept being handed back as alive (and a `null` read kept being
+ * handed back after the row was created), which is a retry that cannot work.
+ */
+export const FRESH_READ = { staleTime: 0 } as const;
+
 // Clerk's getToken() is only available inside the React tree, so we inject it
 // via this setter from TrpcProvider after the provider mounts.
 let getToken: (() => Promise<string | null>) | null = null;

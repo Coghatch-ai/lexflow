@@ -1,6 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { exitPrompt } from "./exit-rules";
-import { decideNavigation, isRunGuarded, pickActiveRun, type RunRegistration } from "./run-guard";
+import {
+  decideNavigation,
+  guardSaveOutcome,
+  isRunGuarded,
+  pickActiveRun,
+  type RunRegistration,
+} from "./run-guard";
 
 // Navigation guard for a test still running (BR-05.1, epic #67 slice S1b).
 // Plain vitest: the whole decision lives in a pure module, so leaving through
@@ -84,5 +90,25 @@ describe("pickActiveRun", () => {
 
     expect(pickActiveRun(runs)).toBeNull();
     expect(isRunGuarded(null)).toBe(false);
+  });
+});
+
+// "Salvar e sair" through the SIDEBAR (BR-05.3, slice S2b). The guard's dialog
+// is `z-50` and painted after the screen, so whatever it does after the save
+// decides whether the student can SEE the failure the screen just raised.
+describe("guardSaveOutcome", () => {
+  it("navigates only once the run is safely on the server", () => {
+    expect(guardSaveOutcome(true)).toEqual({ navigate: true, closeDialog: true });
+  });
+
+  it("closes the guard dialog on a FAILED save, so the screen's message is visible", () => {
+    // The regression: the guard kept its dialog up on `false`, and the failure
+    // (and the CONFLICT) dialog was born behind its backdrop. The student saw
+    // the unchanged dialog and clicked into the void.
+    expect(guardSaveOutcome(false).closeDialog).toBe(true);
+  });
+
+  it("never navigates on a failed save — nothing was saved, so nothing may leave", () => {
+    expect(guardSaveOutcome(false).navigate).toBe(false);
   });
 });

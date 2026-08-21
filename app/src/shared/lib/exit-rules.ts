@@ -1,11 +1,16 @@
-// Rules for leaving a test that is still running (BR-05, epic #67 slice S1).
+// Rules for leaving a test that is still running (BR-05, epic #67 S1 + S2b).
 // Pure module: no React, no tRPC — the four answering screens import these so
 // the same rules apply everywhere and stay unit-testable without RTL/jsdom.
 //
-// This slice only offers "Sair e processar": the run ends now and what was
-// already answered is recorded through the normal sessions.record path.
-// "Salvar e sair" (resume later) needs server-side storage and arrives in a
-// later slice — no mode returns a save option here.
+// Two actions always exist: continue, or end now and record what was answered
+// through the normal `sessions.record` path. Since S2b (#77) the three STUDY
+// modes also offer "Salvar e sair" (BR-05.3) — server-side persistence landed
+// in S2a — and the prova real still refuses it (BR-05.5: it never resumes).
+//
+// This module says what the RULE allows, never what a given screen can do. The
+// dialog renders the third button only when a screen ALSO passed an `onSave`
+// handler, so a mode whose wiring has not landed yet (the Espaçada and the
+// Adaptativo, #78) keeps two buttons without forking a second rule set.
 
 // `RunMode`, `AnswerDraft` and `processableAnswers` are canonical in
 // `@shared/domain/exam-draft` — the API persists and settles runs with the same
@@ -16,7 +21,7 @@ import { processableAnswers, type AnswerDraft, type RunMode } from "@shared/doma
 export { processableAnswers };
 export type { AnswerDraft, RunMode };
 
-/** What the confirmation dialog shows. `optionCount` is 2 by design (S1). */
+/** What the confirmation dialog shows. */
 export interface ExitPrompt {
   title: string;
   body: string;
@@ -24,7 +29,10 @@ export interface ExitPrompt {
   warning: string | null;
   continueLabel: string;
   quitLabel: string;
-  optionCount: 2;
+  /** "Salvar e sair" on the study modes; null on the prova real (BR-05.5). */
+  saveLabel: string | null;
+  /** 3 wherever `saveLabel` exists, 2 where it does not. */
+  optionCount: 2 | 3;
 }
 
 /** Answered / correct / wrong counted against what was ANSWERED, never the queue. */
@@ -47,9 +55,12 @@ export function shouldPromptOnExit(answeredCount: number): boolean {
   return answeredCount > 0;
 }
 
+/** The label of the third action — one string, used by every study mode. */
+const SAVE_AND_EXIT_LABEL = "Salvar e sair";
+
 /**
- * The pt-BR dialog for a leave attempt. Exactly two actions in every mode:
- * continue, or end now and process what was answered.
+ * The pt-BR dialog for a leave attempt: continue, end now and process what was
+ * answered, and — on the study modes only — save and continue later.
  */
 export function exitPrompt(
   mode: RunMode,
@@ -67,6 +78,9 @@ export function exitPrompt(
       warning: REAL_EXAM_WARNING,
       continueLabel: "Continuar prova",
       quitLabel: "Encerrar e processar respostas",
+      // BR-05.5: a prova real is never saved to continue later, so the third
+      // action does not exist for it — not even as a disabled button.
+      saveLabel: null,
       optionCount: 2,
     };
   }
@@ -77,7 +91,8 @@ export function exitPrompt(
     warning: null,
     continueLabel: "Continuar",
     quitLabel: "Sair e processar respostas",
-    optionCount: 2,
+    saveLabel: SAVE_AND_EXIT_LABEL,
+    optionCount: 3,
   };
 }
 
