@@ -93,19 +93,20 @@ issues via the relay → GitHub) is `adminProcedure`. The relay owns the secrets
 server-side prompts (`api/lib/ai-prompts.ts`).
 
 The whole bolt UI is now wired onto these routers (no more mock data). Navigation uses Wouter.
-Most pages pass full strict lint; `TestingPage`, `StudyPlanPage`, `AdminPage`, and the three
-simulation components are still quarantined (need `max-lines-per-function` refactoring per
-conventions.md playbook A/B/C before they can be un-quarantined).
+Every page/component passes full strict lint — there is **no per-file quarantine** in
+`eslint.config.js` any more. Big screens stay under `max-lines-per-function` by extraction
+(screen components + pure logic in `shared/lib/`) per conventions.md playbook A/B/C.
 
 ## POC deviations (intentional — differ from sharpmoney; revisit as the POC matures)
 
 1. **Tailwind 3, not 4.** The inherited bolt UI uses `@tailwind` directives +
    `tailwind.config.js` + the `lex-*` color tokens in `app/src/index.css`. Kept on 3 to
    preserve the design; convention default is Tailwind 4 via `@tailwindcss/vite`.
-2. **Partial lint quarantine.** Most pages/components now pass full strict lint. Still quarantined
-   (need `max-lines-per-function` refactoring): `TestingPage`, `StudyPlanPage`, `AdminPage`,
-   `AdaptiveSimulation`, `SpacedRepetition`, `RealExamSimulation`, `ErrorPatternAnalysis`. New code
-   (api/, drizzle/, shared/, scripts/, and all other frontend files) gets full sharpmoney strictness.
+2. **~~Partial lint quarantine~~ — resolved.** There is no per-file quarantine in
+   `eslint.config.js`; every file (api/, drizzle/, shared/, scripts/, app/, apps/mobile/) gets full
+   sharpmoney strictness. The only relaxation is category-level, not per-file: authored `.tsx` gets
+   `max-lines-per-function` 250 + `complexity` 25 (vs 100 / 15 for `.ts`) because JSX inflates both.
+   A screen that would exceed it is split per conventions.md playbook A/B/C, never exempted.
 3. **Two tsconfigs.** `tsconfig.api.json` (backend, max-strict: `noUncheckedIndexedAccess`,
    `exactOptionalPropertyTypes`) and `tsconfig.json` (frontend, POC-strict). Split because the
    import graph forces one strictness per program; frontend files can't use backend-only types.
@@ -165,14 +166,16 @@ with `gh issue view <n> --json labels` before reporting the issue done.
 
 ## Business rules / product facts
 
-Authoritative product intent every agent must honor (analyst, builder, tester read this as
-the contract). Add durable, standing facts here — not slice-specific notes.
+Authoritative product intent every agent must honor (analyst, builder, tester read these as
+the contract) lives in the project library — this file is only the index:
 
-- `oab_questions.{discipline,exam_board,difficulty,phase}` MUST store the English LOV code,
-  never the pt-BR label. Any importer (`scripts/seed-from-csv.ts`, `scripts/seed.ts`) MUST
-  map label→code before insert and throw on an unmapped label — never write a raw scraper
-  label. (History: the CSV seed wrote raw pt-BR discipline labels → the code-keyed filter
-  matched 0 rows; issue #46.)
+- **[.claude/library/README.md](.claude/library/README.md)** — library index (functionality → rule → code).
+- **[.claude/library/kb-business/](.claude/library/kb-business/README.md)** — functional definitions,
+  ONE FILE PER FUNCTIONALITY: BR-01 LOV codes · BR-02 descartar alternativas · BR-03 responder depois ·
+  BR-04 bookmarks · BR-05 salvar progresso / sair e processar a test in progress.
+- **[.claude/library/answering-surfaces.md](.claude/library/answering-surfaces.md)** — map of every screen
+  where a question is answered (desktop `QuestionCard` screens, mobile `QuestionRunner`), the life of a
+  test run (start → answer → leave → `sessions.record`) + the backend it touches.
 
 ## NEVER
 

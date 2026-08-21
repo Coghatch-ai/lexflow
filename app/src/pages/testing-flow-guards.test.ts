@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { primaryLabel, primaryDisabled, canPostponeGuard } from './testing-flow-guards';
+import { primaryLabel, primaryDisabled } from './testing-flow-guards';
+// `canPostponeGuard` moved to shared/lib/exam-queue in #70 — its cases live in
+// app/src/shared/lib/exam-queue.test.ts now.
 
 // Regression guard for #45: Simulado Padrão two-step Conferir → lock → Próxima.
 
@@ -29,19 +31,5 @@ describe('primaryDisabled', () => {
 
   it('enabled when checked (answer always present at that point)', () => {
     expect(primaryDisabled({ checked: true, selected: 'A' })).toBe(false);
-  });
-});
-
-describe('canPostponeGuard', () => {
-  it('true when unchecked and more questions remain', () => {
-    expect(canPostponeGuard({ checked: false, hasMoreQuestions: true })).toBe(true);
-  });
-
-  it('false when checked (lock step)', () => {
-    expect(canPostponeGuard({ checked: true, hasMoreQuestions: true })).toBe(false);
-  });
-
-  it('false when no more questions (last in queue)', () => {
-    expect(canPostponeGuard({ checked: false, hasMoreQuestions: false })).toBe(false);
   });
 });

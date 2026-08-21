@@ -1,0 +1,88 @@
+import { describe, it, expect } from "vitest";
+import { exitPrompt } from "./exit-rules";
+import { decideNavigation, isRunGuarded, pickActiveRun, type RunRegistration } from "./run-guard";
+
+// Navigation guard for a test still running (BR-05.1, epic #67 slice S1b).
+// Plain vitest: the whole decision lives in a pure module, so leaving through
+// the sidebar is provable without RTL/jsdom.
+
+function run(over: Partial<RunRegistration> = {}): RunRegistration {
+  return {
+    id: "r1",
+    mode: "standard",
+    running: true,
+    answeredCount: 3,
+    totalQuestions: 10,
+    ...over,
+  };
+}
+
+describe("decideNavigation", () => {
+  it("prompts with the SAME prompt exit-rules builds when leaving an armed run", () => {
+    // The regression: the sidebar used to navigate unconditionally. The deep
+    // equality is the second half of the guard — it proves no second set of
+    // rules was born inside run-guard.ts.
+    const decision = decideNavigation(run(), "/testing", "/analytics");
+
+    expect(decision.action).toBe("prompt");
+    if (decision.action !== "prompt") throw new Error("expected a prompt");
+    expect(decision.prompt).toEqual(exitPrompt("standard", 3, 10));
+  });
+
+  it("navigates when the target is the page already open", () => {
+    expect(decideNavigation(run(), "/testing", "/testing").action).toBe("navigate");
+  });
+
+  it("navigates with nothing answered — there is nothing to process", () => {
+    expect(decideNavigation(run({ answeredCount: 0 }), "/testing", "/analytics").action).toBe(
+      "navigate",
+    );
+  });
+
+  it("navigates when the run is not running (mode selection or result screen)", () => {
+    expect(decideNavigation(run({ running: false }), "/testing", "/analytics").action).toBe(
+      "navigate",
+    );
+  });
+
+  it("navigates when no screen is registered", () => {
+    expect(decideNavigation(null, "/analytics", "/goals").action).toBe("navigate");
+  });
+
+  it("carries the prova real warning and labels (BR-05.5) through the sidebar too", () => {
+    const decision = decideNavigation(
+      run({ mode: "real", totalQuestions: 80 }),
+      "/testing",
+      "/goals",
+    );
+
+    if (decision.action !== "prompt") throw new Error("expected a prompt");
+    expect(decision.prompt.warning).toContain("não pode ser salva");
+    expect(decision.prompt.quitLabel).toBe("Encerrar e processar respostas");
+  });
+
+  it("prompts on logout, where there is no target path", () => {
+    expect(decideNavigation(run(), "/testing", null).action).toBe("prompt");
+  });
+});
+
+describe("pickActiveRun", () => {
+  it("skips an idle registration and returns the armed one", () => {
+    // TestingPage stays mounted while it renders the other modes, so its own
+    // idle registration must never mask the mode actually running.
+    const idle = run({ id: "testing-page", running: false });
+    const armed = run({ id: "adaptive", mode: "adaptive" });
+
+    expect(pickActiveRun([idle, armed])).toBe(armed);
+  });
+
+  it("returns null when nothing is armed", () => {
+    const runs = [
+      run({ id: "a", running: false }),
+      run({ id: "b", mode: "adaptive", running: false }),
+    ];
+
+    expect(pickActiveRun(runs)).toBeNull();
+    expect(isRunGuarded(null)).toBe(false);
+  });
+});
