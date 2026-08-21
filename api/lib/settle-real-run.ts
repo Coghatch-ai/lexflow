@@ -24,6 +24,16 @@
 // claimed, and 0 rows rolls the whole transaction back with
 // DraftAlreadyConsumedError. Here that error is the "someone else settled it"
 // answer, not a failure — one run ⇒ exactly one study_sessions row (BR-05.7).
+//
+// STALENESS: de-duplicating is not enough on its own. The claim must also land
+// on the row this call actually JUDGED — between the read and the delete, a
+// `save`/`touch` from the student's own tab can refresh the same row, i.e. the
+// student came BACK, and an unconditional delete would then force-submit a LIVE
+// exam and destroy the in-flight run. So the claim carries `last_saved_at` as an
+// optimistic token (the very token `examDrafts.save`/`touch` already use): a
+// refreshed row matches 0 rows and answers NOT_SETTLED, exactly like losing the
+// race. `force` (startReal) deliberately skips the token — BR-05.5 says asking
+// for a new prova real settles the old one however fresh it is.
 
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "../db/client";
@@ -67,13 +77,33 @@ export async function settleRealRun(
     .where(and(eq(examDrafts.userId, userId), eq(examDrafts.mode, "real")))
     .limit(1);
   if (draft === undefined) return NOT_SETTLED;
+  return settleReadRealRun(userId, draft, { force });
+}
 
+/** The prova real row as read — what the judgement below is made against. */
+export type RealRunDraft = typeof examDrafts.$inferSelect;
+
+/**
+ * Settles a draft ALREADY READ. Split out of `settleRealRun` so the read and the
+ * claim are two visible steps with the row between them — the window the token
+ * closes (see STALENESS in the file header), and the seam
+ * `scripts/smoke-exam-drafts.ts` uses to hold a stale row across a concurrent
+ * `save`/`touch` and prove a returning student is never force-submitted.
+ */
+export async function settleReadRealRun(
+  userId: string,
+  draft: RealRunDraft,
+  { force = false }: { force?: boolean } = {},
+): Promise<SettleResult> {
   const abandoned = isRealRunAbandoned({
     deadlineAt: draft.deadlineAt,
     lastSavedAt: draft.lastSavedAt,
     now: new Date().toISOString(),
   });
   if (!force && !abandoned) return NOT_SETTLED;
+
+  // The token this settlement judged. `force` claims the row whatever its state.
+  const expectedToken = force ? undefined : draft.lastSavedAt;
 
   const survivors = await liveQuestionIds(draft.questionIds);
   const reconciled = reconcileRun(
@@ -84,10 +114,17 @@ export async function settleRealRun(
 
   if (answers.length === 0) {
     // Same claim rule, cheaper: whoever deletes the row settled it. 0 rows ⇒ a
-    // concurrent settlement got there first and this call settled nothing.
+    // concurrent settlement got there first, or the student came back and moved
+    // `last_saved_at` — either way this call settled nothing.
     const [claimed] = await db
       .delete(examDrafts)
-      .where(and(eq(examDrafts.id, draft.id), eq(examDrafts.userId, userId)))
+      .where(
+        and(
+          eq(examDrafts.id, draft.id),
+          eq(examDrafts.userId, userId),
+          expectedToken === undefined ? undefined : eq(examDrafts.lastSavedAt, expectedToken),
+        ),
+      )
       .returning({ id: examDrafts.id });
     return claimed === undefined ? NOT_SETTLED : { settled: true, sessionId: null };
   }
@@ -103,14 +140,16 @@ export async function settleRealRun(
           difficulty: REAL_EXAM_DIFFICULTY,
           answers,
           draftId: draft.id,
+          draftLastSavedAt: expectedToken,
         },
         sm2Config,
       ),
     );
     return { settled: true, sessionId };
   } catch (err: unknown) {
-    // Lost the race: the other settlement already recorded this run and this
-    // transaction wrote nothing. Report "not settled by me" — never a 500.
+    // Lost the race, or the student came back and refreshed the row: either way
+    // this transaction wrote NOTHING and the run is untouched. Report "not
+    // settled by me" — never a 500.
     if (err instanceof DraftAlreadyConsumedError) return NOT_SETTLED;
     throw err;
   }

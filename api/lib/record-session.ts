@@ -51,6 +51,15 @@ export type RecordSessionInput = {
   answers: AnswerDraft[];
   /** In-flight exam draft to consume, deleted inside this transaction. */
   draftId?: string | undefined;
+  /**
+   * The `last_saved_at` the caller BASED ITS DECISION ON — the same optimistic
+   * token `examDrafts.save`/`touch` use. When supplied, the claiming delete only
+   * matches while the row still carries it, so a run the student came back to
+   * (a `save`/`touch` landed between the caller's read and this transaction) is
+   * NOT force-submitted: 0 rows ⇒ `DraftAlreadyConsumedError`, exactly like
+   * losing the race. Omit it to claim the row whatever its state.
+   */
+  draftLastSavedAt?: string | undefined;
 };
 
 /**
@@ -74,12 +83,21 @@ export async function recordSession(
   const correct = input.answers.filter((a) => a.correct).length;
 
   // FIRST statement: claim the run by deleting it. Scoped by user_id so a forged
-  // id cannot consume another student's draft. 0 rows ⇒ someone else already
-  // recorded this run — abort before a single write lands.
+  // id cannot consume another student's draft, and — when the caller passed the
+  // token it read — by `last_saved_at`, so the claim only lands on the row the
+  // caller actually judged. 0 rows ⇒ someone else recorded this run, or the
+  // student came back and refreshed it — abort before a single write lands.
   if (input.draftId !== undefined) {
+    const expectedToken = input.draftLastSavedAt;
     const [claimed] = await tx
       .delete(examDrafts)
-      .where(and(eq(examDrafts.id, input.draftId), eq(examDrafts.userId, userId)))
+      .where(
+        and(
+          eq(examDrafts.id, input.draftId),
+          eq(examDrafts.userId, userId),
+          expectedToken === undefined ? undefined : eq(examDrafts.lastSavedAt, expectedToken),
+        ),
+      )
       .returning({ id: examDrafts.id });
     if (claimed === undefined) throw new DraftAlreadyConsumedError(input.draftId);
   }

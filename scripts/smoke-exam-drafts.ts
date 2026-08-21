@@ -12,34 +12,25 @@
 // settlements of the same abandoned prova real, which is the only way to prove
 // the draft delete really is the mutex that keeps one run to one session — plus
 // (k), which proves `discard` cannot be used as a back door to destroy a prova
-// real whose answers still owe a session.
+// real whose answers still owe a session, and (l), which proves a settlement
+// holding a STALE read cannot force-submit a run the student came back to.
 
 import { eq, sql } from "drizzle-orm";
-import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { TRPCError } from "@trpc/server";
 import { appRouter } from "../api/trpc/router";
 import { settleRealRun } from "../api/lib/settle-real-run";
 import { examDrafts, studySessions, userAnswers, users } from "../drizzle/schema";
-
-type SmokeDb = NodePgDatabase<Record<string, never>>;
-type SmokeCaller = ReturnType<typeof appRouter.createCaller>;
-type SmokeQuestion = { id: string; options: string[]; discipline: string };
+import { assertStaleSettlementNeverForceSubmits } from "./smoke-exam-drafts-stale";
+import {
+  check,
+  countRows,
+  raises,
+  type SmokeCaller,
+  type SmokeDb,
+  type SmokeQuestion,
+} from "./lib/smoke-drafts";
 
 const OTHER_EXTERNAL_ID = "smoke-test-user-b";
-
-function check(condition: boolean, message: string): void {
-  if (!condition) throw new Error(`[smoke] exam_drafts FAILED: ${message}`);
-}
-
-/** Row count for one user in any of the per-user tables this block touches. */
-async function countRows(
-  db: SmokeDb,
-  table: typeof examDrafts | typeof studySessions | typeof userAnswers,
-  userId: string,
-): Promise<number> {
-  const rows = await db.select({ id: table.id }).from(table).where(eq(table.userId, userId));
-  return rows.length;
-}
 
 /** (a) save creates the draft and get returns it, queue order intact. */
 async function assertSaveAndGet(
@@ -129,17 +120,6 @@ async function assertScopedToOwner(
     console.warn("[smoke] (b) exam_drafts scoping across two users OK (TABLE_SCOPE proven)");
   } finally {
     await db.delete(users).where(eq(users.id, other.id));
-  }
-}
-
-/** Runs `fn` and reports whether it raised a TRPCError with `code`. */
-async function raises(code: TRPCError["code"], fn: () => Promise<unknown>): Promise<boolean> {
-  try {
-    await fn();
-    return false;
-  } catch (err: unknown) {
-    if (err instanceof TRPCError && err.code === code) return true;
-    throw err;
   }
 }
 
@@ -537,8 +517,9 @@ export async function smokeExamDrafts(opts: {
   await assertRealCannotBeDiscarded(db, caller, userId, questions);
   await assertSettlesAbandonedReal(db, userId, questions);
   await assertConcurrentSettlementRecordsOnce(db, userId, questions);
+  await assertStaleSettlementNeverForceSubmits(db, caller, userId, questions);
 
   // Belt and braces: nothing this block created may outlive it.
   await db.delete(examDrafts).where(eq(examDrafts.userId, userId));
-  console.warn("[smoke] ✓ exam_drafts (a)–(k) OK");
+  console.warn("[smoke] ✓ exam_drafts (a)–(l) OK");
 }

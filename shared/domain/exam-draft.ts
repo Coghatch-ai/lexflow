@@ -17,8 +17,16 @@
 
 import type { AdaptiveState } from "./adaptive";
 
-/** The four desktop answering surfaces (also the `exam_drafts.mode` values). */
-export type RunMode = "standard" | "adaptive" | "spaced" | "real";
+/**
+ * The four desktop answering surfaces (also the `exam_drafts.mode` values).
+ * The VALUE is the source and `RunMode` is derived from it, so the router's
+ * `z.enum(RUN_MODES)` and the type can never drift apart: adding a mode here is
+ * a compile-time change everywhere the union is switched on, and the input
+ * validator accepts the new mode without a second hand-written list.
+ */
+export const RUN_MODES = ["standard", "adaptive", "spaced", "real"] as const;
+
+export type RunMode = (typeof RUN_MODES)[number];
 
 /**
  * The modes a saved run may be OFFERED BACK from — the three study modes.

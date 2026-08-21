@@ -20,9 +20,17 @@ import { db } from "../../db/client";
 import { examDrafts } from "../../../drizzle/schema";
 import { protectedProcedure, router } from "../procedures";
 import { settleRealRun } from "../../lib/settle-real-run";
-import { RESUMABLE_MODES, answeredOf, isResumableMode } from "../../../shared/domain/exam-draft";
+import {
+  RESUMABLE_MODES,
+  RUN_MODES,
+  answeredOf,
+  isResumableMode,
+} from "../../../shared/domain/exam-draft";
 
-const runMode = z.enum(["standard", "adaptive", "spaced", "real"]);
+// Built FROM the shared `RUN_MODES` tuple, not from a second hand-written list:
+// a mode added to `RunMode` is accepted here with no edit, and one removed stops
+// compiling instead of silently staying valid input.
+const runMode = z.enum(RUN_MODES);
 const difficulty = z.enum(["easy", "medium", "hard"]);
 
 const answerDraft = z.object({
