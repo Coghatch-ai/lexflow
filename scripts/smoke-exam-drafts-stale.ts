@@ -1,7 +1,7 @@
 // scripts/smoke-exam-drafts-stale.ts
 //
-// (l) of the `exam_drafts` smoke block (epic #67 S2a, review of PR #80): the
-// STALE-READ window on the WRITE path. Lazy settlement reads a prova real,
+// (l) and (m) of the `exam_drafts` smoke block (epic #67 S2a, review of PR #80):
+// the STALE-READ window on the WRITE path. Lazy settlement reads a prova real,
 // judges it abandoned, and only then claims it — and in between, the student can
 // come back. Deleting the row unconditionally at that point force-submits a LIVE
 // exam and destroys the run. `last_saved_at` is carried into the claim as the
@@ -9,6 +9,14 @@
 // 0 rows and answers NOT_SETTLED, exactly like losing the race to another
 // settlement. Its own file because `smoke-exam-drafts.ts` sits at the max-lines
 // cap; the plumbing both use lives in `scripts/lib/smoke-drafts.ts`.
+//
+// TWO claims carry that token, so both need their own assertion — the branches
+// are independent code and one passing proves nothing about the other:
+//   (l) ≥1 answer  → the claim is the draft delete inside `recordSession`
+//                    (`draftLastSavedAt`, settle-real-run.ts).
+//   (m) 0 answers  → the claim is the bare delete in `settleReadRealRun` itself.
+// (m) is the branch where the damage is worst: nothing is recorded, so a wrong
+// delete leaves the student's run simply GONE, with no session to show for it.
 
 import { and, eq } from "drizzle-orm";
 import { settleReadRealRun, settleRealRun } from "../api/lib/settle-real-run";
@@ -149,4 +157,105 @@ async function assertSilentAgainStillSettles(
     "(l) the follow-up settlement lost the answers the student added on return",
   );
   check((await countRows(db, examDrafts, userId)) === 0, "(l) the settled draft row survived");
+}
+
+/** (m) The SAME stale-read window, on the ZERO-ANSWER branch: a prova real the
+ *  student opened but has not answered yet. That branch does not record anything
+ *  — it just deletes the row — so an unguarded claim does not force-submit the
+ *  run, it ERASES it: the student comes back to an exam that no longer exists
+ *  and never became a session. The delete carries the same `last_saved_at`
+ *  token, and a `touch` (the 60 s heartbeat — the only thing an unanswered run
+ *  even sends) landing in the window must make the claim match 0 rows. The tail
+ *  proves the refusal is the token and not a lockout, exactly as in (l). */
+export async function assertStaleZeroAnswerSettlementNeverDeletes(
+  db: SmokeDb,
+  caller: SmokeCaller,
+  userId: string,
+  questions: SmokeQuestion[],
+): Promise<void> {
+  const sessionsBefore = await countRows(db, studySessions, userId);
+  const answersBefore = await countRows(db, userAnswers, userId);
+  const future = new Date(Date.now() + 3_600_000).toISOString();
+  const silent = new Date(Date.now() - 300_000).toISOString(); // 5 min: 3 beats missed
+
+  await db.insert(examDrafts).values({
+    userId,
+    mode: "real",
+    setup: { mode: "real" },
+    questionIds: questions.map((q) => q.id),
+    cursor: 0,
+    answers: [], // opened, still reading the first question
+    modeState: { mode: "real" },
+    elapsedSeconds: 45,
+    deadlineAt: future, // hours of exam left — only the silent heartbeat looks dead
+    lastSavedAt: silent,
+    createdBy: userId,
+    lastUpdBy: userId,
+  });
+
+  // Exactly what a settlement reads before it decides. Everything below happens
+  // inside the window between that read and the claim.
+  const [staleDraft] = await db
+    .select()
+    .from(examDrafts)
+    .where(and(eq(examDrafts.userId, userId), eq(examDrafts.mode, "real")))
+    .limit(1);
+  if (staleDraft === undefined) throw new Error("[smoke] (m) the prova real insert did not land");
+  check(staleDraft.answers.length === 0, "(m) the fixture is not the zero-answer branch");
+
+  // The tab was alive all along: its heartbeat lands, moving `last_saved_at`.
+  const refreshed = await caller.examDrafts.touch({
+    mode: "real",
+    token: staleDraft.lastSavedAt,
+  });
+  check(refreshed.lastSavedAt !== staleDraft.lastSavedAt, "(m) the returning touch never moved");
+
+  const settled = await settleReadRealRun(userId, staleDraft);
+  check(
+    !settled.settled && settled.sessionId === null,
+    "(m) a STALE settlement claimed an unanswered prova real the student came back to",
+  );
+  const survivor = await caller.examDrafts.get({ mode: "real" });
+  check(survivor !== null, "(m) the stale settlement DELETED an unanswered run still in progress");
+  check(
+    survivor?.lastSavedAt === refreshed.lastSavedAt,
+    "(m) the stale settlement moved the live run's token",
+  );
+  check(
+    (await countRows(db, studySessions, userId)) === sessionsBefore,
+    "(m) the stale settlement invented a session for an unanswered run",
+  );
+
+  await assertUnansweredSilentAgainStillSettles(db, userId, { silent, sessionsBefore });
+  check(
+    (await countRows(db, userAnswers, userId)) === answersBefore,
+    "(m) an unanswered prova real wrote user_answers",
+  );
+  console.warn("[smoke] (m) stale 0-answer settlement → run untouched · silent again → deletes OK");
+}
+
+/** The tail of (m): let the same unanswered run go genuinely silent and the
+ *  claim lands — row deleted, and still NO session, because an untouched exam is
+ *  not a result. Without this, (m) could pass on a settlement that never claims
+ *  anything at all. */
+async function assertUnansweredSilentAgainStillSettles(
+  db: SmokeDb,
+  userId: string,
+  ctx: { silent: string; sessionsBefore: number },
+): Promise<void> {
+  await db
+    .update(examDrafts)
+    .set({ lastSavedAt: ctx.silent })
+    .where(and(eq(examDrafts.userId, userId), eq(examDrafts.mode, "real")));
+
+  const late = await settleRealRun(userId);
+  check(
+    late.settled && late.sessionId === null,
+    "(m) a genuinely abandoned unanswered run stopped settling",
+  );
+  check((await countRows(db, examDrafts, userId)) === 0, "(m) the settled draft row survived");
+  check(
+    (await countRows(db, studySessions, userId)) === ctx.sessionsBefore,
+    "(m) settling an unanswered run created a session",
+  );
 }

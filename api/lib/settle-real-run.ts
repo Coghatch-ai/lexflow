@@ -87,8 +87,9 @@ export type RealRunDraft = typeof examDrafts.$inferSelect;
  * Settles a draft ALREADY READ. Split out of `settleRealRun` so the read and the
  * claim are two visible steps with the row between them — the window the token
  * closes (see STALENESS in the file header), and the seam
- * `scripts/smoke-exam-drafts.ts` uses to hold a stale row across a concurrent
- * `save`/`touch` and prove a returning student is never force-submitted.
+ * `scripts/smoke-exam-drafts-stale.ts` uses to hold a stale row across a
+ * concurrent `save`/`touch` and prove a returning student is never claimed —
+ * (l) on the recording branch, (m) on the zero-answer delete below.
  */
 export async function settleReadRealRun(
   userId: string,

@@ -12,15 +12,20 @@
 // settlements of the same abandoned prova real, which is the only way to prove
 // the draft delete really is the mutex that keeps one run to one session — plus
 // (k), which proves `discard` cannot be used as a back door to destroy a prova
-// real whose answers still owe a session, and (l), which proves a settlement
-// holding a STALE read cannot force-submit a run the student came back to.
+// real whose answers still owe a session, and (l)+(m), which prove a settlement
+// holding a STALE read cannot claim a run the student came back to — (l) on the
+// branch that records a session, (m) on the zero-answer branch that only
+// deletes, where a wrong claim erases the run without leaving any trace at all.
 
 import { eq, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { appRouter } from "../api/trpc/router";
 import { settleRealRun } from "../api/lib/settle-real-run";
 import { examDrafts, studySessions, userAnswers, users } from "../drizzle/schema";
-import { assertStaleSettlementNeverForceSubmits } from "./smoke-exam-drafts-stale";
+import {
+  assertStaleSettlementNeverForceSubmits,
+  assertStaleZeroAnswerSettlementNeverDeletes,
+} from "./smoke-exam-drafts-stale";
 import {
   check,
   countRows,
@@ -518,8 +523,9 @@ export async function smokeExamDrafts(opts: {
   await assertSettlesAbandonedReal(db, userId, questions);
   await assertConcurrentSettlementRecordsOnce(db, userId, questions);
   await assertStaleSettlementNeverForceSubmits(db, caller, userId, questions);
+  await assertStaleZeroAnswerSettlementNeverDeletes(db, caller, userId, questions);
 
   // Belt and braces: nothing this block created may outlive it.
   await db.delete(examDrafts).where(eq(examDrafts.userId, userId));
-  console.warn("[smoke] ✓ exam_drafts (a)–(l) OK");
+  console.warn("[smoke] ✓ exam_drafts (a)–(m) OK");
 }
