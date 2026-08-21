@@ -18,7 +18,11 @@
 // only deletes (where a wrong claim erases the run without leaving any trace at
 // all), and (n) on the CLIENT submit path, where the two racers are two tabs of
 // the SAME student and the draft id alone de-duplicates without detecting
-// staleness.
+// staleness — plus (o) and (p) (scripts/smoke-exam-drafts-mode.ts), which cover
+// what no token assertion does: (o) that a client submitting the prova real
+// through `sessions.record` can never file it as a study session (BR-05.5), and
+// (p) that `deadlineAt` survives the save → get → save echo a resumed screen
+// makes with the API's own raw-PG value.
 
 import { eq, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
@@ -30,6 +34,10 @@ import {
   assertStaleSettlementNeverForceSubmits,
   assertStaleZeroAnswerSettlementNeverDeletes,
 } from "./smoke-exam-drafts-stale";
+import {
+  assertClientCannotFileRealAsStudy,
+  assertDeadlineRoundTrips,
+} from "./smoke-exam-drafts-mode";
 import {
   check,
   countRows,
@@ -537,8 +545,10 @@ export async function smokeExamDrafts(opts: {
   await assertStaleSettlementNeverForceSubmits(db, caller, userId, questions);
   await assertStaleZeroAnswerSettlementNeverDeletes(db, caller, userId, questions);
   await assertStaleClientSubmitNeverClaims(db, caller, userId, questions);
+  await assertClientCannotFileRealAsStudy(db, caller, userId, questions);
+  await assertDeadlineRoundTrips(caller, db, userId, questions);
 
   // Belt and braces: nothing this block created may outlive it.
   await db.delete(examDrafts).where(eq(examDrafts.userId, userId));
-  console.warn("[smoke] ✓ exam_drafts (a)–(n) OK");
+  console.warn("[smoke] ✓ exam_drafts (a)–(p) OK");
 }

@@ -40,12 +40,13 @@ import { db } from "../db/client";
 import { examDrafts, oabQuestions } from "../../drizzle/schema";
 import { loadSm2Config } from "./sm2";
 import { type DraftClaim, DraftAlreadyConsumedError, recordSession } from "./record-session";
-import { answersForRecord, isRealRunAbandoned, reconcileRun } from "../../shared/domain/exam-draft";
-
-/** What the abandoned prova real is filed under — identical to what the browser
- * sends today from RealExamSimulation, so both paths produce the same session. */
-const REAL_EXAM_DISCIPLINE = "Prova Real";
-const REAL_EXAM_DIFFICULTY = "hard" as const;
+import {
+  REAL_EXAM_DIFFICULTY,
+  REAL_EXAM_DISCIPLINE,
+  answersForRecord,
+  isRealRunAbandoned,
+  reconcileRun,
+} from "../../shared/domain/exam-draft";
 
 export type SettleResult = {
   /** A draft existed and was consumed (recorded and/or deleted). */
@@ -96,6 +97,16 @@ export async function settleReadRealRun(
   draft: RealRunDraft,
   { force = false }: { force?: boolean } = {},
 ): Promise<SettleResult> {
+  // The OTHER half of the BR-05.5 invariant `recordSession` enforces on the
+  // claimed row. This function files whatever it is given as "Prova Real"/hard
+  // and judges it by the prova real's abandonment rule, so handing it a study
+  // draft would mislabel that run AND auto-submit a mode that must never be
+  // auto-submitted (a study run is resumed or discarded, never processed
+  // behind the student's back). `settleRealRun` only ever reads `mode: "real"`
+  // rows — this refuses the exported seam, where "no caller passes a study
+  // draft today" is a property of today's callers, not a guarantee.
+  if (draft.mode !== "real") return NOT_SETTLED;
+
   const abandoned = isRealRunAbandoned({
     deadlineAt: draft.deadlineAt,
     lastSavedAt: draft.lastSavedAt,

@@ -5,10 +5,13 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  REAL_EXAM_DIFFICULTY,
+  REAL_EXAM_DISCIPLINE,
   REAL_RUN_STALE_SECONDS,
   RESUMABLE_MODES,
   answeredOf,
   answersForRecord,
+  filingForClaimedMode,
   isRealRunAbandoned,
   isResumableMode,
   reconcileRun,
@@ -46,6 +49,44 @@ describe("isResumableMode (BR-05.5 / BR-05.3)", () => {
   it("is false for anything that is not a run mode", () => {
     expect(isResumableMode("")).toBe(false);
     expect(isResumableMode("discursive")).toBe(false);
+  });
+});
+
+describe("filingForClaimedMode (BR-05.5 — the CLAIMED row decides)", () => {
+  const asStandard = { discipline: "Direito Civil", difficulty: "medium" as const };
+
+  it("files a claimed prova real as Prova Real/hard, whatever the caller asked", () => {
+    // The exact attack: a client holds the real draft's id + token (both come
+    // from examDrafts.get) and submits it through sessions.record with its own
+    // discipline. The run must still be filed like the settlement files it.
+    expect(filingForClaimedMode("real", asStandard)).toEqual({
+      discipline: REAL_EXAM_DISCIPLINE,
+      difficulty: REAL_EXAM_DIFFICULTY,
+    });
+  });
+
+  it("leaves every study mode filed exactly as the caller asked", () => {
+    for (const mode of ["standard", "adaptive", "spaced"]) {
+      expect(filingForClaimedMode(mode, asStandard)).toEqual(asStandard);
+    }
+  });
+
+  it("leaves a run that claimed NO draft alone", () => {
+    expect(filingForClaimedMode(null, asStandard)).toEqual(asStandard);
+  });
+
+  it("only ever forces on the exact string 'real'", () => {
+    // `mode` is a text column, so this takes untrusted-ish input: anything that
+    // is not the real mode keeps the caller's filing.
+    expect(filingForClaimedMode("Real", asStandard)).toEqual(asStandard);
+    expect(filingForClaimedMode("", asStandard)).toEqual(asStandard);
+  });
+
+  it("produces the SAME filing the server-side settlement uses", () => {
+    // One run, one filing, whichever door it leaves by — that is the rule.
+    expect(filingForClaimedMode("real", { discipline: "x", difficulty: "easy" })).toEqual(
+      filingForClaimedMode("real", asStandard),
+    );
   });
 });
 

@@ -43,6 +43,53 @@ export function isResumableMode(mode: string): boolean {
   return RESUMABLE_MODES.some((resumable) => resumable === mode);
 }
 
+/** The difficulty a finished run is filed under (`study_sessions.difficulty`). */
+export type SessionDifficulty = "easy" | "medium" | "hard";
+
+/**
+ * What a finished PROVA REAL is filed as — the pair the browser has always sent
+ * from RealExamSimulation. Here, in the shared domain, and not next to one of
+ * the two writers, because BOTH paths that end a real run have to agree: the
+ * server-side settlement (`settleRealRun`) and the student's own submit
+ * (`sessions.record`). One run = one filing, whichever door it leaves by.
+ */
+export const REAL_EXAM_DISCIPLINE = "Prova Real";
+export const REAL_EXAM_DIFFICULTY: SessionDifficulty = "hard";
+
+/** How a finished run is filed: the two `study_sessions` label columns. */
+export interface SessionFiling {
+  discipline: string;
+  difficulty: SessionDifficulty;
+}
+
+/**
+ * BR-05.5 as a function: a prova real ALWAYS becomes a "Prova Real"/hard
+ * session, whatever the caller asked for. The mode of the row that was actually
+ * CLAIMED decides — never the payload, because the payload is client input.
+ *
+ * `examDrafts.get({ mode: "real" })` hands the browser the real draft's id AND
+ * its token, so `sessions.record` can consume a prova real through the
+ * study-mode door. Without this the SAME run produces two different session
+ * rows depending on which path won the race (the client's `discipline` on one
+ * side, "Prova Real" on the other) — against BR-05.5, which says a real run
+ * always ends through the same processing. Refusing the claim instead was the
+ * alternative and was rejected: RealExamSimulation submits the real exam
+ * through `sessions.record` itself, so a refusal would break the exam's own
+ * ending. Forcing the labels keeps ONE door and makes it impossible to mislabel
+ * a run through it.
+ *
+ * `claimedMode` is `string | null` on purpose — it comes from
+ * `exam_drafts.mode` (a text column), not from a trusted union, and `null`
+ * means "no draft was claimed" (a run that was never persisted).
+ */
+export function filingForClaimedMode(
+  claimedMode: string | null,
+  requested: SessionFiling,
+): SessionFiling {
+  if (claimedMode !== "real") return requested;
+  return { discipline: REAL_EXAM_DISCIPLINE, difficulty: REAL_EXAM_DIFFICULTY };
+}
+
 /** One recorded answer, exactly the shape `sessions.record` takes. */
 export interface AnswerDraft {
   questionId: string;

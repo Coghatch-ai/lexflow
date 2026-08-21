@@ -91,8 +91,36 @@ const saveInput = z
     answers: z.array(answerDraft),
     modeState,
     elapsedSeconds: z.number().int().min(0),
-    /** Only the prova real has an absolute deadline; null on the study modes. */
-    deadlineAt: z.string().datetime({ offset: true }).nullable().optional(),
+    /**
+     * Only the prova real has an absolute deadline; null on the study modes.
+     *
+     * It must accept BOTH shapes of the same instant, because both are legal
+     * input: the ISO string the browser mints (`toISOString()`) AND the raw PG
+     * text this very API hands back — drizzle overrides the TIMESTAMPTZ parser
+     * to identity for `mode: "string"`, so `get` returns
+     * `"2026-08-21 14:30:04.210932+00"` (µs, no `T`, no `Z`). A rehydrating
+     * screen echoes back what it read, and `z.string().datetime({ offset: true })`
+     * REFUSED exactly that value — BAD_REQUEST on the API's own output, or, for
+     * a client that dropped the field to get past it, a silently erased deadline
+     * (`:deadlineAt` below writes `?? null` on the UPDATE too), which kills the
+     * D8 absolute deadline the auto-submit depends on.
+     *
+     * Parseability is the whole contract here: `deadline_at` is COMPARED
+     * (`isRealRunAbandoned` does `Date.parse`), never echoed as a token, so
+     * normalising is harmless and only the instant matters. That is the exact
+     * opposite of `token`/`lastSavedAt` below, which must travel VERBATIM: it is
+     * matched with `=` against the column, and normalising it through `Date`
+     * drops the microseconds and breaks the optimistic guard for good. Two
+     * string fields of the same row, opposite rules — hence the note.
+     */
+    deadlineAt: z
+      .string()
+      .min(1)
+      .refine((v) => Number.isFinite(Date.parse(v)), {
+        message: "deadlineAt precisa ser uma data/hora reconhecível",
+      })
+      .nullable()
+      .optional(),
     /** `last_saved_at` of the row this save is based on; null = first save. */
     token: z.string().nullable(),
   })

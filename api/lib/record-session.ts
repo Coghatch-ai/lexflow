@@ -9,8 +9,10 @@
 // Two entry points, one body: there is no parallel recording path that could
 // skip SM-2, skip the answer rows, or leave the in-flight `exam_drafts` row
 // behind. When a `DraftClaim` is supplied the draft row is DELETED as the FIRST
-// statement of the transaction, `RETURNING id`, and zero rows aborts the whole
-// transaction (`DraftAlreadyConsumedError`). That ordering is what makes the
+// statement of the transaction, `RETURNING id, mode`, and zero rows aborts the
+// whole transaction (`DraftAlreadyConsumedError`).
+//
+// Deleting FIRST is what makes the
 // delete a real mutex between the client (timer hits zero) and the server (lazy
 // settlement), and between two concurrent settlements: the second transaction
 // blocks on the row lock the first one holds, then re-checks, finds the row
@@ -18,6 +20,13 @@
 // ignoring the row count (the shape review #75 rejected) lets both commit —
 // 2 study_sessions, duplicated user_answers (no unique constraint stops them)
 // and SM-2 advanced twice (upsertSm2States reads-and-writes; not idempotent).
+//
+// `RETURNING mode` (and not just the id) makes this the ONE point where BR-05.5
+// can be enforced: the CLAIMED ROW — never the payload — decides how the session
+// is filed, so a prova real consumed through the study-mode door still becomes a
+// "Prova Real"/hard session (`filingForClaimedMode`). Both entry points pass
+// through here, so neither can mislabel a run the other one would have filed
+// differently.
 
 import { and, eq, sql } from "drizzle-orm";
 // Type-only: this module never opens the transaction, it runs inside one.
@@ -25,7 +34,11 @@ import type { db } from "../db/client";
 import { studySessions, examDrafts, userAnswers } from "../../drizzle/schema";
 import { upsertSm2States } from "./sm2";
 import type { Sm2Config } from "../../shared/domain/spaced-repetition";
-import type { AnswerDraft } from "../../shared/domain/exam-draft";
+import {
+  filingForClaimedMode,
+  type AnswerDraft,
+  type SessionDifficulty,
+} from "../../shared/domain/exam-draft";
 
 /** Transaction handle, as drizzle types it for `db.transaction(cb)`. */
 export type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -71,8 +84,14 @@ export class DraftAlreadyConsumedError extends Error {
 export type DraftClaim = { id: string; lastSavedAt: string } | { id: string; force: true };
 
 export type RecordSessionInput = {
+  /**
+   * What the caller ASKS the session to be filed as. It is honoured for the
+   * study modes and IGNORED when the claimed row turns out to be a prova real —
+   * see `filingForClaimedMode` (BR-05.5): on a real run the labels come from the
+   * claimed row's `mode`, never from the payload.
+   */
   discipline: string;
-  difficulty: "easy" | "medium" | "hard";
+  difficulty: SessionDifficulty;
   /** At least one; blank answers are filtered out BEFORE this call. */
   answers: AnswerDraft[];
   /** In-flight exam draft to consume, deleted inside this transaction. */
@@ -106,6 +125,7 @@ export async function recordSession(
   // moved on (another tab saved, the student came back) — abort before a single
   // write lands.
   const claim = input.draft;
+  let claimedMode: string | null = null;
   if (claim !== undefined) {
     const [claimed] = await tx
       .delete(examDrafts)
@@ -116,16 +136,30 @@ export async function recordSession(
           "force" in claim ? undefined : eq(examDrafts.lastSavedAt, claim.lastSavedAt),
         ),
       )
-      .returning({ id: examDrafts.id });
+      // `mode` rides back with the id: it is the ONLY trustworthy statement of
+      // what this run was, read from the very row this transaction just claimed
+      // (no second read, so no window in which it could change).
+      .returning({ id: examDrafts.id, mode: examDrafts.mode });
     if (claimed === undefined) throw new DraftAlreadyConsumedError(claim.id);
+    claimedMode = claimed.mode;
   }
+
+  // BR-05.5: the CLAIMED row decides how the session is filed. A prova real is
+  // "Prova Real"/hard no matter which door it left by — the client can reach a
+  // real draft through `sessions.record` (examDrafts.get hands it the id and the
+  // token), and without this the same run would be filed under whatever
+  // discipline/difficulty that client sent.
+  const filing = filingForClaimedMode(claimedMode, {
+    discipline: input.discipline,
+    difficulty: input.difficulty,
+  });
 
   const [session] = await tx
     .insert(studySessions)
     .values({
       userId,
-      discipline: input.discipline,
-      difficulty: input.difficulty,
+      discipline: filing.discipline,
+      difficulty: filing.difficulty,
       totalQuestions: total,
       correctAnswers: correct,
       endedAt: sql`now()`,
