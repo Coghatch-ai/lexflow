@@ -5,11 +5,13 @@
 // ctx.userId.
 
 import { z } from "zod";
-import { desc, sql } from "drizzle-orm";
+import { desc } from "drizzle-orm";
+import { TRPCError } from "@trpc/server";
 import { db } from "../../db/client";
-import { studySessions, userAnswers } from "../../../drizzle/schema";
+import { studySessions } from "../../../drizzle/schema";
 import { protectedProcedure, router } from "../procedures";
-import { upsertSm2States, loadSm2Config } from "../../lib/sm2";
+import { loadSm2Config } from "../../lib/sm2";
+import { DraftAlreadyConsumedError, recordSession } from "../../lib/record-session";
 
 const recordInput = z.object({
   discipline: z.string().min(1),
@@ -24,6 +26,10 @@ const recordInput = z.object({
       }),
     )
     .min(1),
+  // The in-flight exam draft this session finishes, when it came from one.
+  // Deleted in the same transaction (api/lib/record-session.ts), which is what
+  // stops the client and the server-side settlement from both recording it.
+  draftId: z.string().uuid().optional(),
 });
 
 export const sessionsRouter = router({
@@ -32,39 +38,33 @@ export const sessionsRouter = router({
     const correct = input.answers.filter((a) => a.correct).length;
     const sm2Config = await loadSm2Config();
 
-    const sessionId = await db.transaction(async (tx) => {
-      const [session] = await tx
-        .insert(studySessions)
-        .values({
-          userId: ctx.userId,
-          discipline: input.discipline,
-          difficulty: input.difficulty,
-          totalQuestions: total,
-          correctAnswers: correct,
-          endedAt: sql`now()`,
-          createdBy: ctx.userId,
-          lastUpdBy: ctx.userId,
-        })
-        .returning({ id: studySessions.id });
-      if (session === undefined) throw new Error("study_session insert returned no row");
-
-      await tx.insert(userAnswers).values(
-        input.answers.map((a) => ({
-          userId: ctx.userId,
-          questionId: a.questionId,
-          userAnswer: a.userAnswer,
-          correct: a.correct,
-          timeSpent: a.timeSpent,
-          createdBy: ctx.userId,
-          lastUpdBy: ctx.userId,
-        })),
+    try {
+      const sessionId = await db.transaction((tx) =>
+        recordSession(
+          tx,
+          ctx.userId,
+          {
+            discipline: input.discipline,
+            difficulty: input.difficulty,
+            answers: input.answers,
+            draftId: input.draftId,
+          },
+          sm2Config,
+        ),
       );
-
-      await upsertSm2States(tx, ctx.userId, input.answers, sm2Config);
-      return session.id;
-    });
-
-    return { sessionId, totalQuestions: total, correctAnswers: correct };
+      return { sessionId, totalQuestions: total, correctAnswers: correct };
+    } catch (err: unknown) {
+      // The server (or another tab) already processed this run — nothing was
+      // written here. CONFLICT, not 500: the answers are not lost, they are in
+      // the session the winner created.
+      if (err instanceof DraftAlreadyConsumedError) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "Este teste já foi processado.",
+        });
+      }
+      throw err;
+    }
   }),
 
   listRecent: protectedProcedure.query(async ({ ctx }) => {

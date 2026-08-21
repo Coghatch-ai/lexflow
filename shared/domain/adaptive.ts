@@ -23,6 +23,22 @@ export const DEFAULT_ADAPTIVE_CONFIG: AdaptiveConfig = {
   startDifficulty: "medium",
 };
 
+/**
+ * The adaptive ladder's live state. Canonical HERE (not in the screen module)
+ * so `exam_drafts.mode_state` can persist it verbatim and the API can read it
+ * back: `tsconfig.api.json` compiles api/ + drizzle/ + shared/ + scripts/ only,
+ * never `app/src/`. `adaptive-screens.tsx` re-exports it, so the screens'
+ * import path is unchanged.
+ */
+export interface AdaptiveState {
+  currentDifficulty: Difficulty;
+  consecutiveCorrect: number;
+  consecutiveWrong: number;
+  totalCorrect: number;
+  totalAnswered: number;
+  difficultyHistory: Difficulty[];
+}
+
 /** Next difficulty given the current streaks. Never steps past the ends. */
 export function nextDifficulty(
   current: Difficulty,

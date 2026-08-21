@@ -30,6 +30,10 @@ const TABLE_SCOPE: Record<string, ScopeType> = {
   // Per-user owned tables
   user_answers: { type: "user" },
   study_sessions: { type: "user" },
+  // In-flight exam draft (epic #67 S2). WITHOUT this line conditions() falls
+  // through to sql`true` and one student's unfinished run is visible to every
+  // other student — the entry is the safety rail, not documentation.
+  exam_drafts: { type: "user" },
   discursive_sessions: { type: "user" },
   user_discursive_answers: { type: "user" },
   user_performance_stats: { type: "user" },

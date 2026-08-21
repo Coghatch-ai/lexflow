@@ -29,6 +29,7 @@ import {
 } from "drizzle-orm/pg-core";
 import type { PlanConfig } from "../shared/domain/study-plan";
 import type { AiExplanation } from "../shared/domain/ai-eval";
+import type { AnswerDraft, ExamDraftModeState, ExamDraftSetup } from "../shared/domain/exam-draft";
 
 // The four system audit columns present on every table without exception.
 const systemFields = {
@@ -181,6 +182,47 @@ export const studySessions = pgTable(
     ...systemFields,
   },
   (t) => [index("idx_study_sessions_user").on(t.userId)],
+);
+
+// A test that is STILL RUNNING (BR-05, epic #67 S2). The row exists ⇔ the run
+// is in progress: it is deleted in the same transaction that records the
+// session (or on discard), so a finished run never lingers and nothing here
+// ever reaches stats/SM-2. No status column, no revision column — `mode` +
+// `user_id` are unique (one unfinished run per mode, BR-05.8) and
+// `last_saved_at` doubles as the optimistic-concurrency token.
+//
+// `deadline_at` is nullable ON PURPOSE: only the prova real has an absolute
+// wall-clock deadline. In the study modes the clock pauses while saved, so
+// `elapsed_seconds` is the truth and there is no deadline at all.
+export const examDrafts = pgTable(
+  "exam_drafts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    mode: text("mode").notNull(), // RunMode: 'standard' | 'adaptive' | 'spaced' | 'real'
+    setup: jsonb("setup").$type<ExamDraftSetup>().notNull(),
+    // Frozen queue order — questions.list orders by random(), so resuming must
+    // replay THIS array (rehydrated via questions.byIds), never re-query.
+    questionIds: jsonb("question_ids").$type<string[]>().notNull(),
+    cursor: integer("cursor").notNull().default(0),
+    answers: jsonb("answers").$type<AnswerDraft[]>().notNull(),
+    modeState: jsonb("mode_state").$type<ExamDraftModeState>().notNull(),
+    elapsedSeconds: integer("elapsed_seconds").notNull().default(0),
+    deadlineAt: timestamp("deadline_at", { withTimezone: true, mode: "string" }),
+    startedAt: timestamp("started_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    lastSavedAt: timestamp("last_saved_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    ...systemFields,
+  },
+  (t) => [
+    unique("uq_exam_draft_user_mode").on(t.userId, t.mode),
+    index("idx_exam_drafts_user").on(t.userId),
+  ],
 );
 
 // OAB 2ª-fase (discursive) study. Mirrors studySessions ↔ userAnswers but for

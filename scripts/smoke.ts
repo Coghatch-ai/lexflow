@@ -11,6 +11,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { oabQuestions, users } from "../drizzle/schema";
 import { appRouter } from "../api/trpc/router";
+import { smokeExamDrafts } from "./smoke-exam-drafts";
 
 const SMOKE_EXTERNAL_ID = "smoke-test-user";
 
@@ -86,9 +87,19 @@ async function main(): Promise<void> {
     await caller.goals.delete({ id: goal.id });
     console.warn("[smoke] goals.update + delete OK");
 
+    // In-flight exam drafts (epic #67 S2a): scoping across two users, the
+    // optimistic token, the record-consumes-run transaction and the lazy
+    // settlement of an abandoned prova real. Runs BEFORE the catalog invariant
+    // below: these assertions depend only on the throwaway users + `qs`, while
+    // the invariant is a global-catalog check that a pre-existing data defect
+    // (#46 backfill, tracked in #76) can make throw — which would otherwise
+    // hide every per-user assertion behind an unrelated failure.
+    await smokeExamDrafts({ db, caller, userId: smokeUserId, questions: qs });
+
     // Invariant: every oab_questions.discipline must be a valid DISCIPLINE LOV code.
     // This assertion catches any future CSV import that wrote a raw pt-BR label
-    // instead of a code (the exact bug fixed in #46).
+    // instead of a code (the exact bug fixed in #46). Still fatal — it throws and
+    // fails the run; it is only ordered last so it cannot mask the checks above.
     const badDisciplineResult = await db.execute<{ bad_count: number }>(
       sql`SELECT count(*)::int AS bad_count
           FROM ${oabQuestions}

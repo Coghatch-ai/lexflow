@@ -28,7 +28,7 @@ the green/red highlight takes over") is vacuous there. In the real exam the cros
 WHOLE run, since an answer stays editable until the exam ends.
 
 Render/logic splits of the big screens: `real-exam-playing.tsx` + `real-exam-review.tsx`,
-`adaptive-screens.tsx` (render) + `adaptive-pool.ts` (pool, cursor, deferred FIFO),
+`adaptive-screens.tsx` (render) + `app/src/components/adaptive-pool.ts` (pool, cursor, deferred FIFO),
 `spaced-screens.tsx`, `testing-completed.tsx`.
 
 Supporting pure modules (unit-tested with plain vitest, no RTL):
@@ -93,9 +93,11 @@ answered") is **not** satisfied product-wide until M1 lands.
    answers-so-far, the timer and the cursor. Nothing about the run exists outside browser memory.
 2. **Answer / postpone** — all in that component state (BR-03; blanks never recorded).
 3. **Leave** — a leave attempt is now INTERCEPTED at its source and offers "sair e processar"
-   (BR-05, epic #67 S1 + S1b). The run still lives only in browser memory — there is no
-   `localStorage`/`sessionStorage` use anywhere in the repo and no partial-run table — so
-   "processar" means "record what was answered NOW via `sessions.record`", never "resume later".
+   (BR-05, epic #67 S1 + S1b). Desde a S2a (#75) existe a tabela `exam_drafts` (uma linha por
+   `(user, mode)`, `UNIQUE(user_id, mode)`), mas **nenhuma tela grava nela ainda**: as 4 telas
+   seguem com a corrida só em memória do navegador (não há `localStorage`/`sessionStorage` em
+   lugar nenhum do repo), então "processar" continua significando "gravar o que foi respondido
+   AGORA via `sessions.record`", nunca "retomar depois". A fiação das telas é S2b/S2c/S2d.
    Nothing is asked when nothing was answered (`shouldPromptOnExit`): there is nothing to process
    and `sessions.record` requires `answers.min(1)`.
 
@@ -131,8 +133,21 @@ answered") is **not** satisfied product-wide until M1 lands.
 5. **Read back** — `sessions.listRecent`; all statistics are computed on read from `user_answers`,
    so anything not recorded in step 4 simply never happened.
 
-`sessions.record` is therefore the single processing path: "finish", "quit and process" and a
-real-exam auto-submit are all the same operation over a shorter answer list.
+### Persistência de corrida (S2a, só backend)
+
+- `exam_drafts` — linha existe ⇔ corrida em andamento; apagada = processada ou descartada. Sem
+  coluna de status e sem coluna de revisão.
+- `last_saved_at` **é** o token de concorrência otimista. `save` com token velho ⇒ `CONFLICT`;
+  `save` com `token: null` sobre uma corrida viva **também** ⇒ `CONFLICT` (BR-05.8 mora no
+  servidor, não na UI). Substituir uma corrida é ato deliberado: `discard` nos modos de estudo,
+  `startReal` na real.
+- `examDrafts.list` **nunca** devolve `mode: 'real'`, por mais fresca que a linha esteja
+  (BR-05.5). A prova real só termina por liquidação: `settleRealRun` — preguiçosa, sem scheduler,
+  disparada por `users.me`, `examDrafts.list`, `examDrafts.startReal` e pelo `processReal` do
+  próprio cliente ao zerar o cronômetro.
+- `recordSession` (`api/lib/record-session.ts`) é o corpo único de gravação; `sessions.record` e
+  `settleRealRun` são as **duas entradas**. O `DELETE` do rascunho é a primeira instrução da
+  transação e funciona como mutex: quem chega depois apaga 0 linhas e desiste sem escrever nada.
 
 ## Functional definitions attached to these surfaces
 
