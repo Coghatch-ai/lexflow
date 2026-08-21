@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react';
 import { Brain, ChevronRight, CheckCircle, XCircle, Clock, Zap, ArrowRightToLine } from 'lucide-react';
-import { nextDifficulty } from '@shared/domain/adaptive';
+import { nextDifficulty, type AdaptiveState } from '@shared/domain/adaptive';
 import { accuracyPct } from '@shared/domain/scoring';
 import type { AiExplanation } from '@shared/domain/ai-eval';
 import { type NotesAndBookmarks } from '../shared/hooks/use-notes-bookmarks';
@@ -22,14 +22,9 @@ export type AdaptiveQuestion = {
   legislationTitle: string | null;
 };
 
-export interface AdaptiveState {
-  currentDifficulty: Difficulty;
-  consecutiveCorrect: number;
-  consecutiveWrong: number;
-  totalCorrect: number;
-  totalAnswered: number;
-  difficultyHistory: Difficulty[];
-}
+// Canonical in `@shared/domain/adaptive` — `exam_drafts.mode_state` persists it
+// verbatim and the API reads it back. Re-exported so importers are unchanged.
+export type { AdaptiveState };
 
 const DIFFICULTY_COLORS: Record<Difficulty, string> = {
   easy: 'bg-green-100 text-green-700',
