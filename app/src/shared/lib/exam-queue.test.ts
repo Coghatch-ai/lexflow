@@ -4,8 +4,10 @@ import {
   canPostponeGuard,
   findNextUnanswered,
   moveToEnd,
+  nextAdaptiveStep,
   shouldServeDeferred,
 } from "./exam-queue";
+import { DEFAULT_ADAPTIVE_CONFIG, type AdaptiveState } from "@shared/domain/adaptive";
 
 describe("moveToEnd", () => {
   it("moves the element at index to the end, preserving relative order", () => {
@@ -203,5 +205,137 @@ describe("shouldServeDeferred", () => {
         poolExhausted: false,
       }),
     ).toBe(true);
+  });
+});
+
+// ── Slice S2c: the FIFO and the ladder after a RESUME ───────────────────────
+//
+// A resumed simulado feeds these rules two rehydrated things: `deferredCount`
+// from `modeState.deferredIds` (the FIFO's bodies come back from
+// `questions.byIds`) and the persisted `AdaptiveState`. Both are ids/plain
+// numbers by then, so the rules cannot tell a resumed run from a live one —
+// which is exactly the property under test.
+describe("deferidas rehidratadas (retomada)", () => {
+  /** What `resumeAdaptiveFrom` handed back, as the board holds it. */
+  const resumed = { deferredIds: ["a2", "a5"], totalAnswered: 8, totalQuestions: 10 };
+
+  it("drena as 2 adiadas rehidratadas quando sobram exatamente 2 vagas", () => {
+    expect(
+      shouldServeDeferred({
+        totalAnswered: resumed.totalAnswered,
+        totalQuestions: resumed.totalQuestions,
+        deferredCount: resumed.deferredIds.length,
+        poolExhausted: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("uma adiada que sumiu do catalogo deixa de ocupar vaga", () => {
+    // `resumeAdaptiveFrom` drops an id that left the catalog from the FIFO: the
+    // count that reaches this rule is the SURVIVORS', so the simulado still
+    // draws a fresh question instead of holding a slot for a ghost.
+    const survivors = resumed.deferredIds.filter((id) => id !== "a5");
+    expect(
+      shouldServeDeferred({
+        totalAnswered: resumed.totalAnswered,
+        totalQuestions: resumed.totalQuestions,
+        deferredCount: survivors.length,
+        poolExhausted: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("canPostponeAdaptive apos a retomada conta as adiadas que voltaram", () => {
+    // 10 - 5 - 2 = 3 ≥ 2: still room to postpone one more.
+    expect(
+      canPostponeAdaptive({
+        totalAnswered: 5,
+        totalQuestions: resumed.totalQuestions,
+        deferredCount: resumed.deferredIds.length,
+        hasReplacement: true,
+      }),
+    ).toBe(true);
+    // 10 - 7 - 2 = 1 < 2: postponing now could shrink the simulado.
+    expect(
+      canPostponeAdaptive({
+        totalAnswered: 7,
+        totalQuestions: resumed.totalQuestions,
+        deferredCount: resumed.deferredIds.length,
+        hasReplacement: true,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("nextAdaptiveStep", () => {
+  const ladder = (over: Partial<AdaptiveState> = {}): AdaptiveState => ({
+    currentDifficulty: "medium",
+    consecutiveCorrect: 0,
+    consecutiveWrong: 0,
+    totalCorrect: 3,
+    totalAnswered: 4,
+    difficultyHistory: [],
+    ...over,
+  });
+
+  it("termina quando o total contratado foi respondido", () => {
+    expect(
+      nextAdaptiveStep({
+        adaptive: ladder({ totalAnswered: 10 }),
+        totalQuestions: 10,
+        deferredCount: 1,
+        poolExhausted: false,
+      }),
+    ).toEqual({ kind: "finish" });
+  });
+
+  it("serve a FIFO na cauda antes de sortear", () => {
+    expect(
+      nextAdaptiveStep({
+        adaptive: ladder({ totalAnswered: 9 }),
+        totalQuestions: 10,
+        deferredCount: 1,
+        poolExhausted: false,
+      }),
+    ).toEqual({ kind: "deferred" });
+  });
+
+  it("sobe a escada a partir do estado PERSISTIDO, sem recomecar em medium", () => {
+    // The resumed run carries the streak, so the very next question is drawn at
+    // `hard` — a run that reset the ladder would draw `medium` here.
+    const persisted = JSON.parse(
+      JSON.stringify(ladder({ currentDifficulty: "medium", consecutiveCorrect: 2 })),
+    ) as AdaptiveState;
+    expect(
+      nextAdaptiveStep({
+        adaptive: persisted,
+        totalQuestions: 10,
+        deferredCount: 0,
+        poolExhausted: false,
+      }),
+    ).toEqual({ kind: "draw", difficulty: "hard" });
+  });
+
+  it("desce a escada apos a sequencia de erros persistida", () => {
+    expect(
+      nextAdaptiveStep({
+        adaptive: ladder({ currentDifficulty: "hard", consecutiveWrong: 2 }),
+        totalQuestions: 10,
+        deferredCount: 0,
+        poolExhausted: false,
+      }),
+    ).toEqual({ kind: "draw", difficulty: "medium" });
+  });
+
+  it("honra um config alternativo", () => {
+    expect(
+      nextAdaptiveStep({
+        adaptive: ladder({ currentDifficulty: "easy", consecutiveCorrect: 1 }),
+        totalQuestions: 10,
+        deferredCount: 0,
+        poolExhausted: false,
+        config: { ...DEFAULT_ADAPTIVE_CONFIG, stepUpAfter: 1 },
+      }),
+    ).toEqual({ kind: "draw", difficulty: "medium" });
   });
 });

@@ -24,6 +24,7 @@ import {
   RESUMABLE_MODES,
   RUN_MODES,
   answeredOf,
+  draftTotalOf,
   isResumableMode,
 } from "../../../shared/domain/exam-draft";
 
@@ -163,7 +164,12 @@ export const examDraftsRouter = router({
     return rows.map((draft) => ({
       mode: draft.mode,
       answered: answeredOf(draft),
-      total: draft.questionIds.length,
+      // NOT `questionIds.length`: in the adaptive mode that array is the
+      // questions SERVED so far (it grows one per answer, with a duplicate
+      // whenever a postponed one comes back), so it would offer "Continuar
+      // (3/4)" for a simulado of 10. `draftTotalOf` reads the target the
+      // student picked; the other modes still count their frozen queue.
+      total: draftTotalOf(draft),
       lastSavedAt: draft.lastSavedAt,
     }));
   }),

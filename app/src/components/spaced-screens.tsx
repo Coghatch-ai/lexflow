@@ -89,6 +89,8 @@ interface SpacedPlayingProps {
   total: number;
   currentQuestion: ReviewItem;
   selectedAnswer: string;
+  /** pt-BR warning from a reconciled resume (questions left the catalog). */
+  notice?: string | null | undefined;
   notesAndBookmarks: NotesAndBookmarks;
   disciplineLov: Lov;
   examBoardLov: Lov;
@@ -102,13 +104,18 @@ interface SpacedPlayingProps {
 }
 
 export function SpacedPlaying({
-  currentIndex, total, currentQuestion, selectedAnswer, notesAndBookmarks,
+  currentIndex, total, currentQuestion, selectedAnswer, notice = null, notesAndBookmarks,
   disciplineLov, examBoardLov, canPostpone, eliminatedOptions,
   onSelect, onToggleEliminate, onPostpone, onAnswer, onRequestExit,
 }: SpacedPlayingProps): ReactElement {
   const { localNotes, bookmarkedIds, handleNoteChange, handleToggleBookmark } = notesAndBookmarks;
   return (
     <div className="space-y-4">
+      {notice !== null && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-3 text-sm">
+          {notice}
+        </div>
+      )}
       <div className="flex items-center justify-between bg-white rounded-xl p-4 shadow">
         <div className="flex items-center gap-3">
           <RotateCcw className="w-5 h-5 text-[#16161a]" />

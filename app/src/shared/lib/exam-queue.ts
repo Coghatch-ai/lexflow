@@ -1,9 +1,19 @@
 // app/src/shared/lib/exam-queue.ts
 //
+// Also the adaptive simulado's "what comes next" rule (`nextAdaptiveStep`),
+// which a resumed run replays over its persisted ladder.
+//
 // Queue helpers for the "responder depois" (postpone) flow in simulations.
 // Both helpers are pure: postponing re-orders the pending question queue
 // (standard mode) or jumps the cursor to the next unanswered question
 // (real exam mode) without ever recording a blank answer.
+
+import {
+  nextDifficulty,
+  type AdaptiveConfig,
+  type AdaptiveState,
+  type Difficulty,
+} from "@shared/domain/adaptive";
 
 export function moveToEnd<T>(items: readonly T[], index: number): T[] {
   if (index < 0 || index >= items.length) return [...items];
@@ -86,4 +96,54 @@ export function shouldServeDeferred({
 }): boolean {
   if (deferredCount <= 0) return false;
   return poolExhausted || totalQuestions - totalAnswered <= deferredCount;
+}
+
+/** What the adaptive simulado does after an answer. */
+export type AdaptiveStep =
+  | { kind: "finish" }
+  /** Serve the head of the deferred FIFO, at its own difficulty. */
+  | { kind: "deferred" }
+  /** Draw an unseen question, preferring `difficulty`. */
+  | { kind: "draw"; difficulty: Difficulty };
+
+/**
+ * The whole "what comes next" decision of the Simulado Adaptativo, as one pure
+ * function over the LADDER and the queue counters (epic #67 S2c).
+ *
+ * Pure on purpose: a resumed run feeds it the persisted `AdaptiveState`, so the
+ * step it answers is the step the uninterrupted run would have taken — the
+ * ladder never restarts at `medium` just because the student left. The caller
+ * still owns the draw itself (`fetchQuestion` can come back empty, and then the
+ * FIFO is what is left).
+ */
+export function nextAdaptiveStep({
+  adaptive,
+  totalQuestions,
+  deferredCount,
+  poolExhausted,
+  config,
+}: {
+  adaptive: AdaptiveState;
+  totalQuestions: number;
+  deferredCount: number;
+  poolExhausted: boolean;
+  config?: AdaptiveConfig;
+}): AdaptiveStep {
+  if (adaptive.totalAnswered >= totalQuestions) return { kind: "finish" };
+  const drain = shouldServeDeferred({
+    totalAnswered: adaptive.totalAnswered,
+    totalQuestions,
+    deferredCount,
+    poolExhausted,
+  });
+  if (drain) return { kind: "deferred" };
+  return {
+    kind: "draw",
+    difficulty: nextDifficulty(
+      adaptive.currentDifficulty,
+      adaptive.consecutiveCorrect,
+      adaptive.consecutiveWrong,
+      config,
+    ),
+  };
 }

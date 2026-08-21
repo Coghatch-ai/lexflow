@@ -4,6 +4,7 @@
 // epic #67 S2a). Plain vitest — no jsdom, no RTL, no DB.
 
 import { describe, expect, it } from "vitest";
+import type { AdaptiveState } from "./adaptive";
 import {
   REAL_EXAM_DIFFICULTY,
   REAL_EXAM_DISCIPLINE,
@@ -11,6 +12,7 @@ import {
   RESUMABLE_MODES,
   answeredOf,
   answersForRecord,
+  draftTotalOf,
   filingForClaimedMode,
   isRealRunAbandoned,
   isResumableMode,
@@ -24,6 +26,16 @@ import {
 function answer(questionId: string, userAnswer: string, correct = true): AnswerDraft {
   return { questionId, userAnswer, correct, timeSpent: 30 };
 }
+
+/** An adaptive ladder mid-run — `draftTotalOf` never reads it, the shape does. */
+const ADAPTIVE_STATE: AdaptiveState = {
+  currentDifficulty: "medium",
+  consecutiveCorrect: 1,
+  consecutiveWrong: 0,
+  totalCorrect: 2,
+  totalAnswered: 3,
+  difficultyHistory: ["medium", "medium", "easy"],
+};
 
 function draft(partial: Partial<ExamDraftSnapshot> = {}): ExamDraftSnapshot {
   return {
@@ -129,6 +141,92 @@ describe("reconcileRun", () => {
     expect(result.questionIds).toEqual([]);
     expect(result.answers).toEqual([]);
     expect(result.cursor).toBe(0);
+  });
+
+  // The adaptive mode serves the SAME question twice on purpose: `park` leaves
+  // it in the served list and `serveDeferred` re-appends it. An `indexOf`
+  // re-anchoring answers with the FIRST copy and throws the student back onto a
+  // question already answered, so the cursor is positional.
+  describe("with a REPEATED question id (the adaptive queue)", () => {
+    const repeated: ExamDraftSnapshot = {
+      // q2 was postponed at index 1 and came back at index 3.
+      questionIds: ["q1", "q2", "q3", "q2", "q4"],
+      cursor: 3,
+      answers: [answer("q1", "A"), answer("q3", "C")],
+    };
+
+    it("keeps a cursor on the SECOND occurrence on the second occurrence", () => {
+      const result = reconcileRun(repeated, ["q1", "q2", "q3", "q4"]);
+      expect(result.questionIds).toEqual(["q1", "q2", "q3", "q2", "q4"]);
+      expect(result.cursor).toBe(3);
+      expect(result.questionIds[result.cursor]).toBe("q2");
+    });
+
+    it("keeps the student on the same COPY when a neighbour leaves the catalog", () => {
+      // q3 (index 2, before the cursor) is gone: the second q2 is now index 2.
+      const result = reconcileRun(repeated, ["q1", "q2", "q4"]);
+      expect(result.questionIds).toEqual(["q1", "q2", "q2", "q4"]);
+      expect(result.cursor).toBe(2);
+      expect(result.questionIds[result.cursor]).toBe("q2");
+      // Still the SECOND copy — a first-occurrence anchor would say 1 here.
+      expect(result.questionIds.indexOf("q2")).toBe(1);
+    });
+
+    it("drops BOTH copies when the repeated question leaves the catalog", () => {
+      const result = reconcileRun(repeated, ["q1", "q3", "q4"]);
+      expect(result.questionIds).toEqual(["q1", "q3", "q4"]);
+      expect(result.dropped).toBe(2);
+      // Two survivors sat before the cursor, so the student lands on q4.
+      expect(result.questionIds[result.cursor]).toBe("q4");
+    });
+  });
+});
+
+describe("draftTotalOf (the N of 'Continuar (n/N)')", () => {
+  const questionIds = ["q1", "q2", "q3"];
+
+  it("uses the SETUP total for an adaptive run, never the served count", () => {
+    // The adaptive queue grows one entry per question served: reading its
+    // length would offer "Continuar (3/3)" for a simulado of 10.
+    expect(
+      draftTotalOf({
+        questionIds,
+        modeState: {
+          mode: "adaptive",
+          adaptive: ADAPTIVE_STATE,
+          totalQuestions: 10,
+          deferredIds: [],
+        },
+      }),
+    ).toBe(10);
+  });
+
+  it("counts the frozen queue for the standard mode", () => {
+    expect(draftTotalOf({ questionIds, modeState: { mode: "standard", carriedTime: {} } })).toBe(3);
+  });
+
+  it("counts the frozen queue for the spaced mode", () => {
+    expect(draftTotalOf({ questionIds, modeState: { mode: "spaced" } })).toBe(3);
+  });
+
+  it("counts the frozen queue for the prova real", () => {
+    expect(draftTotalOf({ questionIds, modeState: { mode: "real" } })).toBe(3);
+  });
+
+  it("counts DUPLICATES in a served adaptive queue as one served question each", () => {
+    // The n and the N come from different places on purpose: `answeredOf`
+    // counts answers, `draftTotalOf` the target.
+    expect(
+      draftTotalOf({
+        questionIds: ["q1", "q2", "q1"],
+        modeState: {
+          mode: "adaptive",
+          adaptive: ADAPTIVE_STATE,
+          totalQuestions: 4,
+          deferredIds: ["q1"],
+        },
+      }),
+    ).toBe(4);
   });
 });
 

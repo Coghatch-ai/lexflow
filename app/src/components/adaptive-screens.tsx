@@ -125,6 +125,8 @@ interface AdaptivePlayingProps {
   timer: number;
   currentQuestion: AdaptiveQuestion;
   selectedAnswer: string;
+  /** pt-BR warning from a reconciled resume (questions left the catalog). */
+  notice?: string | null | undefined;
   notesAndBookmarks: NotesAndBookmarks;
   disciplineLov: Lov;
   examBoardLov: Lov;
@@ -139,7 +141,7 @@ interface AdaptivePlayingProps {
 }
 
 export function AdaptivePlaying({
-  adaptive, totalQuestions, timer, currentQuestion, selectedAnswer,
+  adaptive, totalQuestions, timer, currentQuestion, selectedAnswer, notice = null,
   notesAndBookmarks, disciplineLov, examBoardLov, difficultyLov,
   canPostpone, eliminatedOptions, onSelect, onToggleEliminate, onPostpone, onAnswer,
   onRequestExit,
@@ -147,6 +149,11 @@ export function AdaptivePlaying({
   const { localNotes, bookmarkedIds, handleNoteChange, handleToggleBookmark } = notesAndBookmarks;
   return (
     <div className="space-y-4">
+      {notice !== null && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-3 text-sm">
+          {notice}
+        </div>
+      )}
       <div className="flex items-center justify-between bg-white rounded-xl p-4 shadow">
         <div className="flex items-center gap-3">
           <Brain className="w-5 h-5 text-[#16161a]" />

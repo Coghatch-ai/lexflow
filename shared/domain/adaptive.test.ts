@@ -86,6 +86,20 @@ describe("resuming from a persisted AdaptiveState", () => {
     expect(resumed.currentDifficulty).toBe("hard");
   });
 
+  it("resumes ON the step-up rung itself (consecutiveCorrect === stepUpAfter)", () => {
+    // The exact rung where a lost streak is invisible for one more answer: the
+    // run was saved with the step-up already earned, so the level the resumed
+    // run SERVES next must be the stepped-up one, not the level it saved at.
+    const saved = roundTrip(play(START, [true, true]));
+    expect(saved.consecutiveCorrect).toBe(DEFAULT_ADAPTIVE_CONFIG.stepUpAfter);
+    expect(saved.currentDifficulty).toBe("hard");
+    expect(
+      nextDifficulty(saved.currentDifficulty, saved.consecutiveCorrect, saved.consecutiveWrong),
+    ).toBe("hard");
+    // …and one more correct answer does NOT climb past the top of the ladder.
+    expect(play(saved, [true]).currentDifficulty).toBe("hard");
+  });
+
   it("resuming keeps the STREAK, so the next answer can step up immediately", () => {
     // Saved one correct answer into a streak; a run that dropped the streak on
     // resume would need two more correct answers to reach hard, not one.

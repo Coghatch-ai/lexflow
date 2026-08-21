@@ -1,231 +1,140 @@
+// Entry point of the Revisão Espaçada (BR-05, epic #67 slice S2c): the fresh
+// ≤5 queue, the REHYDRATION of a saved review, and the empty state. The review
+// itself lives in `SpacedBoard`, mounted with a `key` per run so every run gets
+// a clean scheduler and a clean draft identity.
+//
+// Resume NEVER re-queries `questions.reviewQueue` (criterion 5): the due set
+// changes as SM-2 advances and as the day passes, so a second query would swap
+// the questions out from under the cursor. It replays the frozen `questionIds`
+// through `questions.byIds` — which since S2c also returns the SM-2 columns the
+// header shows — and re-imposes their order in `resumeSpacedFrom`.
+
 import { useEffect, useRef, useState, type ReactElement } from 'react';
 import { useSession } from '../auth';
-import { useLov } from '../shared/hooks/use-lov';
-import { trpc } from '../shared/lib/trpc';
-import { shuffle } from '../shared/lib/shuffle';
-import { useNotesAndBookmarks } from '../shared/hooks/use-notes-bookmarks';
-import { useLeaveWarning } from '../shared/hooks/use-leave-warning';
-import { useRegisterRun } from '../shared/run-guard-context';
-import QuitTestDialog from './QuitTestDialog';
-import { exitPrompt, processableAnswers, shouldPromptOnExit } from '../shared/lib/exit-rules';
-import { moveToEnd } from '../shared/lib/exam-queue';
-import {
-  NO_ELIMINATIONS,
-  clearForQuestion,
-  eliminatedFor,
-  eliminationDropsAnswer,
-  toggleElimination,
-  type EliminationState,
-} from '../shared/lib/eliminations';
-import {
-  type ReviewItem,
-  SpacedDone,
-  SpacedEmptyState,
-  SpacedFeedback,
-  SpacedPlaying,
-} from './spaced-screens';
+import { FRESH_READ, trpc } from '../shared/lib/trpc';
+import { persistedDraftOf, resumeSpacedFrom } from '../shared/lib/run-persistence';
+import SpacedBoard from './spaced-board';
+import { SpacedEmptyState } from './spaced-screens';
+import { toReviewItem, type SpacedRunStart } from './spaced-types';
 
-type Status = 'loading' | 'empty' | 'playing' | 'feedback' | 'done';
+const DROPPED_NOTICE = 'Algumas questões saíram do catálogo e foram removidas da revisão.';
+const ALL_DROPPED_NOTICE =
+  'As questões desta revisão saíram do catálogo, então a revisão salva foi descartada.';
 
-export default function SpacedRepetition({ onExit }: { onExit: () => void }): ReactElement {
+interface SpacedRepetitionProps {
+  /** `resume` continues the saved review; `new` draws today's queue. */
+  intent: 'new' | 'resume';
+  onExit: () => void;
+}
+
+export default function SpacedRepetition({
+  intent,
+  onExit,
+}: SpacedRepetitionProps): ReactElement {
   const { user } = useSession();
-  const disciplineLov = useLov('DISCIPLINE');
-  const examBoardLov = useLov('EXAM_BOARD');
   const reviewQuery = trpc.questions.reviewQueue.useQuery();
   const dueCountQuery = trpc.questions.dueCount.useQuery();
   const utils = trpc.useUtils();
-  const recordMutation = trpc.sessions.record.useMutation({
-    onSuccess: () => {
-      void utils.stats.invalidate();
-      void utils.sessions.invalidate();
-      void utils.questions.invalidate();
-    },
+  const discardMutation = trpc.examDrafts.discard.useMutation();
+
+  const [start, setStart] = useState<SpacedRunStart | null>(null);
+  const [runKey, setRunKey] = useState(0);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [resuming, setResuming] = useState(intent === 'resume');
+  // The intent of the NEXT run, which is not always the one the card asked for:
+  // after a resumed review is processed (or when the saved row turned out to be
+  // gone) the screen must draw today's queue, not look for a draft again.
+  const [runIntent, setRunIntent] = useState<'new' | 'resume'>(intent);
+
+  // A fresh queue: the ≤5 most overdue reviews, mapped once. Never re-mapped
+  // against a background refetch — that would reshuffle mid-review.
+  useEffect(() => {
+    if (!user || runIntent !== 'new' || start !== null || reviewQuery.isFetching) return;
+    const data = reviewQuery.data ?? [];
+    if (data.length === 0) return;
+    setStart({
+      questions: data.slice(0, 5).map(toReviewItem),
+      cursor: 0,
+      answers: [],
+      draft: null,
+    });
+    setRunKey((key) => key + 1);
+  }, [user, runIntent, start, reviewQuery.isFetching, reviewQuery.data]);
+
+  const resumeRun = async (): Promise<void> => {
+    setResuming(true);
+    setNotice(null);
+    try {
+      // `persistedDraftOf` restores the `| null` this program cannot infer.
+      //
+      // `FRESH_READ` because this read is also the CONFLICT's "Recarregar do
+      // servidor": under the client's 5-minute default it would rehydrate from
+      // the same cached copy that produced the conflict, forever.
+      const draft = persistedDraftOf(
+        await utils.examDrafts.get.fetch({ mode: 'spaced' }, FRESH_READ),
+      );
+      if (draft === null) {
+        // Discarded on another device between the click and this read: fall
+        // back to today's queue instead of an empty screen.
+        setRunIntent('new');
+        return;
+      }
+      const rows = await utils.questions.byIds.fetch({ ids: draft.questionIds });
+      const state = resumeSpacedFrom(draft, rows.map(toReviewItem));
+      if (state.discard) {
+        // Nothing survived in the catalog: the row cannot be resumed and must
+        // not be recorded either (`user_answers` has an FK to `oab_questions`).
+        await discardMutation.mutateAsync({ mode: 'spaced' });
+        await utils.examDrafts.invalidate();
+        setNotice(ALL_DROPPED_NOTICE);
+        setRunIntent('new');
+        return;
+      }
+      setNotice(state.dropped > 0 ? DROPPED_NOTICE : null);
+      setStart({
+        questions: state.questions,
+        cursor: state.cursor,
+        answers: state.answers,
+        draft: { id: draft.id, token: draft.lastSavedAt },
+      });
+      setRunKey((key) => key + 1);
+    } finally {
+      setResuming(false);
+    }
+  };
+
+  // No dependency array by design (same pattern as `useRegisterRun`): the ref
+  // is what makes it run exactly once, without a hand-maintained dep list.
+  const resumeRequested = useRef(false);
+  useEffect(() => {
+    if (intent !== 'resume' || resumeRequested.current) return;
+    resumeRequested.current = true;
+    void resumeRun();
   });
 
-  const notesAndBookmarks = useNotesAndBookmarks();
-
-  const [status, setStatus] = useState<Status>('loading');
-  const [reviewQuestions, setReviewQuestions] = useState<ReviewItem[]>([]);
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [selectedAnswer, setSelectedAnswer] = useState('');
-  const [lastCorrect, setLastCorrect] = useState<boolean | null>(null);
-  const [nextIntervalDays, setNextIntervalDays] = useState<number>(1);
-  const [questionTime, setTimeSpent] = useState(0);
-  const [sessionCorrect, setSessionCorrect] = useState(0);
-  const [sessionTotal, setSessionTotal] = useState(0);
-  const [answerLog, setAnswerLog] = useState<
-    { questionId: string; userAnswer: string; correct: boolean; timeSpent: number }[]
-  >([]);
-  // Crossed-out alternatives (BR-02) — session-only, never recorded, never fed
-  // to SM-2. Cleared per question once its answer is recorded; this screen has
-  // no "checked" state, so `locked` is never passed to the card.
-  const [eliminations, setEliminations] = useState<EliminationState>(NO_ELIMINATIONS);
-  // "Sair e processar" confirmation (BR-05) — the review stays mounted behind it.
-  const [exitOpen, setExitOpen] = useState(false);
-
-  // Time already spent on a review postponed via "Responder depois", keyed by
-  // question id and re-added when the review is finally answered.
-  const carriedTimeRef = useRef<Map<string, number>>(new Map());
-
-  // Map the review queue into session state only while in 'loading' status and
-  // never against an in-flight fetch: background refetches (window focus after
-  // staleTime, invalidate on record) must not replace — and reshuffle — the
-  // questions mid-session.
-  useEffect(() => {
-    if (!user || status !== 'loading' || reviewQuery.isFetching) return;
-    const data = reviewQuery.data ?? [];
-    if (data.length === 0) {
-      setStatus('empty');
-      return;
-    }
-    const items: ReviewItem[] = data.slice(0, 5).map((q) => ({
-      id: q.id,
-      questionText: q.questionText,
-      options: shuffle(q.options),
-      correctAnswer: q.correctAnswer,
-      explanation: q.explanation,
-      aiExplanation: q.aiExplanation ?? null,
-      discipline: q.discipline,
-      examBoard: q.examBoard,
-      difficulty: q.difficulty,
-      legislationTitle: q.legislationTitle,
-      interval: q.interval,
-      repetitions: q.repetitions,
-      nextReviewAt: q.nextReviewAt,
-      lastCorrect: q.lastCorrect ?? null,
-    }));
-    setReviewQuestions(items);
-    setStatus('playing');
-  }, [user, status, reviewQuery.isFetching, reviewQuery.data]);
-
-  const currentQuestion = reviewQuestions[currentIndex];
-  const dueCount = dueCountQuery.data?.count ?? 0;
-
-  const handleAnswer = () => {
-    if (!user || currentIndex >= reviewQuestions.length) return;
-
-    const correct = selectedAnswer === currentQuestion.correctAnswer;
-    setLastCorrect(correct);
-
-    const reps = currentQuestion.repetitions;
-    let displayInterval: number;
-    if (!correct) {
-      displayInterval = 1;
-    } else if (reps === 0) {
-      displayInterval = 1;
-    } else if (reps === 1) {
-      displayInterval = 6;
-    } else {
-      displayInterval = Math.round(currentQuestion.interval * 2.5);
-    }
-    setNextIntervalDays(displayInterval);
-
-    const totalTimeSpent = questionTime + (carriedTimeRef.current.get(currentQuestion.id) ?? 0);
-    setAnswerLog((log) => [
-      ...log,
-      {
-        questionId: currentQuestion.id,
-        userAnswer: selectedAnswer,
-        correct,
-        timeSpent: totalTimeSpent,
-      },
-    ]);
-    // The answer is recorded — its cross-outs have served their purpose.
-    setEliminations((prev) => clearForQuestion(prev, currentQuestion.id));
-
-    if (correct) setSessionCorrect((c) => c + 1);
-    setSessionTotal((t) => t + 1);
-    setStatus('feedback');
-  };
-
-  const running = status === 'playing' || status === 'feedback';
-  // Closing the tab or reloading with reviews already answered warns first (BR-05.1).
-  useLeaveWarning(running && shouldPromptOnExit(answerLog.length));
-  // Leaving through the sidebar asks the same question (slice S1b).
-  useRegisterRun(
-    { mode: 'spaced', running, answeredCount: answerLog.length, totalQuestions: reviewQuestions.length },
-    () => { handleQuitAndProcess(); },
-  );
-
-  // Leaving a running review asks first (BR-05.4); with nothing answered there
-  // is nothing to process, so the mode is left silently.
-  const requestExit = () => {
-    if (!shouldPromptOnExit(answerLog.length)) {
-      onExit();
-      return;
-    }
-    setExitOpen(true);
-  };
-
-  // "Sair e processar respostas": record what was answered through the same path
-  // a finished review uses. A question never answered is never recorded
-  // (BR-05.6 / BR-03) and keeps its SM-2 schedule untouched.
-  const handleQuitAndProcess = () => {
-    setExitOpen(false);
-    const log = processableAnswers(answerLog);
-    if (log.length === 0) {
-      onExit();
-      return;
-    }
-    setStatus('done');
-    recordMutation.mutate({
-      discipline: currentQuestion.discipline,
-      difficulty: 'medium',
-      answers: log,
-    });
-  };
-
-  const quitDialog = (
-    <QuitTestDialog
-      open={exitOpen}
-      prompt={exitPrompt('spaced', answerLog.length, reviewQuestions.length)}
-      onContinue={() => { setExitOpen(false); }}
-      onQuit={handleQuitAndProcess}
-    />
-  );
-
-  // Cross out / restore an alternative (BR-02). Crossing out the chosen one
-  // drops the selection (BR-02.2); nothing here reaches sessions.record or SM-2.
-  const handleToggleEliminate = (option: string) => {
-    setEliminations((prev) => toggleElimination(prev, currentQuestion.id, option));
-    if (eliminationDropsAnswer(selectedAnswer, option)) setSelectedAnswer('');
-  };
-
-  // "Responder depois" (BR-03.1): the review queue is a materialized ≤5 array,
-  // so "end of the queue" is literal — `moveToEnd` with `currentIndex` staying
-  // put, exactly like the Simulado Padrão. NO answer is recorded, so SM-2 is
-  // untouched: only sessions.record moves a card's schedule.
-  const handlePostpone = () => {
-    if (currentIndex >= reviewQuestions.length - 1) return;
-    carriedTimeRef.current.set(
-      currentQuestion.id,
-      (carriedTimeRef.current.get(currentQuestion.id) ?? 0) + questionTime,
+  if (start !== null) {
+    return (
+      <SpacedBoard
+        key={runKey}
+        start={start}
+        notice={notice}
+        onExitToModes={onExit}
+        onRestart={() => {
+          // "Recarregar Revisões" / "Descartar o salvo": the next run is always
+          // a FRESH queue, even when this one arrived through a resume.
+          setStart(null);
+          setNotice(null);
+          setRunIntent('new');
+          void reviewQuery.refetch();
+        }}
+        onReloadFromServer={() => {
+          void resumeRun();
+        }}
+      />
     );
-    setReviewQuestions((prev) => moveToEnd(prev, currentIndex));
-    setSelectedAnswer('');
-    setTimeSpent(0);
-  };
+  }
 
-  const handleNext = () => {
-    if (currentIndex + 1 >= reviewQuestions.length) {
-      setStatus('done');
-      if (answerLog.length > 0) {
-        recordMutation.mutate({
-          discipline: currentQuestion.discipline,
-          difficulty: 'medium',
-          answers: answerLog,
-        });
-      }
-    } else {
-      setCurrentIndex((i) => i + 1);
-      setSelectedAnswer('');
-      setLastCorrect(null);
-      setTimeSpent(0);
-      setStatus('playing');
-    }
-  };
-
-  if (status === 'loading') {
+  if (resuming || reviewQuery.isFetching) {
     return (
       <div className="bg-white rounded-xl p-6 shadow flex items-center justify-center h-48">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#16161a]" />
@@ -233,65 +142,14 @@ export default function SpacedRepetition({ onExit }: { onExit: () => void }): Re
     );
   }
 
-  if (status === 'empty') {
-    return <SpacedEmptyState dueCount={dueCount} />;
-  }
-
-  if (status === 'playing') {
-    return (
-      <>
-        <SpacedPlaying
-          currentIndex={currentIndex}
-          total={reviewQuestions.length}
-          currentQuestion={currentQuestion}
-          selectedAnswer={selectedAnswer}
-          notesAndBookmarks={notesAndBookmarks}
-          disciplineLov={disciplineLov}
-          examBoardLov={examBoardLov}
-          canPostpone={currentIndex < reviewQuestions.length - 1}
-          eliminatedOptions={eliminatedFor(eliminations, currentQuestion.id)}
-          onSelect={setSelectedAnswer}
-          onToggleEliminate={handleToggleEliminate}
-          onPostpone={handlePostpone}
-          onAnswer={handleAnswer}
-          onRequestExit={requestExit}
-        />
-        {quitDialog}
-      </>
-    );
-  }
-
-  if (status === 'feedback') {
-    return (
-      <>
-        <SpacedFeedback
-          currentIndex={currentIndex}
-          total={reviewQuestions.length}
-          currentQuestion={currentQuestion}
-          lastCorrect={lastCorrect}
-          nextIntervalDays={nextIntervalDays}
-          onNext={handleNext}
-          onRequestExit={requestExit}
-        />
-        {quitDialog}
-      </>
-    );
-  }
-
   return (
-    <SpacedDone
-      sessionCorrect={sessionCorrect}
-      sessionTotal={sessionTotal}
-      onReload={() => {
-        void reviewQuery.refetch();
-        setStatus('loading');
-        setCurrentIndex(0);
-        setAnswerLog([]);
-        setSessionCorrect(0);
-        setSessionTotal(0);
-        setEliminations(NO_ELIMINATIONS);
-        carriedTimeRef.current = new Map();
-      }}
-    />
+    <>
+      {notice !== null && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-3 text-sm mb-4">
+          {notice}
+        </div>
+      )}
+      <SpacedEmptyState dueCount={dueCountQuery.data?.count ?? 0} />
+    </>
   );
 }

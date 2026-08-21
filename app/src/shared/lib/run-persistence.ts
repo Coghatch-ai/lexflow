@@ -15,11 +15,13 @@
 // `deadlineAt` is the exact opposite — it is COMPARED, never echoed, so it is
 // normalisable. Two string fields of the same row, opposite rules.
 
+import type { AdaptiveState } from "@shared/domain/adaptive";
 import {
   reconcileRun,
   type AnswerDraft,
   type ExamDraftModeState,
   type ExamDraftSetup,
+  type ReconciledRun,
   type RunMode,
 } from "@shared/domain/exam-draft";
 
@@ -78,6 +80,132 @@ export function standardDraftPayload(run: StandardRunState): StandardDraftPayloa
     token: run.token,
   };
 }
+
+/** The live Revisão Espaçada run, as the screen holds it. */
+export interface SpacedRunState {
+  /** The ≤5 review queue in the order the student sees it (`moveToEnd` order). */
+  questionIds: readonly string[];
+  cursor: number;
+  answers: readonly AnswerDraft[];
+  token: string | null;
+}
+
+/** Exactly the input `examDrafts.save` takes for a spaced run. */
+export interface SpacedDraftPayload {
+  mode: "spaced";
+  setup: Extract<ExamDraftSetup, { mode: "spaced" }>;
+  questionIds: string[];
+  cursor: number;
+  answers: AnswerDraft[];
+  modeState: Extract<ExamDraftModeState, { mode: "spaced" }>;
+  /** Always 0: the review has no run clock to persist (D8). */
+  elapsedSeconds: 0;
+  token: string | null;
+}
+
+/**
+ * The spaced payload: ONLY the universal columns (D8). `setup` and `modeState`
+ * are both the bare `{ mode: 'spaced' }` — the queue is fully described by
+ * `questionIds`, and `interval`/`repetitions` are the student's state in the
+ * CATALOG, not progress: they are re-fetched on resume (`questions.byIds`), never
+ * snapshotted, or the resumed screen would show a "N acertos" that aged in jsonb.
+ *
+ * `elapsedSeconds` is 0 because this screen has no run clock. Summing the
+ * per-question timer here to make BR-05.10 "look" satisfied would invent a
+ * number nothing measured.
+ */
+export function spacedDraftPayload(run: SpacedRunState): SpacedDraftPayload {
+  return {
+    mode: "spaced",
+    setup: { mode: "spaced" },
+    questionIds: [...run.questionIds],
+    cursor: run.cursor,
+    answers: [...run.answers],
+    modeState: { mode: "spaced" },
+    elapsedSeconds: 0,
+    // Verbatim. See the file header: normalising this kills the guard.
+    token: run.token,
+  };
+}
+
+/** The Simulado Adaptativo setup, as the setup column stores it. */
+export interface AdaptiveSetup {
+  discipline: string;
+  totalQuestions: number;
+}
+
+/** The live Simulado Adaptativo run, as the screen holds it. */
+export interface AdaptiveRunState {
+  setup: AdaptiveSetup;
+  /**
+   * The questions SERVED so far — `pool.questions`, not a materialized queue.
+   * It holds a DUPLICATE whenever a postponed question came back, and that is
+   * exactly what must be replayed: the cursor is a position in this list.
+   */
+  questionIds: readonly string[];
+  cursor: number;
+  answers: readonly AnswerDraft[];
+  /** The ladder, verbatim — `nextDifficulty` is pure over these streaks. */
+  adaptive: AdaptiveState;
+  /** The postponed FIFO, oldest first (BR-03.1). */
+  deferredIds: readonly string[];
+  elapsedSeconds: number;
+  token: string | null;
+}
+
+/** Exactly the input `examDrafts.save` takes for an adaptive run. */
+export interface AdaptiveDraftPayload {
+  mode: "adaptive";
+  setup: Extract<ExamDraftSetup, { mode: "adaptive" }>;
+  questionIds: string[];
+  cursor: number;
+  answers: AnswerDraft[];
+  modeState: Extract<ExamDraftModeState, { mode: "adaptive" }>;
+  elapsedSeconds: number;
+  token: string | null;
+}
+
+/**
+ * The adaptive payload. `adaptive` travels verbatim, which is the whole reason
+ * the ladder survives an exit: `nextDifficulty` is pure over the streaks, so a
+ * resumed run computes the same next difficulty an uninterrupted one would.
+ *
+ * `deferredIds` IS progress (BR-03) and is kept in FIFO order, narrowed to ids
+ * the served list actually knows: the resume rehydrates the FIFO's bodies from
+ * the same `questions.byIds` call as the queue, so a parked id nothing serves
+ * could never come back and would only keep a slot from `shouldServeDeferred`.
+ *
+ * The candidate `questionPool` is deliberately NOT here — it is re-drawn from
+ * the persisted `setup` on resume, and freezing 100 random rows in jsonb would
+ * pin the run to a catalog snapshot for no gain.
+ */
+export function adaptiveDraftPayload(run: AdaptiveRunState): AdaptiveDraftPayload {
+  const served = new Set(run.questionIds);
+  return {
+    mode: "adaptive",
+    setup: { mode: "adaptive", ...run.setup },
+    questionIds: [...run.questionIds],
+    cursor: run.cursor,
+    answers: [...run.answers],
+    modeState: {
+      mode: "adaptive",
+      adaptive: run.adaptive,
+      totalQuestions: run.setup.totalQuestions,
+      deferredIds: run.deferredIds.filter((id) => served.has(id)),
+    },
+    elapsedSeconds: run.elapsedSeconds,
+    // Verbatim. See the file header: normalising this kills the guard.
+    token: run.token,
+  };
+}
+
+/**
+ * Any study mode's save payload. The hook (`use-run-persistence.ts`) takes ONE
+ * of these from the screen's own snapshot instead of building it: the three
+ * modes disagree about `setup`/`modeState` and about nothing else, so the
+ * plumbing has no business knowing which one it is carrying.
+ */
+export type RunDraftPayload = StandardDraftPayload | SpacedDraftPayload | AdaptiveDraftPayload;
 
 /** The columns of an `exam_drafts` row a resume reads (`examDrafts.get`). */
 export interface PersistedDraft {
@@ -177,23 +305,40 @@ function carriedTimeOf(
  * never happen: it orders by `random()`, so it would swap the question set out
  * from under the cursor.
  */
-export function resumeStateFrom<Q extends { id: string }>(
+/**
+ * The half every resume shares: reconcile the persisted run against what the
+ * catalog still has, then rebuild the queue BY THE PERSISTED ORDER.
+ *
+ * Rebuilding from the fetch's own order is the bug this exists to prevent:
+ * `questions.byIds` uses `inArray`, which answers in DATABASE order AND
+ * de-duplicates, while the adaptive queue legitimately serves the same question
+ * twice. Walking the reconciled ids and looking each one up puts both copies
+ * back where they were.
+ */
+function rebuildQueue<Q extends { id: string }>(
   draft: PersistedDraft,
   fetched: readonly Q[],
-): ResumeState<Q> {
+): { reconciled: ReconciledRun; questions: Q[]; byId: Map<string, Q> } {
   const byId = new Map(fetched.map((q) => [q.id, q]));
   const reconciled = reconcileRun(
     { questionIds: draft.questionIds, cursor: draft.cursor, answers: draft.answers },
     byId.keys(),
   );
-
-  if (reconciled.discard) return { discard: true, dropped: reconciled.dropped };
-
   const questions: Q[] = [];
   for (const id of reconciled.questionIds) {
     const question = byId.get(id);
     if (question !== undefined) questions.push(question);
   }
+  return { reconciled, questions, byId };
+}
+
+export function resumeStateFrom<Q extends { id: string }>(
+  draft: PersistedDraft,
+  fetched: readonly Q[],
+): ResumeState<Q> {
+  const { reconciled, questions } = rebuildQueue(draft, fetched);
+
+  if (reconciled.discard) return { discard: true, dropped: reconciled.dropped };
 
   return {
     discard: false,
@@ -205,6 +350,136 @@ export function resumeStateFrom<Q extends { id: string }>(
     elapsedSeconds: draft.elapsedSeconds,
     timeSpent: 0,
     checked: false,
+    dropped: reconciled.dropped,
+  };
+}
+
+/** What the Revisão Espaçada must put back on screen to continue (D8). */
+export type SpacedResume<Q> =
+  | { discard: true; dropped: number }
+  | {
+      discard: false;
+      /** The frozen ≤5 queue, in the persisted order. */
+      questions: Q[];
+      cursor: number;
+      answers: AnswerDraft[];
+      /** The current review restarts from zero (D8) — no carried time exists. */
+      timeSpent: 0;
+      dropped: number;
+    };
+
+/**
+ * Rebuilds a Revisão Espaçada from the saved row plus `questions.byIds`.
+ *
+ * `questions.reviewQueue` is NEVER re-queried here (criterion 5): the due set
+ * changes as SM-2 advances and as the day passes, so re-querying would swap the
+ * questions out from under the cursor. The SM-2 columns the screen displays
+ * come from `byIds` itself, which returns them for the signed-in student.
+ *
+ * There is no `carriedTime`: the spaced `modeState` is the bare `{ mode }`
+ * (D8), so the second visit to a postponed review starts its timer at zero —
+ * the same lossiness already accepted for the current question everywhere else.
+ */
+export function resumeSpacedFrom<Q extends { id: string }>(
+  draft: PersistedDraft,
+  fetched: readonly Q[],
+): SpacedResume<Q> {
+  const { reconciled, questions } = rebuildQueue(draft, fetched);
+  if (reconciled.discard) return { discard: true, dropped: reconciled.dropped };
+  return {
+    discard: false,
+    questions,
+    cursor: reconciled.cursor,
+    answers: reconciled.answers,
+    timeSpent: 0,
+    dropped: reconciled.dropped,
+  };
+}
+
+/** What the Simulado Adaptativo must put back on screen to continue (D8). */
+export type AdaptiveResume<Q> =
+  | { discard: true; dropped: number }
+  | {
+      discard: false;
+      /** The SERVED list, duplicates included, in the persisted order. */
+      questions: Q[];
+      cursor: number;
+      answers: AnswerDraft[];
+      /** Verbatim — the ladder continues instead of restarting at `medium`. */
+      adaptive: AdaptiveState;
+      setup: AdaptiveSetup;
+      /** The postponed FIFO's bodies, oldest first. */
+      deferred: Q[];
+      elapsedSeconds: number;
+      timeSpent: 0;
+      dropped: number;
+    };
+
+const EMPTY_ADAPTIVE: AdaptiveState = {
+  currentDifficulty: "medium",
+  consecutiveCorrect: 0,
+  consecutiveWrong: 0,
+  totalCorrect: 0,
+  totalAnswered: 0,
+  difficultyHistory: [],
+};
+
+/** The ladder + target of a row that really is an adaptive one. */
+function adaptiveStateOf(draft: PersistedDraft): {
+  adaptive: AdaptiveState;
+  totalQuestions: number;
+  deferredIds: readonly string[];
+} {
+  if (draft.modeState.mode !== "adaptive") {
+    return { adaptive: EMPTY_ADAPTIVE, totalQuestions: draft.questionIds.length, deferredIds: [] };
+  }
+  const { adaptive, totalQuestions, deferredIds } = draft.modeState;
+  return { adaptive, totalQuestions, deferredIds };
+}
+
+/** The discipline of a row that really is an adaptive one (`''` = all). */
+function adaptiveDisciplineOf(draft: PersistedDraft): string {
+  return draft.setup.mode === "adaptive" ? draft.setup.discipline : "";
+}
+
+/**
+ * Rebuilds a Simulado Adaptativo from the saved row plus `questions.byIds`.
+ *
+ * The candidate pool is NOT rebuilt here — the screen re-draws it from the
+ * persisted `setup` — because it is not progress: `fetchQuestion` already
+ * treats anything in the served list as seen, so a fresh draw cannot serve a
+ * question twice.
+ *
+ * `deferred` is reconstructed in FIFO order from the SURVIVING ids: a question
+ * that left the catalog leaves the FIFO **and** the queue together, or the
+ * simulado would hold a slot open for a question that can never be served
+ * (`shouldServeDeferred` counts it) and `sessions.record` would eventually be
+ * handed an FK that no longer exists.
+ */
+export function resumeAdaptiveFrom<Q extends { id: string }>(
+  draft: PersistedDraft,
+  fetched: readonly Q[],
+): AdaptiveResume<Q> {
+  const { reconciled, questions, byId } = rebuildQueue(draft, fetched);
+  if (reconciled.discard) return { discard: true, dropped: reconciled.dropped };
+
+  const { adaptive, totalQuestions, deferredIds } = adaptiveStateOf(draft);
+  const deferred: Q[] = [];
+  for (const id of deferredIds) {
+    const question = byId.get(id);
+    if (question !== undefined) deferred.push(question);
+  }
+
+  return {
+    discard: false,
+    questions,
+    cursor: reconciled.cursor,
+    answers: reconciled.answers,
+    adaptive,
+    setup: { discipline: adaptiveDisciplineOf(draft), totalQuestions },
+    deferred,
+    elapsedSeconds: draft.elapsedSeconds,
+    timeSpent: 0,
     dropped: reconciled.dropped,
   };
 }
@@ -325,7 +600,7 @@ export function isConflictError(error: unknown): boolean {
  * dialog with its own two choices (`conflictFor`); these are the failures that
  * used to be swallowed into a dead button.
  */
-export type RunSaveFailureKind = "offline" | "auth" | "claim" | "server";
+export type RunSaveFailureKind = "offline" | "auth" | "claim" | "server" | "busy";
 
 export interface RunSaveFailure {
   kind: RunSaveFailureKind;
@@ -359,6 +634,16 @@ const RUN_SAVE_FAILURES: Record<RunSaveFailureKind, RunSaveFailure> = {
     title: "Não foi possível salvar agora.",
     body: "O servidor recusou o salvamento. Suas respostas continuam nesta aba — tente de novo em instantes.",
     dismissLabel: "Tentar de novo",
+  },
+  // Not an error at all: an exit was asked for while one is already running
+  // (the sidebar guard clicking `save()` during the final flush of "Próxima").
+  // The old code answered `false` in silence and the student clicked into
+  // nothing — this is that same refusal, said out loud.
+  busy: {
+    kind: "busy",
+    title: "Ainda estamos salvando este teste.",
+    body: "Aguarde um instante e tente de novo — nada foi perdido.",
+    dismissLabel: "Entendi",
   },
 };
 
