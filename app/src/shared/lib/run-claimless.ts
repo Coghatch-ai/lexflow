@@ -29,6 +29,7 @@
 import { boundedCall } from "./settle-within";
 import {
   claimFor,
+  isConflictError,
   type ClaimOutcome,
   type DraftClaim,
   type PersistedDraft,
@@ -259,11 +260,144 @@ export function claimlessSaveAdoption(
   return claimFor(probe.row.id, probe.row.lastSavedAt) ?? null;
 }
 
+/**
+ * The echo of ONE payload whose write may still be in the air — the memory that
+ * makes a late commit recognisable on a LATER attempt (Codex round four).
+ *
+ * `claimlessSaveAdoption` proves ownership against the payload of the attempt
+ * that is running RIGHT NOW, which closes the window only while the two are the
+ * same payload. They stop being the same the moment the student answers again:
+ *
+ *   1. the first claimless save times out; the probe reads no row (the insert
+ *      has not committed yet), so the write is owed and the error stands;
+ *   2. the abandoned request COMMITS late;
+ *   3. the student answers more questions, so the retry carries a NEW payload;
+ *   4. the retry's insert meets its own row, the router answers
+ *      `OVERWRITE_CONFLICT`, and the echo of the RETRY cannot match a row
+ *      written by the FIRST attempt — the row is judged foreign, the conflict
+ *      is terminal (`raiseIfConflict` closes the scheduler), and the student is
+ *      locked out of an exam by their own first write.
+ *
+ * Remembering the echo turns step 4 around: the row still is a verbatim echo of
+ * a payload THIS TAB sent, only an older one.
+ */
+interface PendingEcho {
+  /** `saveEcho` of the payload that was sent. */
+  echo: string;
+  /** Its deadline, compared by INSTANT like everywhere else in this file. */
+  deadlineAt: string | null;
+}
+
+/**
+ * The echoes of this run's writes with an UNKNOWN outcome. Mutable on purpose
+ * and owned by the caller (a ref in `use-run-persistence.ts`), because it must
+ * outlive one `saveRun` call and die with the run — a module-level singleton
+ * would leak between runs, between modes and between tests.
+ */
+export interface PendingEchoes {
+  readonly echoes: PendingEcho[];
+}
+
+/**
+ * How many unknown-outcome echoes one run may hold, and WHY the cap can be this
+ * small: the row is created by an INSERT … `onConflictDoNothing`, so at most ONE
+ * claimless save in the life of a run ever writes it — the earliest attempt
+ * that reached the database. Every later claimless save meets that row and is
+ * refused. So the candidates worth remembering are the OLDEST ones, and the cap
+ * DROPS THE NEW ONE rather than evicting the first (`rememberPendingEcho`):
+ * evicting the oldest would throw away precisely the likeliest writer.
+ *
+ * Four is already generous. An attempt only lands here with an unknown outcome
+ * — a CONFLICT is proof it wrote nothing and is never remembered — and each
+ * unknown outcome costs a full `SAVE_TIMEOUT_MS` + `PROBE_TIMEOUT_MS` (20 s),
+ * so filling the list takes ~80 s of uninterrupted silence. Past that the honest
+ * answer is the fail-closed one this file gives everywhere: refuse, and let the
+ * BR-05.8 dialog say so.
+ */
+export const MAX_PENDING_ECHOES = 4;
+
+/** A fresh, empty memory — one per run. */
+export function createPendingEchoes(): PendingEchoes {
+  return { echoes: [] };
+}
+
+/**
+ * Forget everything: the run's identity is now known (a save landed, or a row
+ * was adopted) or the run left this tab. From either point on, no save is
+ * claimless any more and an echo could only ever be a false positive.
+ */
+export function clearPendingEchoes(pending: PendingEchoes): void {
+  pending.echoes.length = 0;
+}
+
+/**
+ * Remember one payload whose write may have landed without telling us.
+ *
+ * ONLY unknown outcomes belong here, and that is the discipline that keeps the
+ * memory honest — the caller filters CONFLICTs out (`saveRun`): a CONFLICT is
+ * the SERVER answering "your insert wrote nothing", which is proof that this
+ * payload is not the row and must never be adoptable.
+ *
+ * Deduplicated: the scheduler resends the SAME payload until the student
+ * answers again, and one payload is one candidate however many times it flew.
+ */
+export function rememberPendingEcho(pending: PendingEchoes, sent: RunDraftPayload): void {
+  const entry: PendingEcho = { echo: saveEcho(sent), deadlineAt: sentDeadline(sent) };
+  const known = pending.echoes.some(
+    (seen) => seen.echo === entry.echo && seen.deadlineAt === entry.deadlineAt,
+  );
+  if (known || pending.echoes.length >= MAX_PENDING_ECHOES) return;
+  pending.echoes.push(entry);
+}
+
+/**
+ * The claim for a row that echoes back a payload this tab sent EARLIER — the
+ * cross-attempt half of `claimlessSaveAdoption`.
+ *
+ * Same proof, same strength: `exam_drafts` is UNIQUE on `(user_id, mode)`, the
+ * read is user-scoped, and every echoed field is compared (`saveEcho` is
+ * compiler-exhaustive, `sameDeadline` covers the one field the server rewrites).
+ * A row matching a remembered echo is a row carrying THIS student's queue draw,
+ * THIS run's cursor, answers and per-answer `timeSpent`, and — in the prova real
+ * — THIS run's absolute deadline to the millisecond, which no independent run
+ * reproduces. What this adds over the current-payload check is only AGE: the
+ * proof is content identity, and content identity does not decay.
+ *
+ * The mirror risk it does NOT open: adopting a genuinely foreign row. The set
+ * of adoptable rows grows by at most `MAX_PENDING_ECHOES` payloads that this tab
+ * actually sent, never by "any row in this mode" — the refusal that
+ * `claimlessSaveAdoption` documents as the rejected alternative stays rejected.
+ *
+ * What it DOES cost is freshness: the adopted row holds the OLDER payload, so
+ * the write that is running now is still owed. `saveRun` reports that as
+ * `owed: true` instead of pretending the current answers are on the server —
+ * the `ok: true` contract of `save-scheduler.ts` depends on the difference.
+ */
+export function pendingEchoAdoption(
+  probe: { read: boolean; row: PersistedDraft | null },
+  pending: PendingEchoes,
+): DraftClaim | null {
+  const row = probe.row;
+  if (!probe.read || row === null) return null;
+  const rowEcho = saveEcho(row);
+  const mine = pending.echoes.some(
+    (seen) => seen.echo === rowEcho && sameDeadline(row.deadlineAt, seen.deadlineAt),
+  );
+  return mine ? (claimFor(row.id, row.lastSavedAt) ?? null) : null;
+}
+
 /** What one save landed: the new token, and the id if it had to be recovered. */
 export interface SavedRun {
   lastSavedAt: string;
   /** Non-null ONLY when the row was adopted after a lost response. */
   draftId: string | null;
+  /**
+   * True when the row is ours but holds an EARLIER payload (adopted through a
+   * pending echo): the token is real, the answers of THIS save are not on the
+   * server yet, and the caller must re-arm the write instead of reporting it
+   * landed.
+   */
+  owed: boolean;
 }
 
 /** The two calls `saveRun` needs — the mutation, and the user-scoped re-read. */
@@ -325,15 +459,45 @@ async function probeWithin(io: SaveRunIO): Promise<{ read: boolean; row: Persist
  * retried by the next debounce (`save-scheduler.ts` re-arms `dirty`) and an
  * unproven CONFLICT still stops the autosave and raises its dialog. Only a
  * proven echo of our own write turns the failure into the success it was.
+ *
+ * TWO echoes are proof, not one (Codex round four): the payload of THIS attempt
+ * and every payload of an earlier attempt whose outcome was never learned
+ * (`pending`). Without the second the recovery only worked while nothing moved
+ * between the two attempts — and a student who answers one more question while
+ * the first write commits late collides with their own row, terminally. The
+ * memory is discarded the moment the run's identity is known, and a CONFLICT is
+ * never remembered because it is the server proving that payload wrote nothing.
  */
-export async function saveRun(sent: RunDraftPayload, io: SaveRunIO): Promise<SavedRun> {
+export async function saveRun(
+  sent: RunDraftPayload,
+  io: SaveRunIO,
+  pending: PendingEchoes,
+): Promise<SavedRun> {
   try {
     const saved = await boundedCall(io.save(sent), SAVE_TIMEOUT_MS);
-    return { lastSavedAt: saved.lastSavedAt, draftId: null };
+    // The token is learned: from here every save carries it, no save is
+    // claimless, and a remembered echo could only be a false positive.
+    clearPendingEchoes(pending);
+    return { lastSavedAt: saved.lastSavedAt, draftId: null, owed: false };
   } catch (error: unknown) {
     if (!needsClaimlessSaveProbe(sent.token !== null)) throw error;
-    const adopted = claimlessSaveAdoption(await probeWithin(io), sent);
-    if (adopted === null) throw error;
-    return { lastSavedAt: adopted.lastSavedAt, draftId: adopted.id };
+    const probe = await probeWithin(io);
+    const mine = claimlessSaveAdoption(probe, sent);
+    if (mine !== null) {
+      clearPendingEchoes(pending);
+      return { lastSavedAt: mine.lastSavedAt, draftId: mine.id, owed: false };
+    }
+    // The row this attempt found is the row an EARLIER attempt wrote: ours, one
+    // payload behind. Adopt it and say the current write is still owed.
+    const late = pendingEchoAdoption(probe, pending);
+    if (late !== null) {
+      clearPendingEchoes(pending);
+      return { lastSavedAt: late.lastSavedAt, draftId: late.id, owed: true };
+    }
+    // Nothing adopted, so this write's fate is unknown — unless the server
+    // ANSWERED (a CONFLICT means the insert wrote 0 rows, which is proof this
+    // payload is not on the server and must never become adoptable).
+    if (!isConflictError(error)) rememberPendingEcho(pending, sent);
+    throw error;
   }
 }

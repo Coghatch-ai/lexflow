@@ -254,8 +254,19 @@ export function createSaveScheduler<T>({
         await pending;
         pending = inFlight;
       }
-      // …then, only if the payload moved while it flew, write once more.
-      if (dirty && !closed) await run();
+      // …then, while the payload keeps moving, keep writing. A LOOP, not one
+      // more write (Codex round four): `run` clears `dirty` before dispatching,
+      // so it can only turn again from a `schedule()` that landed WHILE that
+      // write flew — one more answer confirmed, or the caller re-arming the
+      // payload a `saveRun` adoption left owed (`SavedRun.owed`). Writing once
+      // there answered `ok: true` with that payload still only in the tab,
+      // which is the exact contract the deadline door leans on before
+      // `processReal` settles the row.
+      //
+      // It terminates: every turn either lands (and only an outside
+      // `schedule()` can re-arm) or throws, and a throw leaves through the
+      // `catch` below as `ok: false`. `closed` ends it unconditionally.
+      while (dirty && !closed) await run();
       return { ok: true, value: last };
     } catch (error: unknown) {
       return { ok: false, error };

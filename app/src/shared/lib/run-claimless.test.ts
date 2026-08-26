@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   claimlessSaveAdoption,
   claimlessVerdictFor,
+  createPendingEchoes,
   needsClaimlessProbe,
   needsClaimlessSaveProbe,
   saveRun,
@@ -318,15 +319,19 @@ describe("saveRun — a first save whose response is lost", () => {
         Promise.resolve({ read: true, row: server.row() }),
     };
 
-    const first = await saveRun(standardDraftPayload(run({ token: null })), io);
+    const pending = createPendingEchoes();
+    const first = await saveRun(standardDraftPayload(run({ token: null })), io, pending);
     expect(first.draftId).toBe("row-1");
     expect(first.lastSavedAt).toBe(server.row()?.lastSavedAt);
+    // The row IS this payload, so nothing is left owed.
+    expect(first.owed).toBe(false);
 
     // The retry now carries the adopted token: an UPDATE of our own row, not a
     // second INSERT. Without the adoption this line throws CONFLICT forever.
     const second = await saveRun(
       standardDraftPayload(run({ token: first.lastSavedAt, cursor: 2 })),
       io,
+      pending,
     );
     expect(second.lastSavedAt).not.toBe(first.lastSavedAt);
     expect(server.row()?.cursor).toBe(2);
@@ -334,6 +339,7 @@ describe("saveRun — a first save whose response is lost", () => {
     const third = await saveRun(
       standardDraftPayload(run({ token: second.lastSavedAt, cursor: 3 })),
       io,
+      pending,
     );
     expect(server.row()?.lastSavedAt).toBe(third.lastSavedAt);
   });
@@ -346,10 +352,14 @@ describe("saveRun — a first save whose response is lost", () => {
     const server = fakeDraftsServer();
     const payload = standardDraftPayload(run({ token: null }));
     expect(() => server.save(payload)).not.toThrow(); // committed, response lost
-    const adopted = await saveRun(payload, {
-      save: (input) => Promise.resolve(server.save(input)),
-      probe: () => Promise.resolve({ read: true, row: server.row() }),
-    });
+    const adopted = await saveRun(
+      payload,
+      {
+        save: (input) => Promise.resolve(server.save(input)),
+        probe: () => Promise.resolve({ read: true, row: server.row() }),
+      },
+      createPendingEchoes(),
+    );
     expect(adopted.draftId).toBe("row-1");
     expect(adopted.lastSavedAt).toBe(server.row()?.lastSavedAt);
   });
@@ -358,28 +368,40 @@ describe("saveRun — a first save whose response is lost", () => {
     const server = fakeDraftsServer();
     server.save(standardDraftPayload(run({ token: null, questionIds: ["z9"] }))); // other device
     await expect(
-      saveRun(standardDraftPayload(run({ token: null })), {
-        save: (input) => Promise.resolve(server.save(input)),
-        probe: () => Promise.resolve({ read: true, row: server.row() }),
-      }),
+      saveRun(
+        standardDraftPayload(run({ token: null })),
+        {
+          save: (input) => Promise.resolve(server.save(input)),
+          probe: () => Promise.resolve({ read: true, row: server.row() }),
+        },
+        createPendingEchoes(),
+      ),
     ).rejects.toMatchObject({ data: { code: "CONFLICT" } });
   });
 
   it("rethrows when the probe cannot read — a retry beats a guess", async () => {
     await expect(
-      saveRun(standardDraftPayload(run({ token: null })), {
-        save: () => Promise.reject(LOST_RESPONSE),
-        probe: () => Promise.resolve({ read: false, row: null }),
-      }),
+      saveRun(
+        standardDraftPayload(run({ token: null })),
+        {
+          save: () => Promise.reject(LOST_RESPONSE),
+          probe: () => Promise.resolve({ read: false, row: null }),
+        },
+        createPendingEchoes(),
+      ),
     ).rejects.toBe(LOST_RESPONSE);
   });
 
   it("leaves a save that carried a token exactly as it was", async () => {
     await expect(
-      saveRun(standardDraftPayload(run({ token: PG_TOKEN })), {
-        save: () => Promise.reject(LOST_RESPONSE),
-        probe: () => Promise.reject(new Error("must not be probed")),
-      }),
+      saveRun(
+        standardDraftPayload(run({ token: PG_TOKEN })),
+        {
+          save: () => Promise.reject(LOST_RESPONSE),
+          probe: () => Promise.reject(new Error("must not be probed")),
+        },
+        createPendingEchoes(),
+      ),
     ).rejects.toBe(LOST_RESPONSE);
   });
 });

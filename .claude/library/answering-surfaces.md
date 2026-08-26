@@ -363,6 +363,24 @@ answered") is **not** satisfied product-wide until M1 lands.
    `OVERWRITE_CONFLICT` de um save SEM token deixou de ser terminal por suposição e passou a ser
    terminal por **prova**: com `token: null` o CONFLICT só diz "existe linha em (user, mode)",
    nunca de quem; sem eco, o CONFLICT original segue de pé com o diálogo do BR-05.8.
+   **O eco atravessa tentativas** (4ª revisão adversarial): comparar só com o payload da tentativa
+   ATUAL fecha a janela apenas enquanto o payload não anda. Cadeia que sobrava: o 1º save estoura o
+   teto → a sondagem não lê linha nenhuma (o insert ainda não commitou) → a escrita **commita
+   tarde** → o aluno responde mais uma questão → o retry encontra a própria linha, o eco do RETRY
+   não bate, a linha é julgada estrangeira e o `OVERWRITE_CONFLICT` fecha a prova. Agora todo
+   payload com desfecho **desconhecido** vira um eco lembrado (`PendingEchoes`, `run-claimless.ts`):
+   a adoção aceita a linha que ecoa QUALQUER eco pendente, não só o payload atual. Limites, porque
+   a memória é o risco: no máximo `MAX_PENDING_ECHOES = 4`, e o **novo** é descartado quando enche
+   (a linha nasce de um INSERT … `onConflictDoNothing`, então quem a escreveu é a tentativa MAIS
+   ANTIGA que chegou ao banco); um `OVERWRITE_CONFLICT` **nunca** é lembrado (o servidor respondeu
+   que aquele insert gravou 0 linhas); e tudo é esquecido quando a identidade fica conhecida (save
+   que pousa, adoção, `adopt`, `close`, `discardSaved`). Adotar linha estrangeira continua fora de
+   alcance: o eco é o conteúdo inteiro (fila sorteada, cursor, respostas com `timeSpent`,
+   `elapsedSeconds`, e no real o `deadlineAt` ao milissegundo) de um payload que ESTA aba enviou.
+   Adotar por eco antigo devolve a linha com o payload VELHO, então a escrita atual continua
+   **devendo** (`SavedRun.owed`): o `sendVia` re-arma, e o `flush` passou a drenar `dirty` em laço —
+   escrever uma vez só devolvia `ok: true` com a última resposta ainda só na aba, que é exatamente
+   o contrato de que a porta do prazo depende antes do `processReal`.
 5. **Duas portas de auto-submit, uma sessão.** Aba aberta no zero: `flush()` → `processReal()` →
    tela de revisão montada da MEMÓRIA (critério 4). Aba fechada: nada na hora (não há scheduler) —
    liquida no próximo contato autenticado. Os dois podem disparar; o `DELETE` do rascunho é a

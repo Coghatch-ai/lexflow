@@ -40,8 +40,12 @@ import {
 } from "../lib/run-persistence";
 import {
   claimlessVerdictFor,
+  clearPendingEchoes,
+  createPendingEchoes,
   needsClaimlessProbe,
+  rememberPendingEcho,
   saveRun,
+  type PendingEchoes,
   type SaveRunIO,
 } from "../lib/run-claimless";
 import type { RunMode } from "@shared/domain/exam-draft";
@@ -102,6 +106,13 @@ interface PersistenceRefs {
   token: MutableRefObject<string | null>;
   /** Whether the FAILING save carried a token — picks the conflict copy. */
   hadToken: MutableRefObject<boolean>;
+  /**
+   * The echoes of this run's claimless writes with an unknown outcome, so a
+   * commit that lands LATE is still recognisable as ours on a later attempt
+   * (`run-claimless.ts`). A ref, and cleared with the identity: it must outlive
+   * one save and die with the run.
+   */
+  pendingEchoes: MutableRefObject<PendingEchoes>;
   send: MutableRefObject<() => Promise<string>>;
   /** The same save over a transport that survives the tab (`exit-save.ts`). */
   exitSend: MutableRefObject<() => Promise<string>>;
@@ -198,11 +209,18 @@ function sendVia(
     // still the payload the server was given. A bound applied from outside
     // (`save-scheduler`'s dispatch) could only report the failure — by the next
     // attempt the payload has moved and nothing can prove the row is ours.
-    const saved = await saveRun(payload, io);
+    const saved = await saveRun(payload, io, refs.pendingEchoes.current);
     // Written the instant the mutation resolves, verbatim.
     refs.token.current = saved.lastSavedAt;
     // An adopted row comes WITH its id, so the read below is already paid for.
     if (saved.draftId !== null) refs.draftId.current = saved.draftId;
+    // Adopted through a PENDING echo: the row is ours, but it holds the payload
+    // of an earlier attempt — the answers of THIS send are not on the server.
+    // Re-arm the debounce so the next write (now carrying the token, so an
+    // UPDATE) delivers them. Reporting this as landed would break the `ok: true`
+    // contract `flush` gives the deadline door, which is the failure that put
+    // the review screen over answers living only in the tab.
+    if (saved.owed) refs.scheduler.current?.schedule();
     // One extra read per run, right after the insert that created it. It is
     // best-effort HERE (the save itself already landed); the exit path tries
     // again and refuses to record without it.
@@ -232,11 +250,28 @@ function exitSendVia(
   return async (): Promise<string> => {
     const payload = snapshotRef.current(refs.token.current);
     if (payload === null) return refs.token.current ?? "";
-    refs.hadToken.current = refs.token.current !== null;
-    const saved = await save(payload);
+    const claimless = refs.token.current === null;
+    refs.hadToken.current = !claimless;
+    let saved: { lastSavedAt: string };
+    try {
+      saved = await save(payload);
+    } catch (error: unknown) {
+      // A `keepalive` write is finished by the browser AFTER the document is
+      // gone, so a claimless exit write whose answer we never saw is the same
+      // late commit `saveRun` recovers from — and on a tab that SURVIVES
+      // (`visibilitychange`), the next normal save is the one that would meet
+      // that row and be told it is foreign. Remembering the echo here is what
+      // lets it be recognised; a CONFLICT is excluded for the usual reason (the
+      // server answered that this payload wrote nothing).
+      if (claimless && !isConflictError(error)) {
+        rememberPendingEcho(refs.pendingEchoes.current, payload);
+      }
+      throw error;
+    }
     // Written the moment it lands — a tab that SURVIVES (a mere
     // `visibilitychange`) must not keep the token this write just superseded.
     refs.token.current = saved.lastSavedAt;
+    clearPendingEchoes(refs.pendingEchoes.current);
     return saved.lastSavedAt;
   };
 }
@@ -299,6 +334,9 @@ function schedulerOf(refs: PersistenceRefs): SaveScheduler<string> {
 function forgetIdentity(refs: PersistenceRefs): void {
   refs.draftId.current = null;
   refs.token.current = null;
+  // The echoes belong to the run that just left this tab: kept, they would be
+  // offered as proof of ownership over a row the NEXT run wrote.
+  clearPendingEchoes(refs.pendingEchoes.current);
 }
 
 /**
@@ -360,6 +398,47 @@ async function flushRun(refs: PersistenceRefs, mode: RunMode): Promise<FlushOutc
 export type RunSnapshot = (token: string | null) => RunDraftPayload | null;
 
 /**
+ * The run's mutable identity, as ONE container of stable ref cells.
+ *
+ * Each `useRef` on its own line and at the top level of a hook: the ref OBJECTS
+ * are stable, so the container rebuilt every render still points at the same
+ * cells the scheduler's closure captured on the first one. Extracted out of
+ * `useRunPersistence` only so that function stays inside its size budget —
+ * it is the same code, in the same order, called unconditionally.
+ */
+function usePersistenceRefs(
+  setConflict: (conflict: RunConflict | null) => void,
+  setFailure: (failure: RunSaveFailure | null) => void,
+): PersistenceRefs {
+  const draftIdRef = useRef<string | null>(null);
+  const tokenRef = useRef<string | null>(null);
+  const hadTokenRef = useRef(false);
+  const pendingEchoesRef = useRef(createPendingEchoes());
+  const sendRef = useRef<() => Promise<string>>(() => Promise.resolve(""));
+  const exitSendRef = useRef<() => Promise<string>>(() => Promise.resolve(""));
+  const keepAliveRef = useRef<() => Promise<string>>(() => Promise.resolve(""));
+  const learnDraftIdRef = useRef<() => Promise<void>>(() => Promise.resolve());
+  const probeRowRef = useRef<() => Promise<{ read: boolean; row: PersistedDraft | null }>>(() =>
+    Promise.resolve({ read: false, row: null }),
+  );
+  const schedulerRef = useRef<SaveScheduler<string> | null>(null);
+  return {
+    draftId: draftIdRef,
+    token: tokenRef,
+    hadToken: hadTokenRef,
+    pendingEchoes: pendingEchoesRef,
+    send: sendRef,
+    exitSend: exitSendRef,
+    keepAlive: keepAliveRef,
+    learnDraftId: learnDraftIdRef,
+    probeRow: probeRowRef,
+    scheduler: schedulerRef,
+    setConflict,
+    setFailure,
+  };
+}
+
+/**
  * @param mode Which `exam_drafts` row this run owns. Every call the hook makes
  *   is keyed by it — `get` (learning the id back), `discard` — so a screen can
  *   never read or drop another mode's run.
@@ -374,34 +453,7 @@ export function useRunPersistence(mode: RunMode, snapshot: RunSnapshot): RunPers
 
   const snapshotRef = useRef(snapshot);
   snapshotRef.current = snapshot;
-
-  // Each `useRef` on its own line, at the top level of the hook: the ref
-  // OBJECTS are stable, so the container rebuilt every render still points at
-  // the same cells the scheduler's closure captured on the first one.
-  const draftIdRef = useRef<string | null>(null);
-  const tokenRef = useRef<string | null>(null);
-  const hadTokenRef = useRef(false);
-  const sendRef = useRef<() => Promise<string>>(() => Promise.resolve(""));
-  const exitSendRef = useRef<() => Promise<string>>(() => Promise.resolve(""));
-  const keepAliveRef = useRef<() => Promise<string>>(() => Promise.resolve(""));
-  const learnDraftIdRef = useRef<() => Promise<void>>(() => Promise.resolve());
-  const probeRowRef = useRef<() => Promise<{ read: boolean; row: PersistedDraft | null }>>(() =>
-    Promise.resolve({ read: false, row: null }),
-  );
-  const schedulerRef = useRef<SaveScheduler<string> | null>(null);
-  const refs: PersistenceRefs = {
-    draftId: draftIdRef,
-    token: tokenRef,
-    hadToken: hadTokenRef,
-    send: sendRef,
-    exitSend: exitSendRef,
-    keepAlive: keepAliveRef,
-    learnDraftId: learnDraftIdRef,
-    probeRow: probeRowRef,
-    scheduler: schedulerRef,
-    setConflict,
-    setFailure,
-  };
+  const refs = usePersistenceRefs(setConflict, setFailure);
 
   // `FRESH_READ` is load-bearing in BOTH readers below, not hygiene: under the
   // client's 5-minute default this `fetch` resolves from the CACHE, so it would
@@ -487,6 +539,9 @@ export function useRunPersistence(mode: RunMode, snapshot: RunSnapshot): RunPers
     adopt: (draftId: string, token: string): void => {
       refs.draftId.current = draftId;
       refs.token.current = token;
+      // Ownership is now proven the strong way (a token); anything remembered
+      // from before belongs to a write that is no longer this run's identity.
+      clearPendingEchoes(refs.pendingEchoes.current);
     },
     close: (): void => {
       refs.scheduler.current?.close();
