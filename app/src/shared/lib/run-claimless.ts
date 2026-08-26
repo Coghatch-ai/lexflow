@@ -28,7 +28,7 @@ import {
   type PersistedDraft,
   type RunDraftPayload,
 } from "./run-persistence";
-import type { AnswerDraft, RunMode } from "@shared/domain/exam-draft";
+import { timestampMs, type RunMode } from "@shared/domain/exam-draft";
 
 /**
  * Whether a claimless recording must be checked against the server FIRST.
@@ -94,18 +94,100 @@ export function needsClaimlessSaveProbe(hadToken: boolean, error: unknown): bool
   return !hadToken && !isConflictError(error);
 }
 
-/** The fields of a save that a row written BY that save echoes back verbatim. */
-function saveEcho(run: {
-  questionIds: readonly string[];
-  cursor: number;
-  answers: readonly AnswerDraft[];
-}): string {
-  // Field by field, never `JSON.stringify` of the objects: `answers` makes a
-  // jsonb round trip and jsonb does not preserve key order.
-  const answers = run.answers.map(
-    (a) => `${a.questionId}|${a.userAnswer}|${String(a.correct)}|${String(a.timeSpent)}`,
+/**
+ * Every key ANY save payload carries. Distributive on purpose: a bare
+ * `keyof RunDraftPayload` is the INTERSECTION of the four members' keys, which
+ * silently drops the per-mode ones (`deadlineAt` exists only on the real
+ * payload) — exactly the drift this type exists to prevent.
+ */
+type SavePayloadKey<T = RunDraftPayload> = T extends unknown ? keyof T : never;
+
+/**
+ * Compile-time assertion that an echoed field also EXISTS on the row: there is
+ * nothing to compare a payload field against if `examDrafts.get` does not
+ * return it. A payload field the row lacks fails this constraint instead of
+ * being quietly skipped.
+ */
+type OnRow<K extends keyof PersistedDraft> = K;
+
+/**
+ * The fields compared VERBATIM, as a key union rather than a hand-kept list:
+ * everything a save sends, minus the two that a row cannot echo back.
+ *
+ * - `token` is what the save SENT (the previous `last_saved_at`, null on a
+ *   first save); the row answers with the NEW one. Never the same string by
+ *   definition — comparing it would refuse every true echo.
+ * - `deadlineAt` is compared by INSTANT below, not verbatim: `examDrafts.save`
+ *   normalises it through `deadlineAtInput`'s `.transform` (ISO, µs truncated
+ *   to ms) and the row comes back as raw PG text (`"… 14:30:04.210000+00"`, no
+ *   `T`, no `Z`), so the bytes legitimately differ for one and the same
+ *   instant. It is compared, never skipped.
+ */
+type EchoedKey = OnRow<Exclude<SavePayloadKey, "token" | "deadlineAt">>;
+
+/** Anything carrying the echoed fields — both a sent payload and a read row. */
+type EchoSource = Record<EchoedKey, unknown>;
+
+/** JSON with object keys sorted at every depth: `answers`, `setup` and
+ * `modeState` make a jsonb round trip and jsonb does not preserve key order,
+ * so a raw `JSON.stringify` would call our own write foreign. Array order is
+ * preserved — the queue order IS progress (BR-03). */
+function canonicalJson(value: Record<string, unknown>): string {
+  const isRecord = (v: unknown): v is Record<string, unknown> =>
+    typeof v === "object" && v !== null && !Array.isArray(v);
+  // Always a string: the argument is an object, the one input `JSON.stringify`
+  // never answers `undefined` for.
+  return JSON.stringify(value, (_key: string, member: unknown) =>
+    isRecord(member)
+      ? Object.fromEntries(Object.entries(member).sort(([a], [b]) => a.localeCompare(b)))
+      : member,
   );
-  return [run.questionIds.join(","), String(run.cursor), answers.join(",")].join("/");
+}
+
+/**
+ * The fields of a save that a row written BY that save echoes back verbatim.
+ *
+ * The literal is typed `Record<EchoedKey, unknown>` so the COMPILER keeps this
+ * exhaustive: add a field to any save payload and this object stops building
+ * ("Property 'x' is missing") until it is either compared here or explicitly
+ * excluded from `EchoedKey` with a reason. A hand-maintained subset was the
+ * bug — `deadlineAt`, `modeState` and `elapsedSeconds` were never compared, so
+ * a row differing on exactly those was adopted as ours.
+ */
+function saveEcho(source: EchoSource): string {
+  const echoed: Record<EchoedKey, unknown> = {
+    mode: source.mode,
+    setup: source.setup,
+    questionIds: source.questionIds,
+    cursor: source.cursor,
+    answers: source.answers,
+    modeState: source.modeState,
+    elapsedSeconds: source.elapsedSeconds,
+  };
+  return canonicalJson(echoed);
+}
+
+/**
+ * The deadline of a payload: absent on the study modes, which is the same
+ * thing as the `null` the column holds for them.
+ */
+function sentDeadline(sent: RunDraftPayload): string | null {
+  return "deadlineAt" in sent ? sent.deadlineAt : null;
+}
+
+/**
+ * Whether the row's deadline is the one this save sent — by instant, because
+ * this is the ONE field the server rewrites on the way in (see `EchoedKey`).
+ *
+ * FAIL-CLOSED, like every other decision in this file: a value neither side
+ * can read strictly (`timestampMs`, never `Date.parse`) is not a match. Both
+ * null — every study mode — is a match: nothing was sent, nothing was stored.
+ */
+function sameDeadline(row: string | null, sent: string | null): boolean {
+  if (row === null || sent === null) return row === sent;
+  const stored = timestampMs(row);
+  const asked = timestampMs(sent);
+  return stored !== null && stored === asked;
 }
 
 /**
@@ -117,10 +199,17 @@ function saveEcho(run: {
  * learned — so ownership is proven by the CONTENT instead. `exam_drafts` is
  * UNIQUE on `(user_id, mode)` and the read is already user-scoped, so the probe
  * can only ever return the single row of THIS student in THIS mode; and a row
- * whose frozen queue, cursor and answers are a verbatim echo of the payload we
- * just sent IS the row that payload wrote. Nothing else produces it: an
- * independent run on another device draws its own queue and spends its own
- * `timeSpent` seconds.
+ * that echoes back EVERY field the payload sent IS the row that payload wrote.
+ * Nothing else produces it: an independent run on another device draws its own
+ * queue and spends its own `timeSpent` seconds.
+ *
+ * Every field, not a subset (Codex audit of #79): the proof used to read only
+ * `mode` + queue + cursor + answers, so a same-mode row differing on
+ * `deadlineAt`, `modeState` or `elapsedSeconds` — a live prova real started on
+ * another device, minutes apart — passed as ours and its next save bulldozed
+ * it. `saveEcho` is now compiler-exhaustive over the payload keys and
+ * `sameDeadline` covers the one field the server rewrites, so a field added to
+ * a save payload cannot escape the check by being forgotten here.
  *
  * The other way to resolve the ambiguity — adopt ANY row found — was rejected.
  * A lost response can just as well have been a lost `OVERWRITE_CONFLICT`, and
@@ -138,8 +227,8 @@ export function claimlessSaveAdoption(
   sent: RunDraftPayload,
 ): DraftClaim | null {
   if (!probe.read || probe.row === null) return null;
-  if (probe.row.mode !== sent.mode) return null;
   if (saveEcho(probe.row) !== saveEcho(sent)) return null;
+  if (!sameDeadline(probe.row.deadlineAt, sentDeadline(sent))) return null;
   // The token comes off the row VERBATIM, so the optimistic guard is fully
   // armed again from the very next write: a row that somehow was not ours
   // costs ONE save and then raises the honest "continuado em outro aparelho".

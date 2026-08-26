@@ -8,6 +8,7 @@ import {
 } from "./run-claimless";
 import {
   claimOutcomeFor,
+  realDraftPayload,
   standardDraftPayload,
   type PersistedDraft,
   type RunDraftPayload,
@@ -160,6 +161,91 @@ describe("claimlessSaveAdoption", () => {
   it("refuses a row of another mode, whatever it contains", () => {
     expect(claimlessSaveAdoption({ read: true, row: draft({ mode: "real" }) }, SENT)).toBeNull();
   });
+
+  // THE Codex finding: the proof read `mode` + queue + cursor + answers only,
+  // so a same-mode row that agreed on those and differed on ANY other persisted
+  // field was adopted as ours — a token for a row this tab never wrote, whose
+  // next save overwrites someone's live run (BR-05.8). Every field the payload
+  // sends is now part of the proof.
+  it("refuses a row that echoes the queue and the progress but differs elsewhere", () => {
+    const differs: Partial<PersistedDraft>[] = [
+      // The run clock: same three questions, same cursor, same answer — but 40
+      // minutes of someone else's exam.
+      { elapsedSeconds: 2530 },
+      // `modeState`: the BR-03 carried time of a different run.
+      { modeState: { mode: "standard", carriedTime: { q2: 7 } } },
+      // `setup`: the same discipline drawn under another filter.
+      {
+        setup: { mode: "standard", discipline: "CIVIL_LAW", examBoard: "CESPE", difficulty: null },
+      },
+    ];
+    for (const override of differs) {
+      expect(claimlessSaveAdoption({ read: true, row: draft(override) }, SENT)).toBeNull();
+    }
+  });
+
+  // jsonb does not preserve key order, so the proof must compare VALUES, not
+  // the bytes of a `JSON.stringify`. A row that came back with its keys shuffled
+  // is still our own write.
+  it("adopts our write even when jsonb hands the keys back in another order", () => {
+    const shuffled = draft({
+      answers: [{ timeSpent: 10, correct: true, userAnswer: "A", questionId: "q1" }],
+      modeState: { carriedTime: { q2: 42 }, mode: "standard" },
+    });
+    expect(claimlessSaveAdoption({ read: true, row: shuffled }, SENT)).toEqual({
+      id: draft().id,
+      lastSavedAt: PG_TOKEN,
+    });
+  });
+});
+
+// `deadlineAt` is the one field the server REWRITES on the way in
+// (`deadlineAtInput`'s `.transform` → ISO, µs truncated to ms) and hands back as
+// raw PG text, so it is compared by INSTANT instead of verbatim — compared, not
+// skipped: two provas reais started minutes apart on two devices differ on
+// nothing else.
+describe("claimlessSaveAdoption — the prova real deadline", () => {
+  const DEADLINE = "2026-08-21T19:30:04.210Z";
+  const SENT_REAL: RunDraftPayload = realDraftPayload({
+    questionIds: ["q1", "q2", "q3"],
+    cursor: 1,
+    answers: [answer("q1")],
+    deadlineAt: DEADLINE,
+    token: null,
+  });
+  const realRow = (overrides: Partial<PersistedDraft> = {}): PersistedDraft =>
+    draft({
+      mode: "real",
+      setup: { mode: "real" },
+      modeState: { mode: "real" },
+      elapsedSeconds: 0,
+      // The same instant as DEADLINE, in the raw PG text drizzle returns.
+      deadlineAt: "2026-08-21 19:30:04.210000+00",
+      ...overrides,
+    });
+
+  it("adopts our own row across the ISO ⇄ PG text shapes of one instant", () => {
+    expect(claimlessSaveAdoption({ read: true, row: realRow() }, SENT_REAL)).toEqual({
+      id: realRow().id,
+      lastSavedAt: PG_TOKEN,
+    });
+  });
+
+  it("refuses a live exam that differs ONLY by its deadline", () => {
+    const otherDevice = realRow({ deadlineAt: "2026-08-21 19:22:11.000000+00" });
+    expect(claimlessSaveAdoption({ read: true, row: otherDevice }, SENT_REAL)).toBeNull();
+  });
+
+  it("fails closed on a deadline neither side can read strictly", () => {
+    const unreadable = realRow({ deadlineAt: "2026" });
+    expect(claimlessSaveAdoption({ read: true, row: unreadable }, SENT_REAL)).toBeNull();
+  });
+
+  it("refuses a row with no deadline at all for a save that sent one", () => {
+    expect(
+      claimlessSaveAdoption({ read: true, row: realRow({ deadlineAt: null }) }, SENT_REAL),
+    ).toBeNull();
+  });
 });
 
 /**
@@ -186,7 +272,9 @@ function fakeDraftsServer(): {
     answers: [...payload.answers],
     modeState: payload.modeState,
     elapsedSeconds: payload.elapsedSeconds,
-    deadlineAt: null,
+    // As the column really behaves: only the prova real sends one, and the
+    // router writes `input.deadlineAt ?? null`.
+    deadlineAt: "deadlineAt" in payload ? payload.deadlineAt : null,
     lastSavedAt,
   });
   return {
