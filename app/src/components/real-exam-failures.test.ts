@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   deadlineSettlementFor,
   deadlineSubmitFailure,
+  deadlineSubmittingNotice,
   realBoardScreen,
   realConflictNotice,
   realFailure,
@@ -115,11 +116,26 @@ describe('realBoardScreen', () => {
     // The retry clears `submitFailed` BEFORE flushing, and the flush can hang
     // for a whole request: without `expired` the board went back to `playing`
     // and an exam that had already ended accepted answers again (audit #79).
-    expect(realBoardScreen({ reviewing: false, submitFailed: false, expired: true })).toBe(
-      'submit-failed',
-    );
     expect(realBoardScreen({ reviewing: false, submitFailed: false, expired: true })).not.toBe(
       'playing',
+    );
+  });
+
+  it('calls the in-flight deadline submission SUBMITTING, not a failure', () => {
+    // Second audit round of #79: `expired` used to answer `submit-failed`, so
+    // the whole happy path of criterion 4 — every student who reaches 00:00
+    // with the tab open, answers already saved — got the red "suas respostas
+    // ainda NÃO chegaram ao servidor" card for the length of the send. The
+    // failure screen is reserved for an actual `hold`.
+    expect(realBoardScreen({ reviewing: false, submitFailed: false, expired: true })).toBe(
+      'submitting',
+    );
+    expect(realBoardScreen({ reviewing: false, submitFailed: false, expired: true })).not.toBe(
+      'submit-failed',
+    );
+    // …and a submission that really failed still outranks it.
+    expect(realBoardScreen({ reviewing: false, submitFailed: true, expired: true })).toBe(
+      'submit-failed',
     );
   });
 
@@ -154,6 +170,31 @@ describe('deadlineSubmitFailure', () => {
 
   it('retries the submission instead of dismissing it', () => {
     expect(deadlineSubmitFailure(null).retryLabel).toBe('Enviar de novo');
+  });
+});
+
+// The other half of the same finding: while the deadline submission is IN THE
+// AIR, the copy may not assert the failure. It is the normal end of every prova
+// real, so it says what is happening and asks the student to wait.
+describe('deadlineSubmittingNotice', () => {
+  it('never claims the answers did not reach the server', () => {
+    const notice = deadlineSubmittingNotice();
+    expect(notice.body).not.toContain('NÃO chegaram ao servidor');
+    expect(notice.body).not.toContain('nada foi processado');
+    expect(notice.body).not.toContain('será perdido');
+  });
+
+  it('says the exam ended and the submission is under way', () => {
+    const notice = deadlineSubmittingNotice();
+    expect(notice.title).toContain('tempo acabou');
+    expect(notice.body).toContain('Enviando');
+    expect(notice.body).toContain('Não feche esta página');
+  });
+
+  it('offers no retry — there is nothing to retry while it is in flight', () => {
+    // Structural, not cosmetic: the retry label is what makes the failure card
+    // a failure card, and this notice must not be routed through it.
+    expect(deadlineSubmittingNotice()).not.toHaveProperty('retryLabel');
   });
 });
 

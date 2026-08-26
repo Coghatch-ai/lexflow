@@ -46,11 +46,14 @@ export interface SaveScheduler<T> {
    * `keepAlive` and `send` write the SAME optimistic token (`last_saved_at`),
    * and two writers on one token is a false CONFLICT waiting to happen — one
    * that STOPS the autosave for good (`raiseIfConflict` closes the scheduler),
-   * leaving the exam alive only in the tab. Two rules keep them apart:
-   *   - skipped whenever a save is scheduled, in flight or pending (`dirty`) —
-   *     a save already refreshes `last_saved_at`, so it IS a heartbeat;
+   * leaving the exam alive only in the tab. Three rules keep them apart:
+   *   - skipped whenever a save is scheduled or in flight — that save already
+   *     refreshes `last_saved_at`, so it IS a heartbeat;
    *   - dispatched through the same queue as `send`, so a `schedule()` landing
-   *     mid-beat is sent AFTER it and reads the token the beat produced.
+   *     mid-beat is sent AFTER it and reads the token the beat produced;
+   *   - a beat with an OWED write (`dirty` re-armed by a failed send, nothing
+   *     scheduled, nothing flying) resends that write instead of touching —
+   *     never silence, because silence is what gets the run judged abandoned.
    * A no-op when no `keepAlive` was given (every study mode).
    */
   beat: () => Promise<void>;
@@ -186,13 +189,28 @@ export function createSaveScheduler<T>({
     beat: async (): Promise<void> => {
       const keep = keepAlive;
       if (closed || keep === undefined) return;
-      // A save already refreshes `last_saved_at`, so scheduling/flying/dirty
-      // all mean "this minute is already accounted for". Skipping is what keeps
+      // A save that is SCHEDULED or IN FLIGHT already refreshes `last_saved_at`,
+      // so this minute is accounted for. Skipping those two is what keeps
       // `touch` and `save` off the same token — remove it and the exam eats a
       // false CONFLICT roughly once an hour.
-      if (timer !== null || inFlight !== null || dirty) return;
+      if (timer !== null || inFlight !== null) return;
       try {
-        await dispatch(keep);
+        // `dirty` with NOTHING scheduled and NOTHING flying is not "a save is
+        // coming": since `run` re-arms it on failure, it means the last send
+        // FAILED and nothing will retry it until the student answers again. The
+        // old guard skipped on it too, so ONE background blip silenced the 60 s
+        // heartbeat for the rest of the exam — `last_saved_at` then aged past
+        // REAL_RUN_STALE_SECONDS (180) and the next authenticated contact
+        // (`users.me`, `examDrafts.list`) settled the run under a student who
+        // was still taking it (audit of #79, criterion 6).
+        //
+        // Resending is strictly better than beating here: it refreshes the same
+        // token a `touch` would AND finally delivers the payload, and it cannot
+        // race the beat because `dispatch` serializes every write. `run`
+        // re-arms `dirty` again if this attempt fails too, so the next beat
+        // retries instead of giving up. Awaited, not fired-and-forgotten, so a
+        // beat never outlives the write it started.
+        await (dirty ? run() : dispatch(keep));
       } catch {
         // Already reported through `onError`. A failed beat is never fatal on
         // its own: the caller decides what a CONFLICT means, and a blip is

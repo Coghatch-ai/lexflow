@@ -227,10 +227,11 @@ describe("createSaveScheduler — beat (the prova real heartbeat)", () => {
   });
 
   it("never beats across an open flush — the exit's own resend owns the token", async () => {
-    // `dirty` is the third guard, and this is the window it covers: a flush has
-    // already cancelled the debounce (`timer` null) and is draining the flight
-    // before writing once more. A beat slipping in there would take the token
-    // the owed resend is about to claim with.
+    // The window: a flush has already cancelled the debounce (`timer` null)
+    // and is draining the flight before writing once more. A beat slipping in
+    // there would take the token the owed resend is about to claim with — the
+    // in-flight guard is what keeps it out (it used to be `dirty`, which now
+    // means "an owed write", not "a save is coming").
     const flight = deferred<string>();
     let beats = 0;
     let saves = 0;
@@ -263,6 +264,79 @@ describe("createSaveScheduler — beat (the prova real heartbeat)", () => {
     const study = createSaveScheduler({ send: () => Promise.resolve("saved") });
     await study.beat();
     expect(await study.flush()).toEqual({ ok: true, value: null });
+  });
+});
+
+// A beat with an OWED write — the second audit round of #79. Its own block so
+// the heartbeat suite above stays inside `max-lines-per-function`.
+describe("createSaveScheduler — beat with an owed write", () => {
+  // The regression the `dirty` re-arm created (#79, second audit round): the
+  // beat guard read `dirty` as "a save is already coming", and that stopped
+  // being true the moment a FAILED send started re-arming it. One background
+  // blip then silenced the 60 s heartbeat until the student's next answer —
+  // `last_saved_at` aged past REAL_RUN_STALE_SECONDS (180) and the next
+  // authenticated contact settled the run UNDER a student still sitting the
+  // exam. So a beat with an owed write must WRITE, not go quiet.
+  it("keeps the line alive after a FAILED background save — the beat resends the owed write", async () => {
+    const writes: string[] = [];
+    let sends = 0;
+    const scheduler = createSaveScheduler({
+      send: () => {
+        sends += 1;
+        writes.push("save");
+        return sends === 1 ? Promise.reject(new Error("blip")) : Promise.resolve("token-2");
+      },
+      keepAlive: () => {
+        writes.push("beat");
+        return Promise.resolve("beaten");
+      },
+      onError: () => undefined,
+    });
+
+    scheduler.schedule();
+    await vi.advanceTimersByTimeAsync(SAVE_DEBOUNCE_MS);
+    expect(writes).toEqual(["save"]);
+
+    // Before the fix this beat did NOTHING (`dirty` was true, so it skipped)
+    // and every beat after it did nothing either.
+    await scheduler.beat();
+    expect(writes).toEqual(["save", "save"]);
+
+    // …and once the owed write landed, the heartbeat goes back to the cheap
+    // `touch` — the resend is the exception, not the new cadence.
+    await scheduler.beat();
+    await scheduler.beat();
+    expect(writes).toEqual(["save", "save", "beat", "beat"]);
+  });
+
+  it("never goes silent while the send keeps failing — every beat retries", async () => {
+    // The auditor's roster, as a mutation guard: one failed send then five
+    // beats. Before the fix: 0 server contacts across five minutes. A retry
+    // that gives up after one attempt fails this too.
+    let sends = 0;
+    let beats = 0;
+    const scheduler = createSaveScheduler({
+      send: () => {
+        sends += 1;
+        return Promise.reject(new Error("offline"));
+      },
+      keepAlive: () => {
+        beats += 1;
+        return Promise.resolve("beaten");
+      },
+      onError: () => undefined,
+    });
+
+    scheduler.schedule();
+    await vi.advanceTimersByTimeAsync(SAVE_DEBOUNCE_MS);
+    expect(sends).toBe(1);
+
+    for (let i = 0; i < 5; i += 1) await scheduler.beat();
+
+    // Five beats, five writes: the run is never judged abandoned while this
+    // tab is alive, and the payload keeps trying to land.
+    expect(sends).toBe(6);
+    expect(beats).toBe(0);
   });
 });
 

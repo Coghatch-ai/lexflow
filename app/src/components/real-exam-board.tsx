@@ -57,10 +57,12 @@ import ExamPlaying from './real-exam-playing';
 import ExamReview from './real-exam-review';
 import QuitTestDialog from './QuitTestDialog';
 import RealExamFailureCard from './real-exam-failure-card';
+import RealExamSubmittingCard from './real-exam-submitting-card';
 import RunFailureDialog from '../pages/testing-run-failure';
 import {
   deadlineSettlementFor,
   deadlineSubmitFailure,
+  deadlineSubmittingNotice,
   realBoardScreen,
 } from './real-exam-failures';
 import {
@@ -355,8 +357,18 @@ export default function RealExamBoard({
   // `expired` keeps the ended exam off the screen WHILE the deadline
   // submission is in the air: `finishByDeadline` clears `submitFailed` before
   // flushing, so without it the board fell back to `ExamPlaying` at 00:00 and
-  // accepted answers into an exam that had already ended (audit of #79).
+  // accepted answers into an exam that had already ended (audit of #79). That
+  // window is `submitting`, NOT a failure — see below.
   const screen = realBoardScreen({ reviewing, submitFailed, expired: secondsLeft <= 0 });
+
+  // 00:00 with the submission under way: the normal end of a prova real taken
+  // to the deadline. It reaches here before the auto-submit effect has even
+  // run, so it must not assert anything about the send — showing the failure
+  // card here told every student their answers had NOT reached the server for
+  // the whole length of a healthy request (second audit round of #79).
+  if (screen === 'submitting') {
+    return <RealExamSubmittingCard notice={deadlineSubmittingNotice()} />;
+  }
 
   // The deadline passed with answers still in this tab. NOT `ExamPlaying` (the
   // exam is over) and NOT `ExamReview` (nothing was processed) — the card says

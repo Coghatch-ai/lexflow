@@ -149,6 +149,33 @@ export function deadlineSubmitFailure(reason: string | null): RealFailureCopy {
   };
 }
 
+/** The copy of a screen that is WAITING, not asking for anything. */
+export type RealNotice = { title: string; body: string };
+
+/**
+ * The deadline passed and the submission is IN THE AIR (second audit round of
+ * #79).
+ *
+ * This is the happy path of criterion 4 — the clock reaches 0 with the tab
+ * open, the answers are already saved, the flush + `processReal` take a couple
+ * of seconds — and it used to render `deadlineSubmitFailure`: a red alarm
+ * telling EVERY student that their answers "ainda NÃO chegaram ao servidor",
+ * for the whole length of a send that was going perfectly well. The copy was
+ * simply false while the request was in flight.
+ *
+ * So the wait gets its own state, with no `retryLabel` (there is nothing to
+ * retry) and no reason line (nothing failed). `deadlineSubmitFailure` is
+ * reserved for a real `hold`.
+ */
+export function deadlineSubmittingNotice(): RealNotice {
+  return {
+    title: 'O tempo acabou. Encerrando sua prova…',
+    body:
+      'A prova encerrou e não pode mais ser respondida. Enviando e processando suas ' +
+      'respostas — isto leva alguns segundos. Não feche esta página até terminar.',
+  };
+}
+
 /** What the deadline auto-submit may do, once the flush has answered. */
 export type DeadlineSettlement = 'settle' | 'hold';
 
@@ -170,11 +197,11 @@ export function deadlineSettlementFor(flushed: { ok: boolean }): DeadlineSettlem
   return flushed.ok ? 'settle' : 'hold';
 }
 
-/** The three things the BOARD can put on screen once the exam is running. */
-export type RealBoardScreen = 'playing' | 'submit-failed' | 'review';
+/** The four things the BOARD can put on screen once the exam is running. */
+export type RealBoardScreen = 'playing' | 'submitting' | 'submit-failed' | 'review';
 
 /**
- * What the board renders. `submit-failed` outranks BOTH — that precedence is
+ * What the board renders. `submit-failed` outranks ALL — that precedence is
  * the fix: it may not fall back to `playing` (the deadline passed, the exam
  * cannot be answered any more) and it may not become `review` (which is the
  * screen that says "your exam was processed" over answers that never landed).
@@ -183,9 +210,14 @@ export type RealBoardScreen = 'playing' | 'submit-failed' | 'review';
  * clears `submitFailed` before flushing, and that flush can hang for the length
  * of a request — so between 00:00 and its answer the board fell back to
  * `playing` and an exam that had ALREADY ended accepted answers again. Past the
- * deadline there is no playing board at all: either the run was settled
- * (`review`) or its submission is still owed (`submit-failed`, whose card shows
- * the in-flight state through its own `busy`).
+ * deadline there is no playing board at all.
+ *
+ * What that window is NOT is a failure (second audit round of #79). It first
+ * answered `submit-failed`, so the whole happy path — every student who reaches
+ * 00:00 with everything already saved — got the red "suas respostas ainda NÃO
+ * chegaram ao servidor" card while a perfectly healthy send was in the air, and
+ * even before the auto-submit effect had run. `submitting` is that wait, honest
+ * and actionless; `submit-failed` is only reached once the flush actually held.
  */
 export function realBoardScreen({
   reviewing,
@@ -198,7 +230,7 @@ export function realBoardScreen({
 }): RealBoardScreen {
   if (submitFailed) return 'submit-failed';
   if (reviewing) return 'review';
-  return expired ? 'submit-failed' : 'playing';
+  return expired ? 'submitting' : 'playing';
 }
 
 /**
