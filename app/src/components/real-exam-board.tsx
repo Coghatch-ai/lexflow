@@ -17,6 +17,12 @@
 // the session and leaves the draft alive on top of it, and the next settlement
 // records a SECOND one.
 //
+// A missing token is NOT proof that there is nothing to claim (the save can
+// commit and lose its response), so in this mode `flush()` probes the server
+// before it ever answers "record with no claim" — `needsClaimlessProbe` /
+// `claimlessVerdictFor` in `shared/lib/run-persistence.ts`. A row that comes
+// back is terminal here, like any other CONFLICT.
+//
 // The clock is derived from the ABSOLUTE `deadlineAt`, never counted locally:
 // reloading the tab cannot hand back time and the exam does not pause (D8).
 // The 60 s heartbeat is what tells the server this tab is alive — without it a

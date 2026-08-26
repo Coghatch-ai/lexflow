@@ -25,12 +25,15 @@ import { createSaveScheduler, type SaveScheduler } from "../lib/save-scheduler";
 import {
   adoptableDraftId,
   claimOutcomeFor,
+  claimlessVerdictFor,
   conflictFor,
   isConflictError,
+  needsClaimlessProbe,
   persistedDraftOf,
   runSaveFailure,
   saveFailureFor,
   type DraftClaim,
+  type PersistedDraft,
   type RunConflict,
   type RunDraftPayload,
   type RunSaveFailure,
@@ -98,6 +101,12 @@ interface PersistenceRefs {
   keepAlive: MutableRefObject<() => Promise<string>>;
   /** Reads the row id back from the server; resolves even when it cannot. */
   learnDraftId: MutableRefObject<() => Promise<void>>;
+  /**
+   * Does a row for this mode exist on the server RIGHT NOW? Unlike
+   * `learnDraftId` this asks about EXISTENCE, not ownership, and it reports
+   * whether the read happened (`read: false` = we do not know).
+   */
+  probeRow: MutableRefObject<() => Promise<{ read: boolean; row: PersistedDraft | null }>>;
   scheduler: MutableRefObject<SaveScheduler<string> | null>;
   setConflict: (conflict: RunConflict | null) => void;
   setFailure: (failure: RunSaveFailure | null) => void;
@@ -153,6 +162,46 @@ function keepAliveVia(
   };
 }
 
+/** One `examDrafts.get` for this run's mode, honest about `null`. */
+type ReadRow = () => Promise<PersistedDraft | null>;
+
+/**
+ * `save` returns the token but not the row id, and `sessions.record` needs
+ * BOTH. Swallows its own failure: the id is retried right before it is actually
+ * needed (`flushRun`), and a background save must not die for it.
+ *
+ * `adoptableDraftId` is the second half — it only takes an id off a row that
+ * still carries the token this tab just wrote.
+ */
+function learnDraftIdVia(refs: PersistenceRefs, readRow: ReadRow): () => Promise<void> {
+  return async (): Promise<void> => {
+    try {
+      const id = adoptableDraftId(await readRow(), refs.token.current);
+      if (id !== null) refs.draftId.current = id;
+    } catch {
+      // Left null on purpose — `flushRun` decides what a missing id means.
+    }
+  };
+}
+
+/**
+ * EXISTENCE, not ownership: "is there a row for this mode?", even when the row
+ * carries a token this tab never saw — which is precisely the orphan case
+ * (`needsClaimlessProbe`). It reports whether the read HAPPENED, because
+ * fail-closed needs to tell "no row" apart from "did not find out".
+ */
+function probeRowVia(
+  readRow: ReadRow,
+): () => Promise<{ read: boolean; row: PersistedDraft | null }> {
+  return async (): Promise<{ read: boolean; row: PersistedDraft | null }> => {
+    try {
+      return { read: true, row: await readRow() };
+    } catch {
+      return { read: false, row: null };
+    }
+  };
+}
+
 function schedulerOf(refs: PersistenceRefs): SaveScheduler<string> {
   const existing = refs.scheduler.current;
   if (existing !== null) return existing;
@@ -172,7 +221,31 @@ function forgetIdentity(refs: PersistenceRefs): void {
   refs.token.current = null;
 }
 
-async function flushRun(refs: PersistenceRefs): Promise<FlushOutcome> {
+/**
+ * The prova real's last check before a CLAIMLESS recording (audit of #79).
+ * "No token" means no save resolved here — it does NOT mean no row exists, and
+ * an orphan row plus a claimless session is exactly the double-settlement this
+ * slice forbids. `claimlessVerdictFor` owns the rule; this only fetches.
+ */
+async function claimlessFlush(refs: PersistenceRefs): Promise<FlushOutcome> {
+  const probe = await refs.probeRow.current();
+  const verdict = claimlessVerdictFor(probe);
+  if (verdict === "record") return { ok: true, claim: undefined };
+  if (verdict === "conflict") {
+    // Terminal, exactly like a CONFLICT raised by the save: the row is on the
+    // server and the server settles it. The real board turns this into "já
+    // havia sido encerrada em outro lugar"; nothing is written here.
+    refs.scheduler.current?.close();
+    refs.setConflict(conflictFor(refs.hadToken.current));
+    return { ok: false, claim: undefined };
+  }
+  // Could not read: we do not know, so we do not write. Closing the message
+  // is the retry, and the run is still on screen.
+  refs.setFailure(runSaveFailure("claim"));
+  return { ok: false, claim: undefined };
+}
+
+async function flushRun(refs: PersistenceRefs, mode: RunMode): Promise<FlushOutcome> {
   // A new attempt starts clean: the message on screen is about THIS click.
   refs.setFailure(null);
   const result = await schedulerOf(refs).flush();
@@ -189,6 +262,7 @@ async function flushRun(refs: PersistenceRefs): Promise<FlushOutcome> {
   // The claim is built on the token the flush LANDED with, never on the one
   // the screen was holding when the student clicked.
   const outcome = claimOutcomeFor(refs.draftId.current, refs.token.current);
+  if (needsClaimlessProbe(mode, outcome)) return claimlessFlush(refs);
   if (!outcome.ok) refs.setFailure(outcome.failure);
   return { ok: outcome.ok, claim: outcome.claim };
 }
@@ -230,6 +304,9 @@ export function useRunPersistence(mode: RunMode, snapshot: RunSnapshot): RunPers
   const sendRef = useRef<() => Promise<string>>(() => Promise.resolve(""));
   const keepAliveRef = useRef<() => Promise<string>>(() => Promise.resolve(""));
   const learnDraftIdRef = useRef<() => Promise<void>>(() => Promise.resolve());
+  const probeRowRef = useRef<() => Promise<{ read: boolean; row: PersistedDraft | null }>>(() =>
+    Promise.resolve({ read: false, row: null }),
+  );
   const schedulerRef = useRef<SaveScheduler<string> | null>(null);
   const refs: PersistenceRefs = {
     draftId: draftIdRef,
@@ -238,29 +315,19 @@ export function useRunPersistence(mode: RunMode, snapshot: RunSnapshot): RunPers
     send: sendRef,
     keepAlive: keepAliveRef,
     learnDraftId: learnDraftIdRef,
+    probeRow: probeRowRef,
     scheduler: schedulerRef,
     setConflict,
     setFailure,
   };
 
-  // `save` returns the token but not the row id, and `sessions.record` needs
-  // BOTH. Swallows its own failure: the id is retried right before it is
-  // actually needed (`flushRun`), and a background save must not die for it.
-  //
-  // `FRESH_READ` is load-bearing, not hygiene: under the client's 5-minute
-  // default this `fetch` resolves from the CACHE, so the retry in `flushRun`
-  // would keep re-reading the answer from BEFORE the row existed and the run
-  // could never be processed. `adoptableDraftId` is the second half — it only
-  // takes an id off a row that still carries the token this tab just wrote.
-  refs.learnDraftId.current = async (): Promise<void> => {
-    try {
-      const row = persistedDraftOf(await utils.examDrafts.get.fetch({ mode }, FRESH_READ));
-      const id = adoptableDraftId(row, refs.token.current);
-      if (id !== null) refs.draftId.current = id;
-    } catch {
-      // Left null on purpose — `flushRun` decides what a missing id means.
-    }
-  };
+  // `FRESH_READ` is load-bearing in BOTH readers below, not hygiene: under the
+  // client's 5-minute default this `fetch` resolves from the CACHE, so it would
+  // keep answering from BEFORE the row existed.
+  const readRow = async (): Promise<PersistedDraft | null> =>
+    persistedDraftOf(await utils.examDrafts.get.fetch({ mode }, FRESH_READ));
+  refs.learnDraftId.current = learnDraftIdVia(refs, readRow);
+  refs.probeRow.current = probeRowVia(readRow);
 
   refs.send.current = async (): Promise<string> => {
     const payload = snapshotRef.current(refs.token.current);
@@ -310,7 +377,7 @@ export function useRunPersistence(mode: RunMode, snapshot: RunSnapshot): RunPers
       if (refs.token.current === null) return;
       await schedulerOf(refs).beat();
     },
-    flush: (): Promise<FlushOutcome> => flushRun(refs),
+    flush: (): Promise<FlushOutcome> => flushRun(refs, mode),
     conflict,
     failure,
     dismissFailure: (): void => {

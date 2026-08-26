@@ -17,6 +17,13 @@
 // door (BR-05.5) — and without it the first save of the new run, which carries
 // `token: null`, would hit the OVERWRITE_CONFLICT guard and the student would
 // be stuck with no way forward.
+//
+// Because `startReal` is destructive, NEITHER entry may fail in silence. Both
+// are imperative (`utils.*.fetch` / `mutateAsync`), so nothing renders an error
+// for them; a rejected `examDrafts.get` used to land on the setup card, which
+// is the same pixels as "no pending exam" and puts that force-settle one click
+// away. Every failure here becomes a `RealFailure` and its own screen
+// (`real-exam-failures.ts` owns the rule and the copy).
 
 import { useEffect, useRef, useState, useCallback, type ReactElement } from 'react';
 import { FRESH_READ, trpc } from '../shared/lib/trpc';
@@ -27,6 +34,14 @@ import {
 } from '@shared/domain/exam-draft';
 import ExamSetup from './real-exam-setup';
 import RealExamBoard from './real-exam-board';
+import RealExamFailureCard from './real-exam-failure-card';
+import {
+  realFailure,
+  realScreen,
+  realStartFailureKind,
+  retryActionFor,
+  type RealFailure,
+} from './real-exam-failures';
 import { QUESTIONS_PER_EXAM, toExamQuestion, type RealRunStart } from './real-exam-types';
 
 /**
@@ -58,6 +73,7 @@ export default function RealExamSimulation({ onExit }: { onExit: () => void }): 
   const [runKey, setRunKey] = useState(0);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
+  const [failure, setFailure] = useState<RealFailure | null>(null);
 
   const backToSetup = useCallback((why: string | null): void => {
     setStart(null);
@@ -92,6 +108,7 @@ export default function RealExamSimulation({ onExit }: { onExit: () => void }): 
 
   const decideOnMount = async (): Promise<void> => {
     setLoading(true);
+    setFailure(null);
     try {
       // FRESH_READ: this read decides whether an exam is still running, and the
       // client's 5-minute default would answer it from a cached copy.
@@ -111,6 +128,12 @@ export default function RealExamSimulation({ onExit }: { onExit: () => void }): 
       // `settled: false` means someone else got there first (`users.me` at
       // boot, another tab): the exam still ended, so no second announcement.
       setNotice(settled.settled ? SETTLED_NOTICE : null);
+    } catch {
+      // The decision could NOT be taken. Never the setup card: that card reads
+      // as "no pending exam" and its button force-settles the exam we just
+      // failed to look for.
+      setNotice(null);
+      setFailure(realFailure('mount'));
     } finally {
       setLoading(false);
     }
@@ -127,9 +150,15 @@ export default function RealExamSimulation({ onExit }: { onExit: () => void }): 
 
   const startExam = async (): Promise<void> => {
     setLoading(true);
+    setFailure(null);
+    // Load-bearing for HONESTY, not for control flow: once `startReal` has
+    // resolved, any pending prova real is already settled, so a failure after
+    // this point may not tell the student "nothing was changed".
+    let startRealDone = false;
     try {
       // BEFORE the draw, always — including through "Fazer Outro Simulado Real".
       await startRealMutation.mutateAsync();
+      startRealDone = true;
       await utils.examDrafts.invalidate();
       void utils.stats.invalidate();
       void utils.sessions.invalidate();
@@ -145,12 +174,17 @@ export default function RealExamSimulation({ onExit }: { onExit: () => void }): 
         draft: null,
       });
       setRunKey((key) => key + 1);
+    } catch {
+      setNotice(null);
+      setFailure(realFailure(realStartFailureKind(startRealDone)));
     } finally {
       setLoading(false);
     }
   };
 
-  if (start !== null) {
+  const screen = realScreen({ started: start !== null, failure });
+
+  if (screen === 'exam' && start !== null) {
     return (
       <RealExamBoard
         key={runKey}
@@ -160,6 +194,20 @@ export default function RealExamSimulation({ onExit }: { onExit: () => void }): 
           backToSetup(null);
         }}
         onSettledElsewhere={onSettledElsewhere}
+      />
+    );
+  }
+
+  if (screen === 'failure' && failure !== null) {
+    return (
+      <RealExamFailureCard
+        failure={failure}
+        busy={loading}
+        onRetry={() => {
+          if (retryActionFor(failure.kind) === 'decide') void decideOnMount();
+          else void startExam();
+        }}
+        onExit={onExit}
       />
     );
   }

@@ -640,6 +640,53 @@ export function claimOutcomeFor(draftId: string | null, token: string | null): C
   return { ok: true, claim, failure: null };
 }
 
+/**
+ * Whether a claimless recording must be checked against the server FIRST.
+ *
+ * "No token" is only evidence that no save RESOLVED here — it is not evidence
+ * that no row exists. The save that created the row can commit and have its
+ * response lost (timeout, dropped connection): the token stays null, `dirty`
+ * goes back to false, and `claimOutcomeFor` says "record with no claim at all"
+ * about a run that IS on the server. In the prova real that is the one thing
+ * this slice forbids (`real-exam-board.tsx` header): `sessions.record` accepts
+ * a claimless payload, writes the session, leaves the orphan row alive on top
+ * of it, and the next lazy settlement (`users.me` / `list` / `startReal`)
+ * records a SECOND session with duplicated `user_answers` and SM-2 applied
+ * twice (BR-05.7).
+ *
+ * Only the prova real: it is the only mode a SERVER settles on its own, so it
+ * is the only one where an orphan row turns into a second session. Everywhere
+ * else the orphan is at worst an unwanted "Continuar".
+ */
+export function needsClaimlessProbe(mode: RunMode, outcome: ClaimOutcome): boolean {
+  return mode === "real" && outcome.ok && outcome.claim === undefined;
+}
+
+/** What to do about a claimless run once the server's row has been read. */
+export type ClaimlessVerdict = "record" | "conflict" | "retry";
+
+/**
+ * The verdict on that probe. FAIL-CLOSED in both directions:
+ *
+ * - a row came back → the run IS persisted and this tab cannot claim it. Same
+ *   treatment as a CONFLICT — terminal, nothing written — because the server
+ *   will settle that row itself and writing here would be the twin.
+ * - the read failed (`read: false`) → we do not know, so we do not write. The
+ *   run stays on screen and closing the message is the retry.
+ * - no row → nothing to orphan: the claimless recording is the normal path
+ *   for a run that was never persisted.
+ */
+export function claimlessVerdictFor({
+  read,
+  row,
+}: {
+  read: boolean;
+  row: PersistedDraft | null;
+}): ClaimlessVerdict {
+  if (!read) return "retry";
+  return row === null ? "record" : "conflict";
+}
+
 /** Which copy of a CONFLICT the student is looking at. */
 export type RunConflictKind = "remote" | "live";
 
