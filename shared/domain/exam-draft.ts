@@ -230,6 +230,31 @@ export function draftTotalOf(draft: {
 }
 
 /**
+ * The two shapes a timestamp column legitimately arrives in, and NOTHING else:
+ * the ISO string the browser mints (`2026-08-21T14:30:04.210Z`) and the raw PG
+ * text drizzle hands back for `mode: "string"` (`2026-08-21 14:30:04.210932+00`).
+ *
+ * Stricter than `Date.parse` ON PURPOSE, and this is the parser EVERY read-path
+ * decision below uses — `Date.parse` reached for directly is a bug here.
+ * `Date.parse` is generous exactly where a clock must not be: `"2026"` answers
+ * 1 Jan 2026 (a whole year read as an instant) and a JS `Date.toString()`
+ * answers a locale-shaped guess. Those are the very values Postgres itself
+ * refuses (22007 / 22023) and the reason `examDrafts.save` normalises the field
+ * with a `.transform` — but that guards the WRITE path only. A row written
+ * before it existed, or by anything other than that mutation, still reaches
+ * these functions, and reading a guess out of one is how a student's exam gets
+ * force-submitted on a value nobody measured.
+ */
+const TIMESTAMP_TEXT = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?(\d{2})?)?$/;
+
+/** Milliseconds of a timestamp in one of the two accepted shapes, or null. */
+function timestampMs(value: string): number | null {
+  if (!TIMESTAMP_TEXT.test(value)) return null;
+  const ms = Date.parse(value);
+  return Number.isNaN(ms) ? null : ms;
+}
+
+/**
  * Whether a prova real must be settled server-side. There is no scheduler in
  * this project (Lambda behind API Gateway, no EventBridge), so an abrupt exit
  * is detected lazily on the student's next authenticated contact: the clock ran
@@ -237,7 +262,16 @@ export function draftTotalOf(draft: {
  *
  * A fresh heartbeat before the deadline is NOT abandonment — that is the case
  * that keeps a student who merely opened another tab from being auto-submitted.
- * Unparseable timestamps also answer `false`: never auto-submit on a guess.
+ *
+ * FAILS CLOSED, per field, through `timestampMs`: a value that cannot be read
+ * STRICTLY disables the half of the judgement that needed it, and never stands
+ * in for it. Settling force-submits an exam and DELETEs its draft — it is
+ * irreversible and it is the student's grade, so the two errors are not
+ * symmetric. The cost of failing closed is bounded: an unreadable `deadline_at`
+ * leaves only the heartbeat judging (a quiet one still settles), and a row that
+ * no half can judge is cleared by the `force` of the next `startReal`
+ * (BR-05.5), so nothing is stranded forever. The cost of failing open is a
+ * student mid-exam losing it to a value `Date.parse` invented.
  */
 export function isRealRunAbandoned({
   deadlineAt,
@@ -250,40 +284,17 @@ export function isRealRunAbandoned({
   now: string;
   staleSeconds?: number;
 }): boolean {
-  const nowMs = Date.parse(now);
-  if (Number.isNaN(nowMs)) return false;
+  const nowMs = timestampMs(now);
+  if (nowMs === null) return false;
 
   if (deadlineAt !== null) {
-    const deadlineMs = Date.parse(deadlineAt);
-    if (!Number.isNaN(deadlineMs) && deadlineMs <= nowMs) return true;
+    const deadlineMs = timestampMs(deadlineAt);
+    if (deadlineMs !== null && deadlineMs <= nowMs) return true;
   }
 
-  const lastSavedMs = Date.parse(lastSavedAt);
-  if (Number.isNaN(lastSavedMs)) return false;
+  const lastSavedMs = timestampMs(lastSavedAt);
+  if (lastSavedMs === null) return false;
   return lastSavedMs < nowMs - staleSeconds * 1000;
-}
-
-/**
- * The two shapes a `deadline_at` legitimately arrives in, and NOTHING else:
- * the ISO string the browser mints (`2026-08-21T14:30:04.210Z`) and the raw PG
- * text drizzle hands back for `mode: "string"` (`2026-08-21 14:30:04.210932+00`).
- *
- * Stricter than `Date.parse` ON PURPOSE. `Date.parse` is generous where a clock
- * must not be: `"2026"` answers 1 Jan 2026 (a whole year read as an instant)
- * and a JS `Date.toString()` answers a locale-shaped guess — the very two
- * values Postgres itself refuses (22007 / 22023) and the reason
- * `examDrafts.save` now normalises the field. A countdown painted from either
- * one is a number nobody measured, so `realSecondsLeft` answers `null` instead
- * and the caller falls back to the setup screen (never an auto-submit on a
- * guess — the same principle as `isRealRunAbandoned`).
- */
-const TIMESTAMP_TEXT = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?(\d{2})?)?$/;
-
-/** Milliseconds of a timestamp in one of the two accepted shapes, or null. */
-function timestampMs(value: string): number | null {
-  if (!TIMESTAMP_TEXT.test(value)) return null;
-  const ms = Date.parse(value);
-  return Number.isNaN(ms) ? null : ms;
 }
 
 /**
@@ -293,7 +304,9 @@ function timestampMs(value: string): number | null {
  *
  * Floors at 0 — a deadline in the past means "no time left", never a negative
  * countdown — and answers `null` when there is no usable deadline at all, which
- * the caller must treat as "do not decide", not as "0 seconds left".
+ * the caller must treat as "do not decide", not as "0 seconds left". "Usable"
+ * is `timestampMs`, the same strict read `isRealRunAbandoned` makes: a countdown
+ * painted from a guess is a number nobody measured.
  */
 export function realSecondsLeft({
   deadlineAt,
@@ -318,7 +331,9 @@ export function realSecondsLeft({
  * - `start` — no row at all, or a row whose deadline cannot be read. A prova
  *   real is NEVER offered back to continue, so "no row" is simply the setup
  *   screen; an unreadable deadline is settled by the `startReal` of the next
- *   start (`force`), never auto-submitted here on a guess.
+ *   start (`force`), never auto-submitted here on a guess. "Cannot be read" is
+ *   `timestampMs`, not `Date.parse`: `null` and `"2026"` carry the same amount
+ *   of information about when this exam ends, so they get the same verdict.
  * - `resume` — the row is alive: not abandoned AND with time left. This is the
  *   tab that OWNS the exam coming back from a reload, and it is the branch that
  *   keeps a student who merely opened a second tab from being auto-submitted.

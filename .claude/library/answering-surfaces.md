@@ -215,9 +215,9 @@ answered") is **not** satisfied product-wide until M1 lands.
   liquidação existe só para a prova real, e os modos de estudo terminam por `discard` ou por uma
   gravação normal.
 - **Assimetria de dois campos string da MESMA linha — não uniformizar:**
-  - `deadline_at` é **COMPARADO** (`isRealRunAbandoned` faz `Date.parse`), nunca ecoado como
-    token. É normalizável e o validador aceita de propósito os dois formatos (o ISO do browser e
-    o texto cru do PG). Só o instante importa.
+  - `deadline_at` é **COMPARADO** (`isRealRunAbandoned` lê pelo `timestampMs` estrito, **nunca**
+    por `Date.parse`), nunca ecoado como token. É normalizável e o validador aceita de propósito
+    os dois formatos (o ISO do browser e o texto cru do PG). Só o instante importa.
   - `last_saved_at` / `token` é **casado com `=` dentro do SQL** e viaja **VERBATIM**
     (`"2026-08-21 14:30:04.210932+00"`: µs, sem `T`, sem `Z` — drizzle usa parser identidade em
     `mode: "string"`). Passá-lo por `new Date(...)`, `toISOString()`, `Date.parse` ou por

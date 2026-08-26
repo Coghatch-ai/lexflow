@@ -333,6 +333,59 @@ describe("isRealRunAbandoned", () => {
   it("false on an unparseable timestamp — never auto-submit on a guess", () => {
     expect(isRealRunAbandoned({ deadlineAt: null, lastSavedAt: "not-a-date", now })).toBe(false);
   });
+
+  // The half `Date.parse` would wave through: values that are not garbage
+  // enough to answer NaN, only wrong enough to mean something else. `"2026"`
+  // parses as 1 Jan 2026, so a lenient read of it force-submits an exam that
+  // has not started yet. Postgres refuses these (22007 / 22023) and
+  // `examDrafts.save` normalises them, so a row carrying one is legacy or
+  // hand-written — and a legacy row must not be read as "abandoned".
+  it("false on a PARTIAL deadline — `2026` is a year, not an instant", () => {
+    expect(
+      isRealRunAbandoned({
+        deadlineAt: "2026",
+        lastSavedAt: "2026-08-21T11:59:30.000Z", // heartbeat is fresh
+        now,
+      }),
+    ).toBe(false);
+  });
+
+  it("false on a `Date.toString()` deadline — a locale-shaped guess", () => {
+    expect(
+      isRealRunAbandoned({
+        deadlineAt: new Date("2026-08-21T11:00:00.000Z").toString(), // an hour PAST
+        lastSavedAt: "2026-08-21T11:59:30.000Z",
+        now,
+      }),
+    ).toBe(false);
+  });
+
+  it("false on a partial `lastSavedAt` — a stale heartbeat must be measured, not guessed", () => {
+    expect(isRealRunAbandoned({ deadlineAt: null, lastSavedAt: "2026", now })).toBe(false);
+  });
+
+  it("false on a partial `now` — the clock this is judged against is read strictly too", () => {
+    expect(
+      isRealRunAbandoned({
+        deadlineAt: null,
+        lastSavedAt: "2026-08-21T11:59:30.000Z",
+        now: "2027",
+      }),
+    ).toBe(false);
+  });
+
+  // The other side of failing closed: an unreadable DEADLINE disables only the
+  // deadline half. A heartbeat that is readable AND quiet still settles, so a
+  // corrupt `deadline_at` cannot keep a dead run alive forever.
+  it("true on an unreadable deadline when the heartbeat is readable and quiet", () => {
+    expect(
+      isRealRunAbandoned({
+        deadlineAt: "2026",
+        lastSavedAt: "2026-08-21T11:56:00.000Z", // 4 min = 3 missed beats
+        now,
+      }),
+    ).toBe(true);
+  });
 });
 
 // The prova real's clock (epic #67 slice S2d, #79). It is DERIVED from the
@@ -432,9 +485,33 @@ describe("realMountDecision", () => {
         now,
       }),
     ).toBe("start");
+    // ...and "cannot be read" means the STRICT read. `"2026"` is a year that
+    // `Date.parse` happily calls 1 Jan 2026 — settling on it force-submits an
+    // exam whose deadline nobody actually knows. Same verdict as `null`,
+    // because the two are the same amount of information.
     expect(
       realMountDecision({
         draft: { deadlineAt: "2026", lastSavedAt: "2026-08-21T11:59:30.000Z" },
+        now,
+      }),
+    ).toBe("start");
+    expect(
+      realMountDecision({
+        draft: {
+          deadlineAt: new Date("2026-08-21T11:00:00.000Z").toString(),
+          lastSavedAt: "2026-08-21T11:59:30.000Z",
+        },
+        now,
+      }),
+    ).toBe("start");
+  });
+
+  // Failing closed on the deadline does NOT strand the row: the heartbeat is a
+  // second, independent judgement, and a quiet one still settles.
+  it("settle: unreadable deadline but a heartbeat that went quiet", () => {
+    expect(
+      realMountDecision({
+        draft: { deadlineAt: "2026", lastSavedAt: "2026-08-21T11:56:00.000Z" },
         now,
       }),
     ).toBe("settle");

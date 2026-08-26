@@ -107,8 +107,9 @@ const saveInput = z
      * D8 absolute deadline the auto-submit depends on.
      *
      * Parseability is the whole contract here: `deadline_at` is COMPARED
-     * (`isRealRunAbandoned` does `Date.parse`), never echoed as a token, so
-     * normalising is harmless and only the instant matters. That is the exact
+     * (`isRealRunAbandoned` reads it through the strict `timestampMs`, NOT
+     * `Date.parse`), never echoed as a token, so normalising is harmless and
+     * only the instant matters. That is the exact
      * opposite of `token`/`lastSavedAt` below, which must travel VERBATIM: it is
      * matched with `=` against the column, and normalising it through `Date`
      * drops the microseconds and breaks the optimistic guard for good. Two
