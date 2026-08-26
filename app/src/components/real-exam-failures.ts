@@ -19,6 +19,7 @@
 // only reachable by rendering.
 
 import type { RunConflictKind } from '../shared/lib/run-persistence';
+import { UNSETTLED, type Settled } from '../shared/lib/settle-within';
 
 /**
  * Which operation failed.
@@ -176,6 +177,19 @@ export function deadlineSubmittingNotice(): RealNotice {
   };
 }
 
+/**
+ * How long the deadline submission may stay in the air before the student gets
+ * a button back (third audit round of #79).
+ *
+ * The flush is at worst three sequential round trips (save → read the id back →
+ * probe), so 20 s is well past any healthy send on a bad-but-working mobile
+ * link, while still being a wait a person will sit through. Tripping it early
+ * costs exactly one extra flush — the retry is idempotent by construction (the
+ * draft DELETE is the mutex, `saveRun` adopts the row it can prove it wrote) —
+ * whereas not tripping it at all costs the student the whole prova.
+ */
+export const DEADLINE_SUBMIT_TIMEOUT_MS = 20_000;
+
 /** What the deadline auto-submit may do, once the flush has answered. */
 export type DeadlineSettlement = 'settle' | 'hold';
 
@@ -192,8 +206,18 @@ export type DeadlineSettlement = 'settle' | 'hold';
  * failed in the background re-arms `dirty` and is RESENT by this very flush.
  * Without that, `ok` was only "no send failed while you were watching" and this
  * predicate settled runs whose first save never reached the server (audit #79).
+ *
+ * `UNSETTLED` — the flush never answered within `DEADLINE_SUBMIT_TIMEOUT_MS` —
+ * is a `hold` for the same reason a failed one is, and it is what BOUNDS the
+ * `submitting` card (third audit round of #79). Without it the whole screen
+ * hung on a promise that may never settle: the student sat on a calm spinner
+ * with no button, forever, and never reached this retry. Silence is read
+ * fail-CLOSED here exactly as `claimlessVerdictFor` reads it — "we did not find
+ * out" is never "it landed"; the cost of being wrong is one extra flush, and
+ * the cost of the optimistic reading is the exam.
  */
-export function deadlineSettlementFor(flushed: { ok: boolean }): DeadlineSettlement {
+export function deadlineSettlementFor(flushed: Settled<{ ok: boolean }>): DeadlineSettlement {
+  if (flushed === UNSETTLED) return 'hold';
   return flushed.ok ? 'settle' : 'hold';
 }
 
@@ -218,6 +242,15 @@ export type RealBoardScreen = 'playing' | 'submitting' | 'submit-failed' | 'revi
  * chegaram ao servidor" card while a perfectly healthy send was in the air, and
  * even before the auto-submit effect had run. `submitting` is that wait, honest
  * and actionless; `submit-failed` is only reached once the flush actually held.
+ *
+ * Actionless is only safe while it is BOUNDED (third audit round of #79). This
+ * card has no button, so whatever ends it lives outside this function: the
+ * bound is `DEADLINE_SUBMIT_TIMEOUT_MS` applied to the awaited calls themselves
+ * (`settleWithin` in `finishByDeadline`), which turns a request that never
+ * answers into a `hold` and lands the student on `submit-failed` with its
+ * retry. Bound at the call, not by a second timer watching this screen: one
+ * timeout, one truth, and the state machine here stays a pure function of what
+ * the submission actually said.
  */
 export function realBoardScreen({
   reviewing,

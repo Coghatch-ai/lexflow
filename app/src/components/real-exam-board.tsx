@@ -37,7 +37,10 @@
 // here may not close the run and show the review screen: that discards every
 // answer that never reached the server and announces a result that does not
 // exist. A failed flush HOLDS instead: `submit-failed`, whose button re-runs the
-// submission (`realBoardScreen`).
+// submission (`realBoardScreen`). The wait before that verdict exists is
+// `submitting`, a card with NO button — so both awaits behind it are bounded
+// (`settleWithin`, `DEADLINE_SUBMIT_TIMEOUT_MS`): a request that never answers
+// has to become a verdict, or the actionless card is where the run ends.
 //
 // A CONFLICT NEVER opens the conflict dialog here. "Recarregar do servidor" and
 // "Descartar esta cópia" are choices about a run that can be continued; this one
@@ -60,11 +63,13 @@ import RealExamFailureCard from './real-exam-failure-card';
 import RealExamSubmittingCard from './real-exam-submitting-card';
 import RunFailureDialog from '../pages/testing-run-failure';
 import {
+  DEADLINE_SUBMIT_TIMEOUT_MS,
   deadlineSettlementFor,
   deadlineSubmitFailure,
   deadlineSubmittingNotice,
   realBoardScreen,
 } from './real-exam-failures';
+import { UNSETTLED, settleWithin } from '../shared/lib/settle-within';
 import {
   exitPrompt,
   processableAnswers,
@@ -99,6 +104,29 @@ import {
   useDeadlineAutoSubmit,
   useFirstSave,
 } from '../shared/hooks/use-real-exam-lifecycle';
+
+/**
+ * `processReal` after a LANDED flush — did it actually settle the row?
+ *
+ * Deliberately not surfaced when it did not. It is an ACCELERATOR, not the
+ * guarantee: the row is on the server with its deadline in the past, so the
+ * next authenticated contact settles it (`users.me` / `list` / `startReal`). A
+ * "tente de novo" dialog over the result screen would offer a retry that
+ * changes nothing, and `settled: false` is not an error either — it means
+ * someone else got there first.
+ *
+ * A call that never ANSWERS is treated exactly like one that threw (third audit
+ * round of #79): unbounded, it held the student on the actionless `submitting`
+ * card for as long as the request hung. `false` only skips the invalidations —
+ * there is no result yet to refetch.
+ */
+async function accelerated<T extends object>(run: () => Promise<T>): Promise<boolean> {
+  try {
+    return (await settleWithin(run(), DEADLINE_SUBMIT_TIMEOUT_MS)) !== UNSETTLED;
+  } catch {
+    return false;
+  }
+}
 
 interface RealExamBoardProps {
   start: RealRunStart;
@@ -234,27 +262,26 @@ export default function RealExamBoard({
   // closed, `reviewing` is never set, and the card's button lands right back
   // here. A CONFLICT also arrives as `ok: false`, and the effect above turns
   // that one terminal before this screen can be seen.
+  //
+  // BOTH awaits are BOUNDED (`settleWithin`, third audit round of #79). While
+  // they are in the air the board shows `submitting`, a card with no button —
+  // so a request that never answers left the student there forever, never
+  // reaching the retry below. The bound goes on the calls themselves rather
+  // than on a timer watching the screen: it turns the silence into the same
+  // `hold` a failed flush produces, so there is one timeout and one path out.
   const finishByDeadline = async (): Promise<void> => {
     setBusy(true);
     setSubmitFailed(false);
-    const flushed = await persistence.flush();
+    const flushed = await settleWithin(persistence.flush(), DEADLINE_SUBMIT_TIMEOUT_MS);
     if (deadlineSettlementFor(flushed) === 'hold') {
       setSubmitFailed(true);
       setBusy(false);
       return;
     }
-    try {
-      await processRealMutation.mutateAsync();
+    if (await accelerated(() => processRealMutation.mutateAsync())) {
       void utils.stats.invalidate();
       void utils.sessions.invalidate();
       void utils.examDrafts.invalidate();
-    } catch {
-      // Deliberately not surfaced. `processReal` is an ACCELERATOR, not the
-      // guarantee: the row is on the server with its deadline in the past, so
-      // the next authenticated contact settles it (`users.me` / `list` /
-      // `startReal`). A "tente de novo" dialog over the result screen would
-      // offer a retry that changes nothing. `settled: false` is not an error
-      // either — it means someone else got there first.
     }
     persistence.close();
     setBusy(false);

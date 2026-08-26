@@ -1,5 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { UNSETTLED, settleWithin } from '../shared/lib/settle-within';
 import {
+  DEADLINE_SUBMIT_TIMEOUT_MS,
   deadlineSettlementFor,
   deadlineSubmitFailure,
   deadlineSubmittingNotice,
@@ -88,6 +90,55 @@ describe('deadlineSettlementFor', () => {
 
   it('settles only when the answers are on the server', () => {
     expect(deadlineSettlementFor({ ok: true })).toBe('settle');
+  });
+
+  it('holds a flush that never answered at all', () => {
+    // Mutation guard for the third audit round: reading UNSETTLED as `settle`
+    // is the optimistic reading this slice forbids everywhere else — "we did
+    // not find out" is never "it landed".
+    expect(deadlineSettlementFor(UNSETTLED)).toBe('hold');
+    expect(deadlineSettlementFor(UNSETTLED)).not.toBe('settle');
+  });
+});
+
+// The BLOCKING finding of the Codex review of the second round: the deadline
+// auto-submit awaited `flush()` / `processReal` with NO bound while the board
+// rendered `submitting` — a card with no button. A request that never settles
+// therefore stranded the student on an actionless screen forever, never
+// reaching the retry. Same defect as the round before it, mirrored: the screen
+// asserted ("this wait ends") something the code did not know.
+describe('the deadline submission is BOUNDED', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('never leaves the board on the actionless submitting card', async () => {
+    vi.useFakeTimers();
+    // The exact shape of the bug: a flush that answers neither way.
+    const hungFlush = new Promise<{ ok: boolean }>(() => {
+      // never resolves, never rejects
+    });
+    const flushed = settleWithin(hungFlush, DEADLINE_SUBMIT_TIMEOUT_MS);
+    await vi.advanceTimersByTimeAsync(DEADLINE_SUBMIT_TIMEOUT_MS);
+
+    // The whole chain, at the pure layer: silence → hold → the retry screen.
+    const held = deadlineSettlementFor(await flushed) === 'hold';
+    const screen = realBoardScreen({ reviewing: false, submitFailed: held, expired: true });
+    expect(screen).not.toBe('submitting');
+    expect(screen).toBe('submit-failed');
+    expect(deadlineSubmitFailure(null).retryLabel).toBe('Enviar de novo');
+  });
+
+  it('leaves the HAPPY path alone — a send that lands is still not a failure', async () => {
+    vi.useFakeTimers();
+    const flushed = settleWithin(Promise.resolve({ ok: true }), DEADLINE_SUBMIT_TIMEOUT_MS);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(deadlineSettlementFor(await flushed)).toBe('settle');
+    // …and while it is still in the air, before the bound, the board is the
+    // neutral card, never the red one.
+    expect(realBoardScreen({ reviewing: false, submitFailed: false, expired: true })).toBe(
+      'submitting',
+    );
   });
 });
 
