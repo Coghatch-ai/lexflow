@@ -19,8 +19,8 @@ AND "Responder depois" (BR-03):
 | ------------------- | ------------------------------------------- | -------------------------------------------------------- | ----------------------------------------------------------- |
 | Simulado Padrão     | `app/src/pages/testing-standard-board.tsx`  | answer recorded; frozen at Conferir (`locked={checked}`) | `moveToEnd`, cursor stays                                   |
 | Simulado Real       | `app/src/components/RealExamSimulation.tsx` | exam leaves `playing` / reset                            | `findNextUnanswered` (cursor jumps; "Adiada" badge)         |
-| Repetição Espaçada  | `app/src/components/SpacedRepetition.tsx`   | answer recorded                                          | `moveToEnd` on the ≤5 review queue; SM-2 untouched          |
-| Simulado Adaptativo | `app/src/components/adaptive-screens.tsx`   | answer recorded                                          | `deferred` FIFO drained at the tail (`shouldServeDeferred`) |
+| Repetição Espaçada  | `app/src/components/spaced-board.tsx`       | answer recorded                                          | `moveToEnd` on the ≤5 review queue; SM-2 untouched          |
+| Simulado Adaptativo | `app/src/components/adaptive-board.tsx`     | answer recorded                                          | `deferred` FIFO drained at the tail (`shouldServeDeferred`) |
 
 The three screens outside the Padrão have **no "checked" state** (feedback is a separate screen, and
 the real exam never reveals during the run), so they never pass `locked` — BR-02.5 ("after checking,
@@ -33,6 +33,12 @@ Render/logic splits of the big screens: `real-exam-playing.tsx` + `real-exam-rev
 `TestingPage.tsx` só escolhe o modo; `testing-standard-run.tsx` (filtros, sorteio, reidratação),
 `testing-standard-board.tsx` (a corrida + persistência), `testing-standard-setup.tsx`,
 `testing-standard-question.tsx`, `testing-run-conflict.tsx`, `testing-standard-types.ts`.
+
+A S2c (#78) fez a MESMA divisão nas outras duas telas de estudo: `SpacedRepetition.tsx` e
+`AdaptiveSimulation.tsx` viraram só a ENTRADA (`intent: 'new' | 'resume'` — fila do dia/setup, ou
+reidratação), e a corrida mudou para `spaced-board.tsx` e `adaptive-board.tsx` (+
+`adaptive-board-view.tsx`, só render), com `spaced-types.ts` / `adaptive-types.ts` guardando o
+`RunStart` de cada uma. Ambas montam o board com `key` por corrida, como o Padrão.
 
 Supporting pure modules (unit-tested with plain vitest, no RTL):
 
@@ -111,20 +117,28 @@ answered") is **not** satisfied product-wide until M1 lands.
      `app/src/shared/hooks/use-run-persistence.ts`: salva a cada resposta confirmada com
      debounce trailing de 1500 ms, dá flush no "Salvar e sair"/"Sair e processar"/última questão,
      e o card do modo mostra "Continuar (n/N)" a partir de `examDrafts.list`.
-   - **Revisão Espaçada e Adaptativo (#78) e prova real (#79) — ainda só em memória.** Elas
-     reusarão o mesmo hook; até lá o diálogo delas segue com 2 botões (a REGRA já permite 3 nos
-     modos de estudo — quem segura o botão é o `onSave` que a tela ainda não passa).
+   - **Revisão Espaçada e Simulado Adaptativo (S2c, #78) — gravam e retomam.** Mesmo hook,
+     agora parametrizado por modo (`useRunPersistence(mode, snapshot)`): `spaced-board.tsx` e
+     `adaptive-board.tsx` salvam a cada resposta confirmada, dão flush nas mesmas três portas e
+     ganharam "Salvar e sair" + card "Continuar (n/N)". A espaçada reidrata por
+     `questions.byIds` sobre o `questionIds` persistido e **nunca** reconsulta
+     `questions.reviewQueue` (a fila muda com o SM-2 e com o dia). O adaptativo repõe a escada
+     (`AdaptiveState` verbatim) e a FIFO de adiadas (`deferredIds`), e re-sorteia só o pool
+     candidato.
+   - **Prova real (#79) — ainda só em memória.** Reusará o mesmo hook; até lá o diálogo dela
+     segue com 2 botões (BR-05.5: a real nunca é oferecida de volta).
 
-   Não há `localStorage`/`sessionStorage` em lugar nenhum do repo: fora do Padrão, "processar"
+   Não há `localStorage`/`sessionStorage` em lugar nenhum do repo: na prova real, "processar"
    continua significando "gravar o que foi respondido AGORA via `sessions.record`", nunca
    "retomar depois".
    Nothing is asked when nothing was answered (`shouldPromptOnExit`): there is nothing to process
    and `sessions.record` requires `answers.min(1)`.
 
    Covered exits:
-   - **In-screen exit, all 4 screens** (#68): each of `TestingPage.tsx`, `RealExamSimulation.tsx`,
-     `SpacedRepetition.tsx`, `AdaptiveSimulation.tsx` renders its own `QuitTestDialog` and owns the
-     `quit` handler that calls `sessions.record` over the answers so far.
+   - **In-screen exit, all 4 screens** (#68): each of `testing-standard-board.tsx`,
+     `RealExamSimulation.tsx`, `spaced-board.tsx` e `adaptive-board.tsx` (as duas últimas desde a
+     S2c, #78) renders its own `QuitTestDialog` and owns the `quit` handler that calls
+     `sessions.record` over the answers so far.
    - **Global navigation guard** (#69): `RunGuardProvider` sits inside `<Router>` and above
      `<Layout>`. Each running screen registers itself via `useRegisterRun`; `Layout.tsx` routes the
      **sidebar nav** (`:114`), the **admin nav** (`:144`) and **Sair / sign-out** (`:182`) through
@@ -200,6 +214,29 @@ answered") is **not** satisfied product-wide until M1 lands.
     num `useRef` (`use-run-persistence.ts`), nunca em state, e `run-persistence.test.ts` trava o
     valor cru como asserção. Se alguém for endurecer o parsing, é `deadlineAt` e **só**
     `deadlineAt` (#79) — nunca o token.
+
+### O que a S2c (#78) acrescentou ao desenho
+
+- **O hook virou paramétrico:** `useRunPersistence(mode, snapshot)` — o `"standard"` literal saiu
+  das três chamadas (`get`, payload, `discard`) e o payload passa a vir do `snapshot(token)` da
+  própria tela (`standardDraftPayload` / `spacedDraftPayload` / `adaptiveDraftPayload`).
+- **O cursor do `reconcileRun` é POSICIONAL** (`shared/domain/exam-draft.ts`), nunca `indexOf`: o
+  adaptativo serve a MESMA questão duas vezes de propósito (`park` a deixa em `questions` e
+  `serveDeferred` a reanexa), e a primeira ocorrência jogaria o aluno para trás, sobre uma questão
+  já respondida.
+- **`draftTotalOf`** (mesmo módulo) é o "N" do card: no adaptativo é `modeState.totalQuestions`
+  (a meta), porque `questionIds` ali é o que já foi SERVIDO — `examDrafts.list` ofereceria
+  "Continuar (3/4)" numa prova de 10.
+- **`questions.byIds` devolve o estado SM-2 do próprio aluno** (`interval`, `repetitions`,
+  `nextReviewAt`, `lastCorrect`) por LEFT JOIN com o predicado do usuário **no ON**. No WHERE a
+  junção vira INNER e some toda questão que o aluno nunca viu — quebraria "Questões Salvas" e a
+  retomada do Padrão. `pnpm smoke` (q) trava as três metades: colunas próprias, nulos para a não
+  vista e contagem de linhas intacta.
+- **`RunSaveFailureKind` ganhou `'busy'`** ("Ainda estamos salvando este teste.") — a saída pedida
+  durante um flush respondia `false` em silêncio e o aluno clicava no vazio. Nenhum código de erro
+  mapeia para ela: é recusa local, não resposta do servidor.
+- **O que NÃO entrou:** `examDrafts.touch` (batimento da prova real) segue sem chamador — é linha
+  da S2d/#79, junto com a obrigação de escrever `refs.token.current = res.lastSavedAt`.
 
 ### Como o Padrão persiste (S2b, #77 — o desenho que #78/#79 reusam)
 

@@ -39,6 +39,11 @@ import {
   assertDeadlineRoundTrips,
 } from "./smoke-exam-drafts-mode";
 import {
+  assertAdaptiveTotalIsTheTarget,
+  assertByIdsCarriesOwnSm2State,
+  assertSpacedRecordConsumesDraft,
+} from "./smoke-exam-drafts-s2c";
+import {
   check,
   countRows,
   raises,
@@ -548,7 +553,15 @@ export async function smokeExamDrafts(opts: {
   await assertClientCannotFileRealAsStudy(db, caller, userId, questions);
   await assertDeadlineRoundTrips(caller, db, userId, questions);
 
+  // (q)–(s): the data path slice S2c changed — `byIds` + the "N" of the card +
+  // the spaced run's own claim. They run last because each needs a clean
+  // `exam_drafts` for this user, which the sweep below guarantees for the next.
+  await db.delete(examDrafts).where(eq(examDrafts.userId, userId));
+  await assertByIdsCarriesOwnSm2State(db, caller, questions);
+  await assertAdaptiveTotalIsTheTarget(db, caller, userId, questions);
+  await assertSpacedRecordConsumesDraft(db, caller, userId, questions);
+
   // Belt and braces: nothing this block created may outlive it.
   await db.delete(examDrafts).where(eq(examDrafts.userId, userId));
-  console.warn("[smoke] ✓ exam_drafts (a)–(p) OK");
+  console.warn("[smoke] ✓ exam_drafts (a)–(s) OK");
 }

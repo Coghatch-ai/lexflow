@@ -4,7 +4,7 @@
 // (questions the signed-in user has gotten wrong). Gated behind auth.
 
 import { z } from "zod";
-import { and, eq, inArray, lte, notInArray, sql, type SQL } from "drizzle-orm";
+import { and, eq, getTableColumns, inArray, lte, notInArray, sql, type SQL } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db } from "../../db/client";
 import {
@@ -184,12 +184,42 @@ export const questionsRouter = router({
     };
   }),
 
-  // Fetch a specific set of questions by ID — used by the "Questões Salvas" page.
+  // Fetch a specific set of questions by ID — the "Questões Salvas" page and
+  // EVERY resume of a persisted run (`questions.list` orders by random(), so it
+  // can never rehydrate a frozen queue).
+  //
+  // The SM-2 columns ride along so the Revisão Espaçada can resume WITHOUT
+  // calling `reviewQueue` (epic #67 S2c, criterion 5: re-querying the due set
+  // would swap the questions out from under the cursor). They are the student's
+  // state in the catalog, not run progress — re-read here on every resume,
+  // never snapshotted into the draft, where they would age and start lying.
+  //
+  // The user predicate sits in the JOIN's ON, NOT in the WHERE: in the WHERE it
+  // silently turns this LEFT JOIN into an INNER one and every question the
+  // student has never seen disappears — which empties "Questões Salvas" and
+  // breaks the standard resume. A question with no SM-2 row answers nulls, and
+  // the row count is the same as before the join.
   byIds: protectedProcedure
     .input(z.object({ ids: z.array(z.string()).max(500) }))
-    .query(async ({ input }) => {
+    .query(async ({ ctx, input }) => {
       if (input.ids.length === 0) return [];
-      return db.select().from(oabQuestions).where(inArray(oabQuestions.id, input.ids));
+      return db
+        .select({
+          ...getTableColumns(oabQuestions),
+          interval: userQuestionStates.interval,
+          repetitions: userQuestionStates.repetitions,
+          nextReviewAt: userQuestionStates.nextReviewAt,
+          lastCorrect: userQuestionStates.lastCorrect,
+        })
+        .from(oabQuestions)
+        .leftJoin(
+          userQuestionStates,
+          and(
+            eq(userQuestionStates.questionId, oabQuestions.id),
+            eq(userQuestionStates.userId, ctx.userId),
+          ),
+        )
+        .where(inArray(oabQuestions.id, input.ids));
     }),
 
   // Public SM-2 config (readable by all authenticated users for display purposes).

@@ -167,6 +167,15 @@ export function resumeCursor(cursor: number, survivorCount: number): number {
  * answers — and re-anchors the cursor onto the same question the student was
  * on (or, if that one vanished, onto the survivor that took its place).
  *
+ * The re-anchoring is POSITIONAL — how many survivors sit BEFORE the cursor —
+ * never `indexOf(anchorId)`. The adaptive mode serves the same question twice
+ * on purpose (`park` leaves it in the served list and `serveDeferred`
+ * re-appends it), so `questionIds` legitimately holds duplicates, and `indexOf`
+ * answers with the FIRST occurrence: resuming a run parked on the second copy
+ * would throw the cursor backwards onto a question already answered. Counting
+ * survivors is identical to `indexOf` on a duplicate-free queue and correct on
+ * one with duplicates.
+ *
  * MUST run before every write of a run's answers: `user_answers.question_id`
  * has an FK to `oab_questions`, so recording an answer to a deleted question
  * takes the whole transaction down (that is also why the server-side
@@ -177,11 +186,8 @@ export function reconcileRun(run: ExamDraftSnapshot, catalogIds: Iterable<string
   const questionIds = run.questionIds.filter((id) => catalog.has(id));
   const answers = run.answers.filter((a) => catalog.has(a.questionId));
 
-  const anchorId = run.questionIds[Math.max(0, Math.trunc(run.cursor))];
-  const anchored =
-    anchorId !== undefined && catalog.has(anchorId)
-      ? questionIds.indexOf(anchorId)
-      : run.questionIds.slice(0, Math.max(0, run.cursor)).filter((id) => catalog.has(id)).length;
+  const cursor = Number.isFinite(run.cursor) ? Math.max(0, Math.trunc(run.cursor)) : 0;
+  const anchored = run.questionIds.slice(0, cursor).filter((id) => catalog.has(id)).length;
 
   return {
     questionIds,
@@ -200,6 +206,24 @@ export function answersForRecord(run: ExamDraftSnapshot): AnswerDraft[] {
 /** The "n" of the "Continuar (n/N)" card — answered, never the queue length. */
 export function answeredOf(run: ExamDraftSnapshot): number {
   return processableAnswers(run.answers).length;
+}
+
+/**
+ * The "N" of the "Continuar (n/N)" card — how many questions the run is FOR.
+ *
+ * For the standard and spaced modes the queue is materialized up front, so its
+ * length IS the target. The adaptive mode has no queue: `questionIds` holds the
+ * questions SERVED so far (with a duplicate whenever a postponed one came
+ * back), which grows one per answer — reading it as the total would offer
+ * "Continuar (3/4)" for a simulado of 10. Its target is the number the student
+ * picked in the setup, carried in `modeState.totalQuestions`.
+ */
+export function draftTotalOf(draft: {
+  questionIds: readonly string[];
+  modeState: ExamDraftModeState;
+}): number {
+  if (draft.modeState.mode === "adaptive") return draft.modeState.totalQuestions;
+  return draft.questionIds.length;
 }
 
 /**

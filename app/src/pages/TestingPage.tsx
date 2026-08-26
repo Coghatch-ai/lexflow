@@ -18,8 +18,12 @@ export default function TestingPage(): ReactElement {
   const [mode, setMode] = useState<Mode | null>(null);
   const [intent, setIntent] = useState<StartIntent>('new');
 
-  if (mode === 'adaptive') return <AdaptiveSimulation onExit={() => { setMode(null); }} />;
-  if (mode === 'spaced') return <SpacedRepetition onExit={() => { setMode(null); }} />;
+  if (mode === 'adaptive') {
+    return <AdaptiveSimulation intent={intent} onExit={() => { setMode(null); }} />;
+  }
+  if (mode === 'spaced') {
+    return <SpacedRepetition intent={intent} onExit={() => { setMode(null); }} />;
+  }
   if (mode === 'real') return <RealExamSimulation onExit={() => { setMode(null); }} />;
 
   if (mode === null) {

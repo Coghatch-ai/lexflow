@@ -33,7 +33,12 @@ import {
   shouldPromptOnExit,
   type AnswerDraft,
 } from '../shared/lib/exit-rules';
-import { appendAnswer, dedupeAnswers, type DraftClaim } from '../shared/lib/run-persistence';
+import {
+  appendAnswer,
+  dedupeAnswers,
+  standardDraftPayload,
+  type DraftClaim,
+} from '../shared/lib/run-persistence';
 import TestCompleted from './testing-completed';
 import StandardQuestion from './testing-standard-question';
 import RunOverlays from './testing-run-overlays';
@@ -94,10 +99,10 @@ export default function StandardBoard({
     },
   });
 
-  const persistence = useRunPersistence(() =>
+  const persistence = useRunPersistence('standard', (token) =>
     finished
       ? null
-      : {
+      : standardDraftPayload({
           setup: {
             discipline: start.filters.discipline,
             examBoard: start.filters.examBoard !== '' ? start.filters.examBoard : null,
@@ -108,7 +113,8 @@ export default function StandardBoard({
           answers,
           carriedTime: carriedTimeRef.current,
           elapsedSeconds: timer,
-        },
+          token,
+        }),
   );
 
   // A resumed run already owns its row: adopting during render (a ref write,
@@ -218,7 +224,13 @@ export default function StandardBoard({
   // path and show the normal result screen. The current question only joins the
   // payload once it was checked (BR-05.6 / BR-03).
   const handleQuitAndProcess = async (): Promise<void> => {
-    if (busy) return;
+    // Reachable without any dialog open: the final flush of `handleNext` holds
+    // `busy` while the sidebar guard can still fire. Silence here is what let
+    // the student click into nothing.
+    if (busy) {
+      persistence.reportBusy();
+      return;
+    }
     const carried = carriedTimeRef.current.get(currentQuestion.id) ?? 0;
     const finalAnswers = processableAnswers(
       checked
@@ -251,7 +263,11 @@ export default function StandardBoard({
   // "Salvar e sair" (BR-05.3). Resolves true only once the run is safely on the
   // server, so the sidebar guard knows whether it may navigate.
   const handleSaveAndExit = async (): Promise<boolean> => {
-    if (busy) return false;
+    // Same silent path as above, through the guard's "Salvar e sair".
+    if (busy) {
+      persistence.reportBusy();
+      return false;
+    }
     setBusy(true);
     // Marks the run dirty so the flush ALWAYS writes: a student who saves
     // between two debounce windows must still find the run waiting.

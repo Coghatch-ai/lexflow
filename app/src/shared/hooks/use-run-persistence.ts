@@ -2,7 +2,13 @@
 //
 // The plumbing that keeps an in-flight run on the server (BR-05, epic #67 slice
 // S2b): the debounce, the tRPC calls, the two refs that hold the draft's
-// identity, and the `pagehide` best-effort. Slices #78 and #79 reuse THIS hook.
+// identity, and the `pagehide` best-effort.
+//
+// PARAMETRIC in the mode since S2c (#78): the three study screens share this
+// one hook. It was `"standard"` in three literal places (the `get` that learns
+// the id back, the payload builder, the `discard`), which is exactly what made
+// "just reuse the hook" impossible — the mode is now an argument and the
+// payload comes from the screen's own snapshot.
 //
 // It decides nothing. Every rule lives in the two pure modules it wraps —
 // `../lib/save-scheduler` (cadence) and `../lib/run-persistence` (payload,
@@ -22,13 +28,14 @@ import {
   conflictFor,
   isConflictError,
   persistedDraftOf,
+  runSaveFailure,
   saveFailureFor,
-  standardDraftPayload,
   type DraftClaim,
   type RunConflict,
+  type RunDraftPayload,
   type RunSaveFailure,
-  type StandardRunState,
 } from "../lib/run-persistence";
+import type { RunMode } from "@shared/domain/exam-draft";
 
 /** What an exit handler needs before it may record or navigate. */
 export interface FlushOutcome {
@@ -58,6 +65,13 @@ export interface RunPersistence {
   close: () => void;
   /** "Descartar o salvo" — drops the server's row for this mode. */
   discardSaved: () => Promise<void>;
+  /**
+   * An exit was asked for while one is already in flight. Says so out loud
+   * instead of answering `false` in silence — the sidebar guard's `save()` can
+   * land during the final flush of "Próxima", and the student clicked into
+   * nothing until this existed.
+   */
+  reportBusy: () => void;
   /**
    * Surface an error raised by a call this hook did not make (the recording
    * itself): a CONFLICT as its dialog, anything else as a failure message.
@@ -142,14 +156,24 @@ async function flushRun(refs: PersistenceRefs): Promise<FlushOutcome> {
   return { ok: outcome.ok, claim: outcome.claim };
 }
 
-/** The run as the SCREEN knows it — the token is the hook's business, not its. */
-export type RunSnapshot = Omit<StandardRunState, "token">;
+/**
+ * Reads the CURRENT run off the screen and builds the payload for it. Called
+ * at SEND time, so the write always carries the newest state and never a
+ * captured copy; `null` means "nothing to persist" (the run already ended).
+ *
+ * The screen owns the builder — `standardDraftPayload`, `spacedDraftPayload`,
+ * `adaptiveDraftPayload` — because only it knows its mode's `setup` and
+ * `modeState`. The hook hands it the LIVE token so the payload can carry it
+ * verbatim: the token moves on every save and a captured one is always stale.
+ */
+export type RunSnapshot = (token: string | null) => RunDraftPayload | null;
 
 /**
- * @param snapshot Reads the CURRENT run off the screen. Called at send time, so
- *   the write always carries the newest state and never a captured copy.
+ * @param mode Which `exam_drafts` row this run owns. Every call the hook makes
+ *   is keyed by it — `get` (learning the id back), `discard` — so a screen can
+ *   never read or drop another mode's run.
  */
-export function useRunPersistence(snapshot: () => RunSnapshot | null): RunPersistence {
+export function useRunPersistence(mode: RunMode, snapshot: RunSnapshot): RunPersistence {
   const utils = trpc.useUtils();
   const saveMutation = trpc.examDrafts.save.useMutation();
   const discardMutation = trpc.examDrafts.discard.useMutation();
@@ -190,9 +214,7 @@ export function useRunPersistence(snapshot: () => RunSnapshot | null): RunPersis
   // takes an id off a row that still carries the token this tab just wrote.
   refs.learnDraftId.current = async (): Promise<void> => {
     try {
-      const row = persistedDraftOf(
-        await utils.examDrafts.get.fetch({ mode: "standard" }, FRESH_READ),
-      );
+      const row = persistedDraftOf(await utils.examDrafts.get.fetch({ mode }, FRESH_READ));
       const id = adoptableDraftId(row, refs.token.current);
       if (id !== null) refs.draftId.current = id;
     } catch {
@@ -201,12 +223,10 @@ export function useRunPersistence(snapshot: () => RunSnapshot | null): RunPersis
   };
 
   refs.send.current = async (): Promise<string> => {
-    const run = snapshotRef.current();
-    if (run === null) return refs.token.current ?? "";
+    const payload = snapshotRef.current(refs.token.current);
+    if (payload === null) return refs.token.current ?? "";
     refs.hadToken.current = refs.token.current !== null;
-    const saved = await saveMutation.mutateAsync(
-      standardDraftPayload({ ...run, token: refs.token.current }),
-    );
+    const saved = await saveMutation.mutateAsync(payload);
     // Written the instant the mutation resolves, verbatim.
     refs.token.current = saved.lastSavedAt;
     // One extra read per run, right after the insert that created it. It is
@@ -257,7 +277,7 @@ export function useRunPersistence(snapshot: () => RunSnapshot | null): RunPersis
       forgetIdentity(refs);
     },
     discardSaved: async (): Promise<void> => {
-      await discardMutation.mutateAsync({ mode: "standard" });
+      await discardMutation.mutateAsync({ mode });
       // The WHOLE router, never just `list`: `get` is what a resume reads, and
       // leaving it cached serves a row this call just deleted.
       await utils.examDrafts.invalidate();
@@ -266,6 +286,9 @@ export function useRunPersistence(snapshot: () => RunSnapshot | null): RunPersis
     },
     reportError: (error: unknown): void => {
       raiseFailure(refs, error);
+    },
+    reportBusy: (): void => {
+      setFailure(runSaveFailure("busy"));
     },
   };
 }
