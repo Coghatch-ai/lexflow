@@ -25,10 +25,8 @@ import { createSaveScheduler, type SaveScheduler } from "../lib/save-scheduler";
 import {
   adoptableDraftId,
   claimOutcomeFor,
-  claimlessVerdictFor,
   conflictFor,
   isConflictError,
-  needsClaimlessProbe,
   persistedDraftOf,
   runSaveFailure,
   saveFailureFor,
@@ -38,6 +36,7 @@ import {
   type RunDraftPayload,
   type RunSaveFailure,
 } from "../lib/run-persistence";
+import { claimlessVerdictFor, needsClaimlessProbe, saveRun } from "../lib/run-claimless";
 import type { RunMode } from "@shared/domain/exam-draft";
 
 /** What an exit handler needs before it may record or navigate. */
@@ -333,9 +332,18 @@ export function useRunPersistence(mode: RunMode, snapshot: RunSnapshot): RunPers
     const payload = snapshotRef.current(refs.token.current);
     if (payload === null) return refs.token.current ?? "";
     refs.hadToken.current = refs.token.current !== null;
-    const saved = await saveMutation.mutateAsync(payload);
+    // `saveRun`, not the mutation directly: a FIRST save whose response is lost
+    // still created the row, and retrying it as another `token: null` is what
+    // the router answers with OVERWRITE_CONFLICT forever (#79). It probes and
+    // adopts the row only when that row is a verbatim echo of what we sent.
+    const saved = await saveRun(payload, {
+      save: (input) => saveMutation.mutateAsync(input),
+      probe: () => refs.probeRow.current(),
+    });
     // Written the instant the mutation resolves, verbatim.
     refs.token.current = saved.lastSavedAt;
+    // An adopted row comes WITH its id, so the read below is already paid for.
+    if (saved.draftId !== null) refs.draftId.current = saved.draftId;
     // One extra read per run, right after the insert that created it. It is
     // best-effort HERE (the save itself already landed); the exit path tries
     // again and refuses to record without it.

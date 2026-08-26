@@ -20,8 +20,10 @@
 // A missing token is NOT proof that there is nothing to claim (the save can
 // commit and lose its response), so in this mode `flush()` probes the server
 // before it ever answers "record with no claim" — `needsClaimlessProbe` /
-// `claimlessVerdictFor` in `shared/lib/run-persistence.ts`. A row that comes
-// back is terminal here, like any other CONFLICT.
+// `claimlessVerdictFor` in `shared/lib/run-claimless.ts`. A row that comes
+// back is terminal here, like any other CONFLICT. The SAME lost response on the
+// save side is `saveRun` in that file: it adopts the row it can prove it wrote,
+// instead of retrying `token: null` into OVERWRITE_CONFLICT forever.
 //
 // The clock is derived from the ABSOLUTE `deadlineAt`, never counted locally:
 // reloading the tab cannot hand back time and the exam does not pause (D8).

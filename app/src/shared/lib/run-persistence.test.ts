@@ -5,11 +5,9 @@ import {
   appendAnswer,
   claimFor,
   claimOutcomeFor,
-  claimlessVerdictFor,
   conflictFor,
   dedupeAnswers,
   isConflictError,
-  needsClaimlessProbe,
   persistedDraftOf,
   resumableFor,
   resumeStateFrom,
@@ -360,55 +358,6 @@ describe("claimOutcomeFor", () => {
     expect(outcome.ok).toBe(true);
     expect(outcome.claim).toBeUndefined();
     expect(outcome.failure).toBeNull();
-  });
-});
-
-// The #79 audit finding: `claimOutcomeFor(null, null)` above says "record with
-// no claim", which is right for a run that was never persisted and WRONG for a
-// run whose creating save committed and lost its response. In the prova real
-// that second case writes the session, leaves the orphan row alive on top of
-// it, and the next lazy settlement records a SECOND session (BR-05.7).
-describe("needsClaimlessProbe", () => {
-  const CLAIMLESS = claimOutcomeFor(null, null);
-
-  it("checks the server before ANY claimless recording of a prova real", () => {
-    expect(needsClaimlessProbe("real", CLAIMLESS)).toBe(true);
-  });
-
-  it("does not check when the claim is known — nothing to be unsure about", () => {
-    expect(needsClaimlessProbe("real", claimOutcomeFor("draft-1", PG_TOKEN))).toBe(false);
-  });
-
-  it("does not check a refusal — that run is not being recorded at all", () => {
-    expect(needsClaimlessProbe("real", claimOutcomeFor(null, PG_TOKEN))).toBe(false);
-  });
-
-  it("leaves the study modes alone — only the real exam is settled by the server", () => {
-    for (const mode of ["standard", "spaced", "adaptive"] as const) {
-      expect(needsClaimlessProbe(mode, CLAIMLESS)).toBe(false);
-    }
-  });
-});
-
-// Fail-closed in BOTH directions: a row that came back is terminal, and a probe
-// that could not be read is never taken for "no row".
-describe("claimlessVerdictFor", () => {
-  it("records only when the server confirms there is no row to orphan", () => {
-    expect(claimlessVerdictFor({ read: true, row: null })).toBe("record");
-  });
-
-  it("is terminal when a row IS there — the server will settle that row", () => {
-    // The orphan: the save committed, its response was lost, so this tab holds
-    // no token. Recording here is the twin session.
-    const verdict = claimlessVerdictFor({ read: true, row: draft({ mode: "real" }) });
-    expect(verdict).toBe("conflict");
-    expect(verdict).not.toBe("record");
-  });
-
-  it("refuses when the probe itself failed — unread is not 'no row'", () => {
-    const verdict = claimlessVerdictFor({ read: false, row: null });
-    expect(verdict).toBe("retry");
-    expect(verdict).not.toBe("record");
   });
 });
 
