@@ -346,11 +346,23 @@ answered") is **not** satisfied product-wide until M1 lands.
    na aba. Limiar do servidor: `REAL_RUN_STALE_SECONDS = 180` (3 batimentos perdidos).
    **`dirty` NÃO é motivo para pular** (2ª auditoria do #79): com o re-arme na falha, `dirty` sem
    nada agendado/em voo significa "o último envio FALHOU", então o beat **reenvia** em vez de calar.
-   E toda escrita tem **teto** — `WRITE_TIMEOUT_MS = 30 s` no `save-scheduler`, via `settleWithin`
-   (revisão adversarial Codex): `fetch` não expira sozinho, e uma escrita pendurada segurava o
-   `inFlight` para sempre — o beat pulava todo minuto, `last_saved_at` passava dos 180 s e o
-   próximo contato autenticado liquidava a prova **debaixo** do aluno. Silêncio vira falha, o
-   slot libera, o próximo beat reenvia.
+   E toda escrita tem **teto** (revisão adversarial Codex): `fetch` não expira sozinho, e uma
+   escrita pendurada segurava o `inFlight` para sempre — o beat pulava todo minuto,
+   `last_saved_at` passava dos 180 s e o próximo contato autenticado liquidava a prova **debaixo**
+   do aluno. Silêncio vira falha, o slot libera, o próximo beat reenvia.
+   **Onde o teto mora importa** (3ª revisão adversarial): `SAVE_TIMEOUT_MS = 15 s` mora DENTRO do
+   `saveRun` (`run-claimless.ts`), com `PROBE_TIMEOUT_MS = 5 s` para a sondagem, e
+   `WRITE_TIMEOUT_MS = 30 s` no `save-scheduler` é só **rede de segurança** para quem não tem
+   recuperação própria (`keepAlive`, `exitSend`) — 15+5 < 30 por construção, com teste que fixa a
+   ordem. Um teto aplicado de FORA só sabia relatar a falha: a requisição abandonada podia **ter
+   commitado**, o `token` continuava `null`, e o retry saía como outro `token: null` que o router
+   recusa com `OVERWRITE_CONFLICT` — conflito do aluno contra a própria escrita, e TERMINAL
+   (`raiseIfConflict` fecha o scheduler). Dentro do `saveRun` o estouro é só mais uma resposta
+   perdida: a sondagem compara a linha com **o mesmo payload** que estourou — único instante em
+   que o eco prova a posse, porque um beat depois o payload já mudou — e adota. Por isso também o
+   `OVERWRITE_CONFLICT` de um save SEM token deixou de ser terminal por suposição e passou a ser
+   terminal por **prova**: com `token: null` o CONFLICT só diz "existe linha em (user, mode)",
+   nunca de quem; sem eco, o CONFLICT original segue de pé com o diálogo do BR-05.8.
 5. **Duas portas de auto-submit, uma sessão.** Aba aberta no zero: `flush()` → `processReal()` →
    tela de revisão montada da MEMÓRIA (critério 4). Aba fechada: nada na hora (não há scheduler) —
    liquida no próximo contato autenticado. Os dois podem disparar; o `DELETE` do rascunho é a

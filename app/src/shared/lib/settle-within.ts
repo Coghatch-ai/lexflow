@@ -49,6 +49,35 @@ export async function settleWithin<T extends object>(
   }
 }
 
+/** What a call that never answered rejects with. */
+export const TIMED_OUT_MESSAGE = "save timed out";
+
+/**
+ * `settleWithin` as a REJECTION instead of a marker: one awaited call, bounded,
+ * where silence becomes the single outcome every save path already handles
+ * (`onError`, the `dirty` re-arm, `saveRun`'s claimless recovery, `ok: false`).
+ *
+ * It lives here rather than in either caller because both need the very same
+ * bound for opposite reasons — `save-scheduler` to free the slot `beat` skips
+ * on, `run-claimless` to turn a hung write into the lost-response case it
+ * already knows how to recover from — and two copies of one bound is how the
+ * two budgets drift out of the order they depend on.
+ *
+ * It does NOT cancel the call (`mutateAsync` exposes no signal): the loser keeps
+ * flying and may still commit. That is precisely why the caller that owns the
+ * payload must be the one to bound it — see `saveRun`.
+ */
+export async function boundedCall<T>(call: Promise<T>, ms: number): Promise<T> {
+  // Wrapped in an object because `settleWithin` takes `T extends object`, which
+  // is what keeps `UNSETTLED` from colliding with a legitimate string value.
+  const raced = await settleWithin(
+    call.then((value) => ({ value })),
+    ms,
+  );
+  if (raced === UNSETTLED) throw new Error(TIMED_OUT_MESSAGE);
+  return raced.value;
+}
+
 /** The bound as a promise plus its off switch, so the handle never escapes. */
 function boundAfter(ms: number): { promise: Promise<typeof UNSETTLED>; cancel: () => void } {
   let cancel = (): void => undefined;

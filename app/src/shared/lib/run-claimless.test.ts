@@ -111,19 +111,21 @@ describe("claimlessVerdictFor", () => {
   });
 });
 
-// The SAVE-path twin. A CONFLICT is an ANSWER, not an unknown: the row
-// pre-existed this save (BR-05.8) and must get its dialog, never an adoption.
+// The SAVE-path twin. With `token: null` the router's CONFLICT says only that a
+// row exists on (user_id, mode) — never whose — and this tab's own timed-out
+// first write produces exactly that row. So EVERY claimless failure is probed,
+// and the echo test is what keeps another device's run terminal (BR-05.8).
 describe("needsClaimlessSaveProbe", () => {
   it("probes after a first save whose response was lost", () => {
-    expect(needsClaimlessSaveProbe(false, LOST_RESPONSE)).toBe(true);
+    expect(needsClaimlessSaveProbe(false)).toBe(true);
   });
 
-  it("never probes after a CONFLICT — the server already said whose row it is", () => {
-    expect(needsClaimlessSaveProbe(false, conflictError("Já existe um teste"))).toBe(false);
+  it("probes a claimless CONFLICT too — it may be this tab's own abandoned write", () => {
+    expect(needsClaimlessSaveProbe(false)).toBe(true);
   });
 
   it("never probes a save that CARRIED a token — that one can be claimed", () => {
-    expect(needsClaimlessSaveProbe(true, LOST_RESPONSE)).toBe(false);
+    expect(needsClaimlessSaveProbe(true)).toBe(false);
   });
 });
 
@@ -336,18 +338,20 @@ describe("saveRun — a first save whose response is lost", () => {
     expect(server.row()?.lastSavedAt).toBe(third.lastSavedAt);
   });
 
-  it("is the loop it prevents: the same run without the recovery never lands", async () => {
-    // The pre-fix behaviour, spelled out against the same fake server — this is
-    // what `saveRun` turns into the three landed saves above.
+  it("adopts on the OVERWRITE_CONFLICT too — that row is this tab's own write", async () => {
+    // The retry AFTER a lost first save: the row is already there, so the
+    // router answers OVERWRITE_CONFLICT. Reading that as "another device" is
+    // what made the student collide with themselves, terminally
+    // (`raiseIfConflict` closes the scheduler for good). The echo decides.
     const server = fakeDraftsServer();
     const payload = standardDraftPayload(run({ token: null }));
     expect(() => server.save(payload)).not.toThrow(); // committed, response lost
-    await expect(
-      saveRun(payload, {
-        save: (input) => Promise.resolve(server.save(input)),
-        probe: () => Promise.resolve({ read: true, row: server.row() }),
-      }),
-    ).rejects.toMatchObject({ data: { code: "CONFLICT" } });
+    const adopted = await saveRun(payload, {
+      save: (input) => Promise.resolve(server.save(input)),
+      probe: () => Promise.resolve({ read: true, row: server.row() }),
+    });
+    expect(adopted.draftId).toBe("row-1");
+    expect(adopted.lastSavedAt).toBe(server.row()?.lastSavedAt);
   });
 
   it("rethrows a CONFLICT untouched — that dialog is the student's to answer", async () => {

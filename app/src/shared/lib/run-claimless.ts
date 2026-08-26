@@ -13,6 +13,12 @@
 //     router reads as "first save" and refuses with `OVERWRITE_CONFLICT` — the
 //     student retries forever against a row THIS TAB wrote.
 //
+// The save path also owns the BOUND on that write (`SAVE_TIMEOUT_MS`), because
+// a request that stalls is the same event as one whose response was dropped —
+// and only the module holding the payload can tell the row it wrote from a
+// stranger's. Bounding it from the cadence layer instead was the regression
+// this file's third round exists to undo (see `saveRun`).
+//
 // They are deliberately neighbours rather than two mechanisms in two files:
 // the fail-closed direction is the same in both (`read: false` ⇒ do nothing),
 // and only the terminal move differs (do not record vs. adopt and carry on).
@@ -20,9 +26,9 @@
 // Pure, like `run-persistence.ts` it builds on: no React, no tRPC, so the whole
 // loop — save, lost response, retry — is provable with plain vitest.
 
+import { boundedCall } from "./settle-within";
 import {
   claimFor,
-  isConflictError,
   type ClaimOutcome,
   type DraftClaim,
   type PersistedDraft,
@@ -80,18 +86,34 @@ export function claimlessVerdictFor({
 /**
  * The SAVE-path twin of `needsClaimlessProbe` (audit of #79), same cause, other
  * end of the run: a save that carried no token created the row server-side and
- * its response was lost. `token` stays null, so every retry is another
- * `token: null` — which the router reads as "first save" and refuses with
- * `OVERWRITE_CONFLICT` (`onConflictDoNothing` + CONFLICT). The student retries
- * forever against their own row, and a prova real's row then goes stale until
- * `settleRealRun` calls the exam abandoned.
+ * its response was lost (dropped, or bounded away by `SAVE_TIMEOUT_MS`).
+ * `token` stays null, so every retry is another `token: null` — which the
+ * router reads as "first save" and refuses with `OVERWRITE_CONFLICT`
+ * (`onConflictDoNothing` + CONFLICT). The student retries forever against their
+ * own row, and a prova real's row then goes stale until `settleRealRun` calls
+ * the exam abandoned.
  *
- * A CONFLICT is excluded on purpose: the server ANSWERED, so nothing is
- * unknown — the row pre-existed this save (BR-05.8, a run born on another
- * device) and it must get its dialog, never an adoption.
+ * A CONFLICT used to be excluded here — "the server ANSWERED, so nothing is
+ * unknown". That reading was wrong for a CLAIMLESS save, and it is the last
+ * link of the Codex chain (`exam-drafts.router.ts` `save`): with `token: null`
+ * the router's CONFLICT says only "a row exists on (user_id, mode)". It does
+ * NOT say whose. This tab's own timed-out first write produces exactly that
+ * row, so treating the answer as terminal makes the student collide with
+ * themselves — the one collision a prova real can never recover from, since
+ * `raiseIfConflict` closes the scheduler for good.
+ *
+ * So the CONFLICT stops being terminal by ASSUMPTION and becomes terminal by
+ * PROOF: it is probed, and `claimlessSaveAdoption` adopts only a row that
+ * echoes back every field this payload sent. No echo ⇒ the original CONFLICT
+ * stands untouched and gets its BR-05.8 dialog ("continuado em outro
+ * aparelho"), which is the fail-closed half this file has everywhere.
+ *
+ * A save that CARRIED a token is untouched: its CONFLICT is a real lost race
+ * on `last_saved_at`, ownership was already proven by the token, and there is
+ * nothing to discover by reading the row again.
  */
-export function needsClaimlessSaveProbe(hadToken: boolean, error: unknown): boolean {
-  return !hadToken && !isConflictError(error);
+export function needsClaimlessSaveProbe(hadToken: boolean): boolean {
+  return !hadToken;
 }
 
 /**
@@ -251,22 +273,66 @@ export interface SaveRunIO {
 }
 
 /**
- * One save, with the lost-response recovery around it (#79). A pure
+ * How long ONE save may stay in the air before this module calls it lost.
+ *
+ * The bound lives HERE, not in `save-scheduler.ts`, and that is the whole fix
+ * of the third Codex round. A bound in `dispatch` abandons the request from
+ * outside: the scheduler holds no payload, so a write that timed out and then
+ * COMMITTED was indistinguishable from one that never landed — `dirty` was
+ * re-armed, the retry went out as another `token: null`, and the router
+ * answered `OVERWRITE_CONFLICT` against the student's own abandoned write,
+ * terminally. Inside `saveRun` the timeout is just another lost response, and
+ * the probe below compares the row against THE VERY PAYLOAD that timed out,
+ * which is the only moment the echo can prove ownership: one beat later the
+ * payload has moved on (a new answer, a new cursor) and no row would ever match
+ * it again.
+ *
+ * 15 s, so that 15 + `PROBE_TIMEOUT_MS` stays under the scheduler's 30 s
+ * backstop and the recovery always runs before the slot is torn out from under
+ * it. Tripping early is cheap: the probe either proves the row is ours (one
+ * read, and the token is learned) or refuses, and the write is owed again.
+ */
+export const SAVE_TIMEOUT_MS = 15_000;
+
+/**
+ * The recovery read's own bound: the probe is a single user-scoped `get`, and a
+ * probe that hangs would hold the slot exactly like the write it came to
+ * rescue. Unread is never taken for "no row" (`read: false`), so the timeout is
+ * a refusal, never an adoption.
+ */
+export const PROBE_TIMEOUT_MS = 5_000;
+
+/** The probe, bounded and fail-closed: silence and failure both read as unknown. */
+async function probeWithin(io: SaveRunIO): Promise<{ read: boolean; row: PersistedDraft | null }> {
+  try {
+    return await boundedCall(io.probe(), PROBE_TIMEOUT_MS);
+  } catch {
+    return { read: false, row: null };
+  }
+}
+
+/**
+ * One save, BOUNDED, with the lost-response recovery around it (#79). A pure
  * orchestration over two injected calls rather than logic inside the hook, so
- * the whole loop is provable without React.
+ * the whole loop — save, silence, probe, adoption — is provable without React.
+ *
+ * The three ways a claimless save can fail are ONE case here, because they are
+ * one case on the server: the row may or may not exist, and only its content
+ * says whose it is. A dropped response, a request that never answers
+ * (`SAVE_TIMEOUT_MS`) and an `OVERWRITE_CONFLICT` all lead to the same probe.
  *
  * Rethrows the original error whenever it did NOT adopt: a dropped request is
- * retried by the next debounce (`save-scheduler.ts` re-arms `dirty`) and a
- * CONFLICT still stops the autosave and raises its dialog. Only a proven echo
- * of our own write turns the failure into the success it actually was.
+ * retried by the next debounce (`save-scheduler.ts` re-arms `dirty`) and an
+ * unproven CONFLICT still stops the autosave and raises its dialog. Only a
+ * proven echo of our own write turns the failure into the success it was.
  */
 export async function saveRun(sent: RunDraftPayload, io: SaveRunIO): Promise<SavedRun> {
   try {
-    const saved = await io.save(sent);
+    const saved = await boundedCall(io.save(sent), SAVE_TIMEOUT_MS);
     return { lastSavedAt: saved.lastSavedAt, draftId: null };
   } catch (error: unknown) {
-    if (!needsClaimlessSaveProbe(sent.token !== null, error)) throw error;
-    const adopted = claimlessSaveAdoption(await io.probe(), sent);
+    if (!needsClaimlessSaveProbe(sent.token !== null)) throw error;
+    const adopted = claimlessSaveAdoption(await probeWithin(io), sent);
     if (adopted === null) throw error;
     return { lastSavedAt: adopted.lastSavedAt, draftId: adopted.id };
   }

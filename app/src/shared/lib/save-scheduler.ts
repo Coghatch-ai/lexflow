@@ -24,14 +24,13 @@
 // BOUNDED (`WRITE_TIMEOUT_MS`): silence becomes a failure, so the slot `beat`
 // skips on can never be held forever by a request that stalled.
 
-import { UNSETTLED, settleWithin } from "./settle-within";
+import { boundedCall } from "./settle-within";
 
 /** Debounce window between a confirmed answer and its write (BR-05 S2b). */
 export const SAVE_DEBOUNCE_MS = 1500;
 
 /**
- * How long ONE write may stay in the air before it counts as failed (Codex
- * adversarial review of #79).
+ * The BACKSTOP bound on one dispatched write (Codex adversarial review of #79).
  *
  * `fetch` never times out on its own: a connection that stalls after the
  * request left resolves neither way. The slot such a write occupies
@@ -41,35 +40,27 @@ export const SAVE_DEBOUNCE_MS = 1500;
  * student still sitting it. The same failure the `dirty` re-arm fixed one round
  * earlier, through the other flag.
  *
+ * BACKSTOP, not the primary bound, and that word is the third-round fix. This
+ * module bounds an OPAQUE writer: when it trips, the write it abandoned is a
+ * request that may still commit, and this module has no payload to recognise
+ * that commit by — so the timeout arrived here as a plain failure, `dirty` was
+ * re-armed, and the retry of a FIRST save went out as another `token: null`,
+ * which the router answers with OVERWRITE_CONFLICT: a conflict the student
+ * hit against their own abandoned write, and TERMINAL (`raiseIfConflict`).
+ * The bound that can RECOVER belongs where the payload is — inside `saveRun`
+ * (`run-claimless.ts`), whose probe compares the row against the very payload
+ * that timed out. This one only guarantees the slot is freed, for the writers
+ * that carry no recovery of their own (`keepAlive`, `exitSend`).
+ *
  * 30 s is chosen against those two numbers: comfortably longer than any healthy
  * write on a bad mobile link, and short enough that the NEXT beat (≤ 60 s away)
- * resends the owed payload well inside the 180 s staleness window. Tripping it
- * early costs one extra write — the retry is idempotent by construction
- * (`saveRun` adopts the row it can prove it wrote) — while not tripping it at
- * all costs the exam.
+ * resends the owed payload well inside the 180 s staleness window. It is also
+ * deliberately LONGER than the save path's own budget
+ * (`SAVE_TIMEOUT_MS + PROBE_TIMEOUT_MS`, 20 s), so the recovery always gets to
+ * run before the backstop fires — an ordering `run-claimless-timeout.test.ts`
+ * pins, because inverting it silently restores the terminal conflict.
  */
 export const WRITE_TIMEOUT_MS = 30_000;
-
-/** What a write that never answered rejects with. */
-export const WRITE_TIMEOUT_MESSAGE = "save timed out";
-
-/**
- * One write, BOUNDED: silence becomes a rejection, which is the single outcome
- * every path here already handles (`onError`, the `dirty` re-arm, `ok: false`).
- *
- * It does not cancel the request — `mutateAsync` exposes no signal — so the
- * loser keeps flying and lands harmlessly: the row is UNIQUE on
- * `(user_id, mode)`, and the resend either carries the right token or raises
- * the honest CONFLICT.
- */
-async function boundedWrite<T>(written: Promise<T>, ms: number): Promise<T> {
-  const raced = await settleWithin(
-    written.then((value) => ({ value })),
-    ms,
-  );
-  if (raced === UNSETTLED) throw new Error(WRITE_TIMEOUT_MESSAGE);
-  return raced.value;
-}
 
 /**
  * The outcome of a flush. Never a rejected promise: an exit handler awaits
@@ -203,8 +194,10 @@ export function createSaveScheduler<T>({
       if (previous !== null) await previous.catch(() => undefined);
       try {
         // BOUNDED: a write that never answers must free this slot, or `beat`
-        // skips on it for the rest of the exam (`WRITE_TIMEOUT_MS`).
-        const value = await boundedWrite(write(), WRITE_TIMEOUT_MS);
+        // skips on it for the rest of the exam (`WRITE_TIMEOUT_MS`). The SAVE
+        // path bounds itself sooner and recovers (`saveRun`); this is what
+        // covers the writers that cannot.
+        const value = await boundedCall(write(), WRITE_TIMEOUT_MS);
         last = value;
         return value;
       } catch (error: unknown) {

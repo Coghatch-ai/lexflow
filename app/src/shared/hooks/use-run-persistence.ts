@@ -191,6 +191,13 @@ function sendVia(
     // still created the row, and retrying it as another `token: null` is what
     // the router answers with OVERWRITE_CONFLICT forever (#79). It probes and
     // adopts the row only when that row is a verbatim echo of what we sent.
+    //
+    // It also BOUNDS the write (`SAVE_TIMEOUT_MS`), which is why `token` can no
+    // longer stay null after a save that stalled and landed anyway: the timeout
+    // is handled by the same probe, against this same `payload`, while it is
+    // still the payload the server was given. A bound applied from outside
+    // (`save-scheduler`'s dispatch) could only report the failure — by the next
+    // attempt the payload has moved and nothing can prove the row is ours.
     const saved = await saveRun(payload, io);
     // Written the instant the mutation resolves, verbatim.
     refs.token.current = saved.lastSavedAt;
