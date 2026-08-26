@@ -10,10 +10,15 @@
 
 import type { ReactElement } from 'react';
 import { AlertTriangle } from 'lucide-react';
-import type { RealFailure } from './real-exam-failures';
+import type { RealFailureCopy } from './real-exam-failures';
 
 interface RealExamFailureCardProps {
-  failure: RealFailure;
+  /**
+   * Copy only (`RealFailureCopy`, not `RealFailure`): the board's deadline
+   * failure renders on this same card and must NOT carry a container
+   * `RealFailureKind`, whose retry map can answer `start` — the destructive one.
+   */
+  failure: RealFailureCopy;
   /** A retry is in flight — both buttons wait it out. */
   busy: boolean;
   onRetry: () => void;

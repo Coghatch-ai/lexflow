@@ -29,13 +29,21 @@
 // student who leaves the exam open in a background tab is judged abandoned
 // after 3 missed beats and auto-submitted mid-exam.
 //
+// The deadline door may only SETTLE once its flush landed (`deadlineSettlementFor`).
+// It is the one exit with no manual retry behind it — the clock is at 0, so the
+// student cannot press "Encerrar" again — which is exactly why a failed flush
+// here may not close the run and show the review screen: that discards every
+// answer that never reached the server and announces a result that does not
+// exist. A failed flush HOLDS instead: `submit-failed`, whose button re-runs the
+// submission (`realBoardScreen`).
+//
 // A CONFLICT NEVER opens the conflict dialog here. "Recarregar do servidor" and
 // "Descartar esta cópia" are choices about a run that can be continued; this one
 // cannot, and "discard" is precisely what BR-05.5 forbids. A CONFLICT — from the
 // save, the heartbeat or the recording — means the exam already ended somewhere
 // else, so it is terminal: back to the setup card with a line saying so.
 
-import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
+import { useEffect, useMemo, useState, type ReactElement } from 'react';
 import { useLov } from '../shared/hooks/use-lov';
 import { trpc } from '../shared/lib/trpc';
 import { findNextUnanswered } from '../shared/lib/exam-queue';
@@ -46,7 +54,13 @@ import { useRunPersistence } from '../shared/hooks/use-run-persistence';
 import ExamPlaying from './real-exam-playing';
 import ExamReview from './real-exam-review';
 import QuitTestDialog from './QuitTestDialog';
+import RealExamFailureCard from './real-exam-failure-card';
 import RunFailureDialog from '../pages/testing-run-failure';
+import {
+  deadlineSettlementFor,
+  deadlineSubmitFailure,
+  realBoardScreen,
+} from './real-exam-failures';
 import {
   exitPrompt,
   processableAnswers,
@@ -58,6 +72,7 @@ import {
   dedupeAnswers,
   realDraftPayload,
   type DraftClaim,
+  type RunConflictKind,
 } from '../shared/lib/run-persistence';
 import {
   REAL_EXAM_DIFFICULTY,
@@ -74,6 +89,12 @@ import {
 } from '../shared/lib/eliminations';
 import { answeredIndexes, formatTime, type RealRunStart } from './real-exam-types';
 import { useHeartbeat, useTickingNow } from '../shared/hooks/use-real-exam-clock';
+import { useRealExamMarks } from '../shared/hooks/use-real-exam-marks';
+import {
+  useAdoptedDraft,
+  useDeadlineAutoSubmit,
+  useFirstSave,
+} from '../shared/hooks/use-real-exam-lifecycle';
 
 interface RealExamBoardProps {
   start: RealRunStart;
@@ -81,8 +102,12 @@ interface RealExamBoardProps {
   onExitToModes: () => void;
   /** "Fazer Outro Simulado Real" — back to the setup card. */
   onRestart: () => void;
-  /** The exam ended somewhere else (CONFLICT): terminal, with a pt-BR line. */
-  onSettledElsewhere: () => void;
+  /**
+   * A CONFLICT ended this tab's exam: terminal, with a pt-BR line picked from
+   * the conflict's KIND — a `live` one means the prova real is still running
+   * elsewhere, not that it was processed (`realConflictNotice`).
+   */
+  onSettledElsewhere: (kind: RunConflictKind) => void;
 }
 
 export default function RealExamBoard({
@@ -99,11 +124,14 @@ export default function RealExamBoard({
   const [questions] = useState(start.questions);
   const [currentIndex, setCurrentIndex] = useState(start.cursor);
   const [answers, setAnswers] = useState<AnswerDraft[]>(start.answers);
-  const [flagged, setFlagged] = useState<Set<number>>(new Set());
-  const [postponed, setPostponed] = useState<Set<number>>(new Set());
+  const marks = useRealExamMarks();
   const [eliminations, setEliminations] = useState<EliminationState>(NO_ELIMINATIONS);
   const [reviewing, setReviewing] = useState(false);
   const [busy, setBusy] = useState(false);
+  // The deadline fired and its flush did NOT land. Terminal for the exam (it
+  // can never be answered again) but NOT for the answers: they are still here
+  // and the screen this raises is how they get sent.
+  const [submitFailed, setSubmitFailed] = useState(false);
   const [exitOpen, setExitOpen] = useState(false);
   const [showConfirmSubmit, setShowConfirmSubmit] = useState(false);
   const now = useTickingNow(!reviewing);
@@ -130,14 +158,9 @@ export default function RealExamBoard({
   );
   const { conflict, failure } = persistence;
 
-  // A rehydrated run already owns its row: adopting during render (a ref write,
-  // nothing painted) keeps the token out of an effect, where a re-run would
-  // overwrite a fresher token with the one this mount started from.
-  const adoptedRef = useRef(false);
-  if (!adoptedRef.current) {
-    adoptedRef.current = true;
-    if (start.draft !== null) persistence.adopt(start.draft.id, start.draft.token);
-  }
+  // A rehydrated run already owns its row (`useAdoptedDraft` explains why it is
+  // a render-time ref write and not an effect).
+  useAdoptedDraft(start.draft, persistence.adopt);
 
   // The answers, in the two shapes the screens need. Keyed by QUESTION ID
   // because that is how they are persisted (D8); the index set is derived from
@@ -163,23 +186,18 @@ export default function RealExamBoard({
   // The exam already ended elsewhere (another tab's submit, or a lazy
   // settlement that won the race). Terminal — never the conflict dialog.
   useEffect(() => {
-    if (conflict !== null) onSettledElsewhere();
+    if (conflict !== null) onSettledElsewhere(conflict.kind);
   }, [conflict, onSettledElsewhere]);
 
-  // The FIRST save of a fresh run, which is what writes `deadline_at`. Without
-  // it an exam abandoned before the first answer leaves no row to settle, and
-  // the deadline the auto-submit is judged against never exists. No dependency
-  // array by design — the ref is what makes it run exactly once.
-  const openedRef = useRef(false);
-  useEffect(() => {
-    if (openedRef.current) return;
-    openedRef.current = true;
-    if (start.draft === null) persistence.scheduleSave();
-  });
+  // The FIRST save of a fresh run — what writes `deadline_at` (`useFirstSave`).
+  useFirstSave(start.draft === null, persistence.scheduleSave);
 
   useLeaveWarning(!reviewing && shouldPromptOnExit(answeredCount));
 
-  const recordRun = async (finalAnswers: AnswerDraft[], claim: DraftClaim | undefined): Promise<void> => {
+  const recordRun = async (
+    finalAnswers: AnswerDraft[],
+    claim: DraftClaim | undefined,
+  ): Promise<void> => {
     try {
       await recordMutation.mutateAsync({
         // BR-05.5: filed as "Prova Real"/hard whichever door it left by. The
@@ -202,9 +220,25 @@ export default function RealExamBoard({
 
   // The 5 h ran out with the tab open. Same settlement the server would have
   // done, asked for by the client so the student sees their result now.
+  //
+  // The flush is a GATE, not a formality (audit of #79): it is what puts the
+  // answers on the server, and `processReal` settles the SERVER's row — so a
+  // failed flush means settling would file an exam missing everything typed
+  // since the last save, or (for a run whose first save never landed) an exam
+  // that does not exist at all. There is no manual retry behind this door, so
+  // it holds the run in `submit-failed` instead of discarding it: nothing is
+  // closed, `reviewing` is never set, and the card's button lands right back
+  // here. A CONFLICT also arrives as `ok: false`, and the effect above turns
+  // that one terminal before this screen can be seen.
   const finishByDeadline = async (): Promise<void> => {
     setBusy(true);
-    await persistence.flush();
+    setSubmitFailed(false);
+    const flushed = await persistence.flush();
+    if (deadlineSettlementFor(flushed) === 'hold') {
+      setSubmitFailed(true);
+      setBusy(false);
+      return;
+    }
     try {
       await processRealMutation.mutateAsync();
       void utils.stats.invalidate();
@@ -223,22 +257,10 @@ export default function RealExamBoard({
     setReviewing(true);
   };
 
-  // Fires exactly once, guarded by a ref rather than a dependency list: a
-  // second auto-submit would be a second `processReal` for the same run.
-  //
-  // `busy` is in the guard for the tightest race this screen has: the student
-  // clicks "Encerrar" with a second left and the deadline passes while that
-  // flush is still in the air. The draft DELETE would de-duplicate them anyway,
-  // but the two would fight over one claim and the loser would raise a CONFLICT
-  // at the student for a run that ended perfectly normally. If the manual exit
-  // then FAILS, `busy` clears with `reviewing` still false and this fires — the
-  // deadline has passed, so settling is exactly right.
-  const submittedRef = useRef(false);
-  useEffect(() => {
-    if (reviewing || busy || submittedRef.current || secondsLeft > 0) return;
-    submittedRef.current = true;
-    void finishByDeadline();
-  });
+  // Fires exactly once (`useDeadlineAutoSubmit` owns the ref guard and the race
+  // `blocked` is there for). The RETRY on a held submission is not this effect —
+  // it is the card's button calling `finishByDeadline` again.
+  useDeadlineAutoSubmit({ blocked: reviewing || busy, secondsLeft, submit: finishByDeadline });
 
   // "Encerrar" / "Sair da prova" / the sidebar guard: process what was
   // answered through the normal recording path, WITH the claim.
@@ -303,12 +325,7 @@ export default function RealExamBoard({
         timeSpent: 0,
       }),
     );
-    setPostponed((prev) => {
-      if (!prev.has(currentIndex)) return prev;
-      const next = new Set(prev);
-      next.delete(currentIndex);
-      return next;
-    });
+    marks.unpostpone(currentIndex);
     persistence.scheduleSave();
   };
 
@@ -329,20 +346,32 @@ export default function RealExamBoard({
   const postponeCurrent = (): void => {
     const next = findNextUnanswered(questions.length, currentIndex, answered);
     if (next === null) return;
-    setPostponed((prev) => new Set(prev).add(currentIndex));
+    marks.postpone(currentIndex);
     setCurrentIndex(next);
   };
 
-  const toggleFlag = (): void => {
-    setFlagged((prev) => {
-      const next = new Set(prev);
-      if (next.has(currentIndex)) next.delete(currentIndex);
-      else next.add(currentIndex);
-      return next;
-    });
-  };
+  const screen = realBoardScreen({ reviewing, submitFailed });
 
-  if (reviewing) {
+  // The deadline passed with answers still in this tab. NOT `ExamPlaying` (the
+  // exam is over) and NOT `ExamReview` (nothing was processed) — the card says
+  // so and its button re-runs the submission. `failure` rides along so the
+  // student is told WHY (offline / session expired / server), and the failure
+  // DIALOG is skipped here: it would only repeat this card behind a backdrop
+  // whose button dismisses instead of retrying.
+  if (screen === 'submit-failed') {
+    return (
+      <RealExamFailureCard
+        failure={deadlineSubmitFailure(failure?.body ?? null)}
+        busy={busy}
+        onRetry={() => {
+          void finishByDeadline();
+        }}
+        onExit={onExitToModes}
+      />
+    );
+  }
+
+  if (screen === 'review') {
     return (
       <ExamReview
         questions={questions}
@@ -362,8 +391,8 @@ export default function RealExamBoard({
         currentIndex={currentIndex}
         answersByQuestionId={answersByQuestionId}
         answeredIndexes={answered}
-        flagged={flagged}
-        postponed={postponed}
+        flagged={marks.flagged}
+        postponed={marks.postponed}
         timeLeft={secondsLeft}
         examDuration={REAL_EXAM_DURATION_SECONDS}
         showConfirmSubmit={showConfirmSubmit}
@@ -379,24 +408,36 @@ export default function RealExamBoard({
         onSelectAnswer={selectAnswer}
         onToggleEliminate={handleToggleEliminate}
         onSetIndex={setCurrentIndex}
-        onToggleFlag={toggleFlag}
+        onToggleFlag={() => {
+          marks.toggleFlag(currentIndex);
+        }}
         onPostpone={postponeCurrent}
         onGoToUnanswered={() => {
           setShowConfirmSubmit(false);
           const first = questions.findIndex((_, idx) => !answered.has(idx));
           if (first >= 0) setCurrentIndex(first);
         }}
-        onShowConfirmSubmit={() => { setShowConfirmSubmit(true); }}
-        onHideConfirmSubmit={() => { setShowConfirmSubmit(false); }}
-        onSubmit={() => { void handleQuitAndProcess(); }}
+        onShowConfirmSubmit={() => {
+          setShowConfirmSubmit(true);
+        }}
+        onHideConfirmSubmit={() => {
+          setShowConfirmSubmit(false);
+        }}
+        onSubmit={() => {
+          void handleQuitAndProcess();
+        }}
         onRequestExit={requestExit}
       />
       <QuitTestDialog
         open={exitOpen}
         prompt={exitPrompt('real', answeredCount, questions.length)}
         busy={busy}
-        onContinue={() => { setExitOpen(false); }}
-        onQuit={() => { void handleQuitAndProcess(); }}
+        onContinue={() => {
+          setExitOpen(false);
+        }}
+        onQuit={() => {
+          void handleQuitAndProcess();
+        }}
       />
       {/* Only the FAILURE half of `RunOverlays` (see the file header): the
           conflict half offers to reload or discard a run that never resumes. */}

@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  deadlineSettlementFor,
+  deadlineSubmitFailure,
+  realBoardScreen,
+  realConflictNotice,
   realFailure,
   realScreen,
   realStartFailureKind,
@@ -63,6 +67,84 @@ describe('realStartFailureKind', () => {
     expect(realStartFailureKind(false)).toBe('start');
     expect(realFailure('start').body).toContain('Nada foi alterado');
     expect(realFailure('start-after-settle').body).not.toContain('Nada foi alterado');
+  });
+});
+
+// The BLOCKING finding of the Codex review of #79: `finishByDeadline` ignored
+// the result of `persistence.flush()` and closed the run + showed the review
+// screen anyway. A timer expiry landing after a failed save DROPPED every
+// answer that never reached the server — and this is the one door with no
+// manual retry behind it, because the deadline has already passed.
+describe('deadlineSettlementFor', () => {
+  it('never settles a deadline whose flush did not land', () => {
+    // Mutation guard: flipping this to `settle` is exactly the reported bug —
+    // `processReal` settles the SERVER's row, so settling on a failed flush
+    // files an exam missing everything typed since the last save (or one that
+    // was never persisted at all).
+    expect(deadlineSettlementFor({ ok: false })).toBe('hold');
+    expect(deadlineSettlementFor({ ok: false })).not.toBe('settle');
+  });
+
+  it('settles only when the answers are on the server', () => {
+    expect(deadlineSettlementFor({ ok: true })).toBe('settle');
+  });
+});
+
+describe('realBoardScreen', () => {
+  it('never shows the review screen while a submission is held', () => {
+    // `setReviewing(true)` may not be reachable on a path where answers were
+    // lost: `submit-failed` outranks `review`.
+    expect(realBoardScreen({ reviewing: true, submitFailed: true })).toBe('submit-failed');
+    expect(realBoardScreen({ reviewing: true, submitFailed: true })).not.toBe('review');
+  });
+
+  it('never falls back to the playing board either — the deadline passed', () => {
+    expect(realBoardScreen({ reviewing: false, submitFailed: true })).toBe('submit-failed');
+    expect(realBoardScreen({ reviewing: false, submitFailed: true })).not.toBe('playing');
+  });
+
+  it('is the normal board and the normal review when nothing is held', () => {
+    expect(realBoardScreen({ reviewing: false, submitFailed: false })).toBe('playing');
+    expect(realBoardScreen({ reviewing: true, submitFailed: false })).toBe('review');
+  });
+});
+
+describe('deadlineSubmitFailure', () => {
+  it('says the answers did NOT reach the server, and that leaving loses them', () => {
+    const copy = deadlineSubmitFailure(null);
+    expect(copy.body).toContain('NÃO chegaram ao servidor');
+    expect(copy.body).toContain('nada foi processado');
+    expect(copy.body).toContain('será perdido');
+    // The opposite claim is what the review screen makes — it may never appear
+    // on the screen raised BECAUSE the submission failed.
+    expect(copy.body).not.toContain('foram processadas');
+    expect(copy.body).not.toContain('está no seu histórico');
+  });
+
+  it('carries the underlying reason so the student knows what to fix', () => {
+    expect(deadlineSubmitFailure('Sua sessão expirou.').body).toContain('Sua sessão expirou.');
+  });
+
+  it('retries the submission instead of dismissing it', () => {
+    expect(deadlineSubmitFailure(null).retryLabel).toBe('Enviar de novo');
+  });
+});
+
+// The sibling the audit named: a `live` CONFLICT is a prova real still RUNNING
+// somewhere else — announcing it as processed sends the student to a histórico
+// with nothing in it.
+describe('realConflictNotice', () => {
+  it('never claims a live conflict was encerrada e processada', () => {
+    const live = realConflictNotice('live');
+    expect(live).toContain('em andamento em outro lugar');
+    expect(live).not.toContain('encerrada e processada');
+    expect(live).not.toContain('resultado está no seu histórico');
+  });
+
+  it('keeps a remote conflict honest about not knowing which it was', () => {
+    const remote = realConflictNotice('remote');
+    expect(remote).toContain('encerrada ou continuada');
+    expect(remote).toContain('Se ela já foi encerrada');
   });
 });
 

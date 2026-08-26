@@ -1,5 +1,6 @@
-// What the Simulado Real shows when it could not decide, or could not start
-// (BR-05.5, epic #67 slice S2d — audit of #79).
+// What the Simulado Real shows when it could not decide, could not start, or
+// could not SEND what the student answered (BR-05.5, epic #67 slice S2d —
+// audit of #79).
 //
 // The rule this file exists for: **a read that FAILED must never be presented
 // as "there is no exam pending".** The container's entry is imperative
@@ -16,6 +17,8 @@
 // Pure and React-free on purpose: the invariants above are provable with plain
 // vitest, while the wiring that feeds them (the `catch` blocks, the card) is
 // only reachable by rendering.
+
+import type { RunConflictKind } from '../shared/lib/run-persistence';
 
 /**
  * Which operation failed.
@@ -108,4 +111,101 @@ export type RealRetryAction = 'decide' | 'start';
  */
 export function retryActionFor(kind: RealFailureKind): RealRetryAction {
   return kind === 'mount' ? 'decide' : 'start';
+}
+
+/**
+ * The copy a failure CARD needs. `kind` is deliberately not in it: it exists
+ * only to pick the container's retry (`retryActionFor`, where one of the two
+ * answers is the destructive `startReal`), and the board's own failure below is
+ * not a container failure — it must never be routed through that map.
+ */
+export type RealFailureCopy = Pick<RealFailure, 'title' | 'body' | 'retryLabel'>;
+
+/**
+ * The deadline passed AND the flush that had to land first did not (audit of
+ * #79, blocking finding).
+ *
+ * This is the one path with no manual retry behind it: the clock is at 0, so
+ * the student cannot go back and press "Encerrar" again. Closing the run and
+ * showing the review screen here — which is what the code did — throws away
+ * every answer that never reached the server and tells the student their exam
+ * was processed. So the exam ENDS (it can never be answered again) but the
+ * submission is HELD: this copy says exactly that, and its button re-runs the
+ * submission instead of dismissing it.
+ *
+ * `reason` is the pt-BR line of the underlying failure (offline / expired
+ * session / server / claim) when there is one — the student needs to know
+ * whether to fix the connection or sign in again.
+ */
+export function deadlineSubmitFailure(reason: string | null): RealFailureCopy {
+  return {
+    title: 'O tempo acabou, mas suas respostas ainda não foram enviadas.',
+    body:
+      (reason === null ? '' : `${reason} `) +
+      'A prova encerrou e não pode mais ser respondida, mas suas respostas continuam nesta ' +
+      'aba e ainda NÃO chegaram ao servidor — nada foi processado. Não feche esta página: ' +
+      'toque em "Enviar de novo". Se sair agora, o que não chegou ao servidor será perdido.',
+    retryLabel: 'Enviar de novo',
+  };
+}
+
+/** What the deadline auto-submit may do, once the flush has answered. */
+export type DeadlineSettlement = 'settle' | 'hold';
+
+/**
+ * The rule the blocking finding is about: a deadline auto-submit may only
+ * settle (`processReal` → close the run → review screen) when the flush LANDED.
+ *
+ * A failed flush means the answers are still only in this tab: closing the run
+ * drops them and the review screen claims a result that does not exist. `hold`
+ * keeps them, and the retry is what completes the submission.
+ */
+export function deadlineSettlementFor(flushed: { ok: boolean }): DeadlineSettlement {
+  return flushed.ok ? 'settle' : 'hold';
+}
+
+/** The three things the BOARD can put on screen once the exam is running. */
+export type RealBoardScreen = 'playing' | 'submit-failed' | 'review';
+
+/**
+ * What the board renders. `submit-failed` outranks BOTH — that precedence is
+ * the fix: it may not fall back to `playing` (the deadline passed, the exam
+ * cannot be answered any more) and it may not become `review` (which is the
+ * screen that says "your exam was processed" over answers that never landed).
+ */
+export function realBoardScreen({
+  reviewing,
+  submitFailed,
+}: {
+  reviewing: boolean;
+  submitFailed: boolean;
+}): RealBoardScreen {
+  if (submitFailed) return 'submit-failed';
+  return reviewing ? 'review' : 'playing';
+}
+
+/**
+ * What the setup card says after a CONFLICT ended this tab's prova real.
+ *
+ * Told apart by the conflict's own kind, because the two are NOT the same fact
+ * and the old copy asserted the stronger one for both. A `remote` conflict
+ * (this tab HAD a token and lost the race) is either an exam submitted
+ * elsewhere or one being continued elsewhere — the save cannot tell, so the
+ * copy may not promise a result in the history. A `live` conflict (no token:
+ * the FIRST save hit a row that already exists) is a prova real still running
+ * somewhere else; announcing it as "encerrada e processada" is simply false,
+ * and it sends the student to a histórico with nothing new in it.
+ */
+export function realConflictNotice(kind: RunConflictKind): string {
+  if (kind === 'live') {
+    return (
+      'Já existe uma prova real em andamento em outro lugar, então esta aba não pôde ' +
+      'assumi-la. Continue a prova no aparelho onde ela está aberta.'
+    );
+  }
+  return (
+    'Esta prova real foi encerrada ou continuada em outro lugar, então esta aba parou de ' +
+    'salvar. Se ela já foi encerrada, o resultado está no seu histórico; se ainda está ' +
+    'valendo em outro aparelho, continue por lá.'
+  );
 }

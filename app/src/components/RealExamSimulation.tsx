@@ -27,15 +27,17 @@
 
 import { useEffect, useRef, useState, useCallback, type ReactElement } from 'react';
 import { FRESH_READ, trpc } from '../shared/lib/trpc';
-import { persistedDraftOf, resumeRealFrom } from '../shared/lib/run-persistence';
 import {
-  REAL_EXAM_DURATION_SECONDS,
-  realMountDecision,
-} from '@shared/domain/exam-draft';
+  persistedDraftOf,
+  resumeRealFrom,
+  type RunConflictKind,
+} from '../shared/lib/run-persistence';
+import { REAL_EXAM_DURATION_SECONDS, realMountDecision } from '@shared/domain/exam-draft';
 import ExamSetup from './real-exam-setup';
 import RealExamBoard from './real-exam-board';
 import RealExamFailureCard from './real-exam-failure-card';
 import {
+  realConflictNotice,
   realFailure,
   realScreen,
   realStartFailureKind,
@@ -55,10 +57,6 @@ import { QUESTIONS_PER_EXAM, toExamQuestion, type RealRunStart } from './real-ex
  */
 const SETTLED_NOTICE =
   'Sua prova real anterior foi encerrada e as respostas foram processadas. O resultado está no seu histórico.';
-
-/** A CONFLICT mid-exam: the run was already ended somewhere else. */
-const ELSEWHERE_NOTICE =
-  'Esta prova real já havia sido encerrada e processada em outro lugar. O resultado está no seu histórico.';
 
 /** Nothing of the saved exam survived in the catalog. */
 const ALL_DROPPED_NOTICE =
@@ -80,12 +78,21 @@ export default function RealExamSimulation({ onExit }: { onExit: () => void }): 
     setNotice(why);
   }, []);
 
-  const onSettledElsewhere = useCallback((): void => {
-    backToSetup(ELSEWHERE_NOTICE);
-  }, [backToSetup]);
+  // A CONFLICT ended this tab's exam. The copy comes from the conflict's KIND:
+  // a `live` one is a prova real still RUNNING somewhere else, and the old
+  // single line announced it as "encerrada e processada" — sending the student
+  // to a histórico with nothing in it, for an exam still on the clock.
+  const onSettledElsewhere = useCallback(
+    (kind: RunConflictKind): void => {
+      backToSetup(realConflictNotice(kind));
+    },
+    [backToSetup],
+  );
 
   /** Rehydrates the tab that OWNS the exam (a reload), or falls back to setup. */
-  const rehydrate = async (draft: NonNullable<ReturnType<typeof persistedDraftOf>>): Promise<void> => {
+  const rehydrate = async (
+    draft: NonNullable<ReturnType<typeof persistedDraftOf>>,
+  ): Promise<void> => {
     const rows = await utils.questions.byIds.fetch({ ids: draft.questionIds });
     const state = resumeRealFrom(draft, rows.map(toExamQuestion));
     if (state.discard || state.deadlineAt === null) {
