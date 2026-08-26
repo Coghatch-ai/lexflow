@@ -16,9 +16,60 @@
 // `last_saved_at`. Resolving while a save is still in the air would hand over
 // the token from BEFORE that save, the claim would match 0 rows, and the
 // student would get a CONFLICT caused by their own save (api/lib/record-session.ts).
+//
+// `flushOnExit()` is the OTHER exit — the one nobody waits for, because the tab
+// is being destroyed. It is synchronous and issues the owed write through
+// `exitSend` (a `keepalive` request), since after an unload handler returns
+// nothing that awaits the network ever resumes. Every write here is also
+// BOUNDED (`WRITE_TIMEOUT_MS`): silence becomes a failure, so the slot `beat`
+// skips on can never be held forever by a request that stalled.
+
+import { UNSETTLED, settleWithin } from "./settle-within";
 
 /** Debounce window between a confirmed answer and its write (BR-05 S2b). */
 export const SAVE_DEBOUNCE_MS = 1500;
+
+/**
+ * How long ONE write may stay in the air before it counts as failed (Codex
+ * adversarial review of #79).
+ *
+ * `fetch` never times out on its own: a connection that stalls after the
+ * request left resolves neither way. The slot such a write occupies
+ * (`inFlight`) is what `beat` skips on — so ONE hung save or touch silenced the
+ * 60 s heartbeat forever, `last_saved_at` aged past `REAL_RUN_STALE_SECONDS`
+ * (180), and the next authenticated contact settled the prova real under a
+ * student still sitting it. The same failure the `dirty` re-arm fixed one round
+ * earlier, through the other flag.
+ *
+ * 30 s is chosen against those two numbers: comfortably longer than any healthy
+ * write on a bad mobile link, and short enough that the NEXT beat (≤ 60 s away)
+ * resends the owed payload well inside the 180 s staleness window. Tripping it
+ * early costs one extra write — the retry is idempotent by construction
+ * (`saveRun` adopts the row it can prove it wrote) — while not tripping it at
+ * all costs the exam.
+ */
+export const WRITE_TIMEOUT_MS = 30_000;
+
+/** What a write that never answered rejects with. */
+export const WRITE_TIMEOUT_MESSAGE = "save timed out";
+
+/**
+ * One write, BOUNDED: silence becomes a rejection, which is the single outcome
+ * every path here already handles (`onError`, the `dirty` re-arm, `ok: false`).
+ *
+ * It does not cancel the request — `mutateAsync` exposes no signal — so the
+ * loser keeps flying and lands harmlessly: the row is UNIQUE on
+ * `(user_id, mode)`, and the resend either carries the right token or raises
+ * the honest CONFLICT.
+ */
+async function boundedWrite<T>(written: Promise<T>, ms: number): Promise<T> {
+  const raced = await settleWithin(
+    written.then((value) => ({ value })),
+    ms,
+  );
+  if (raced === UNSETTLED) throw new Error(WRITE_TIMEOUT_MESSAGE);
+  return raced.value;
+}
 
 /**
  * The outcome of a flush. Never a rejected promise: an exit handler awaits
@@ -57,6 +108,35 @@ export interface SaveScheduler<T> {
    * A no-op when no `keepAlive` was given (every study mode).
    */
   beat: () => Promise<void>;
+  /**
+   * The tab is GOING AWAY (`pagehide` / `visibilitychange: hidden`).
+   *
+   * Two things separate it from `flush()` (Codex adversarial review of #79):
+   *
+   * 1. the TRANSPORT. A normal request is cancelled with the document, so a
+   *    write issued from `pagehide` lands only if it happens to beat the
+   *    unload. `exitSend` is a `fetch` with `keepalive: true`, which the
+   *    browser finishes after the document is gone.
+   * 2. NOTHING is awaited before issuing it. `flush()` drains what is already
+   *    flying first, and after an unload handler returns nothing awaiting the
+   *    network ever resumes — so in that case the owed write was never issued
+   *    at all.
+   *
+   * Three cases, in order:
+   *   - nothing owed → nothing sent. The last write already landed, and a
+   *     duplicate save on every tab-switch is a request per app-switch on
+   *     mobile.
+   *   - owed and the queue is IDLE → `exitSend` is dispatched now. `dispatch`
+   *     calls the writer synchronously when nothing precedes it, so the request
+   *     leaves inside the unload handler's own task.
+   *   - owed but a write is already in FLIGHT → falls back to `flush()`. The
+   *     exit write must not overtake it: both carry the same optimistic token,
+   *     the loser matches 0 rows, and a CONFLICT is TERMINAL for the prova real
+   *     (`raiseIfConflict` closes the scheduler). Queued behind it, the exit
+   *     write is best-effort exactly as before — that residual window is real
+   *     and documented, not closed.
+   */
+  flushOnExit: () => void;
   /** Stop for good — no further send happens, whatever is scheduled. */
   close: () => void;
 }
@@ -66,6 +146,13 @@ export interface SaveSchedulerOptions<T> {
   send: () => Promise<T>;
   /** Refreshes the token WITHOUT rewriting the payload (`examDrafts.touch`). */
   keepAlive?: () => Promise<T>;
+  /**
+   * Writes the CURRENT state over a transport that survives the document being
+   * destroyed (`keepalive`). Same payload as `send`, different plumbing — a
+   * no-op distinction everywhere except `flushOnExit`. Absent = the exit stays
+   * best-effort through `flush()`.
+   */
+  exitSend?: () => Promise<T>;
   delayMs?: number;
   /** Called once per failed send, including the ones nobody is awaiting. */
   onError?: (error: unknown) => void;
@@ -74,6 +161,7 @@ export interface SaveSchedulerOptions<T> {
 export function createSaveScheduler<T>({
   send,
   keepAlive,
+  exitSend,
   delayMs = SAVE_DEBOUNCE_MS,
   onError,
 }: SaveSchedulerOptions<T>): SaveScheduler<T> {
@@ -104,13 +192,19 @@ export function createSaveScheduler<T>({
    * A failed predecessor is awaited but never rethrown here: it already went to
    * `onError` and it must not cancel the write behind it (a dropped request is
    * retried by the next debounce, not treated as a lost race).
+   *
+   * With NOTHING in flight the writer is called synchronously (the async body
+   * runs to its first real `await`), which is what lets `flushOnExit` issue a
+   * request from inside an unload handler.
    */
   const dispatch = (write: () => Promise<T>): Promise<T> => {
     const previous = inFlight;
     const attempt = (async (): Promise<T> => {
       if (previous !== null) await previous.catch(() => undefined);
       try {
-        const value = await write();
+        // BOUNDED: a write that never answers must free this slot, or `beat`
+        // skips on it for the rest of the exam (`WRITE_TIMEOUT_MS`).
+        const value = await boundedWrite(write(), WRITE_TIMEOUT_MS);
         last = value;
         return value;
       } catch (error: unknown) {
@@ -145,9 +239,9 @@ export function createSaveScheduler<T>({
    * `ok: true` therefore means what every caller already assumes: everything
    * the scheduler was asked to send has landed.
    */
-  const run = (): Promise<T> => {
+  const run = (write: () => Promise<T> = send): Promise<T> => {
     dirty = false;
-    const rearmed = dispatch(send).catch((error: unknown) => {
+    const rearmed = dispatch(write).catch((error: unknown) => {
       dirty = true;
       throw error;
     });
@@ -156,6 +250,23 @@ export function createSaveScheduler<T>({
     // nobody awaiting (`void run()`).
     void rearmed.catch(() => undefined);
     return rearmed;
+  };
+
+  const flush = async (): Promise<FlushResult<T>> => {
+    clearPending();
+    try {
+      // Drain what is already flying (its token is newer than ours)…
+      let pending = inFlight;
+      while (pending !== null) {
+        await pending;
+        pending = inFlight;
+      }
+      // …then, only if the payload moved while it flew, write once more.
+      if (dirty && !closed) await run();
+      return { ok: true, value: last };
+    } catch (error: unknown) {
+      return { ok: false, error };
+    }
   };
 
   return {
@@ -169,21 +280,19 @@ export function createSaveScheduler<T>({
       }, delayMs);
     },
 
-    flush: async (): Promise<FlushResult<T>> => {
+    flush,
+
+    flushOnExit: (): void => {
+      // Nothing owed: the last write landed and the debounce is empty.
+      if (closed || (!dirty && timer === null)) return;
       clearPending();
-      try {
-        // Drain what is already flying (its token is newer than ours)…
-        let pending = inFlight;
-        while (pending !== null) {
-          await pending;
-          pending = inFlight;
-        }
-        // …then, only if the payload moved while it flew, write once more.
-        if (dirty && !closed) await run();
-        return { ok: true, value: last };
-      } catch (error: unknown) {
-        return { ok: false, error };
+      // A write already in flight owns the token — the exit write queues behind
+      // it through `flush`, which is best-effort and may never be issued.
+      if (exitSend === undefined || inFlight !== null) {
+        void flush();
+        return;
       }
+      void run(exitSend);
     },
 
     beat: async (): Promise<void> => {

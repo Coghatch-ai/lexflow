@@ -2,7 +2,8 @@
 //
 // The plumbing that keeps an in-flight run on the server (BR-05, epic #67 slice
 // S2b): the debounce, the tRPC calls, the two refs that hold the draft's
-// identity, and the `pagehide` best-effort.
+// identity, and the `pagehide` exit write (`keepalive`, and what it still
+// cannot promise — see the effect at the bottom).
 //
 // PARAMETRIC in the mode since S2c (#78): the three study screens share this
 // one hook. It was `"standard"` in three literal places (the `get` that learns
@@ -20,7 +21,8 @@
 // tree and open a stale-closure window between the save and the recording.
 
 import { useEffect, useRef, useState, type MutableRefObject } from "react";
-import { FRESH_READ, trpc } from "../lib/trpc";
+import { FRESH_READ, exitTrpcClient, trpc } from "../lib/trpc";
+import { exitTransportFor } from "../lib/exit-save";
 import { createSaveScheduler, type SaveScheduler } from "../lib/save-scheduler";
 import {
   adoptableDraftId,
@@ -36,7 +38,12 @@ import {
   type RunDraftPayload,
   type RunSaveFailure,
 } from "../lib/run-persistence";
-import { claimlessVerdictFor, needsClaimlessProbe, saveRun } from "../lib/run-claimless";
+import {
+  claimlessVerdictFor,
+  needsClaimlessProbe,
+  saveRun,
+  type SaveRunIO,
+} from "../lib/run-claimless";
 import type { RunMode } from "@shared/domain/exam-draft";
 
 /** What an exit handler needs before it may record or navigate. */
@@ -96,6 +103,8 @@ interface PersistenceRefs {
   /** Whether the FAILING save carried a token — picks the conflict copy. */
   hadToken: MutableRefObject<boolean>;
   send: MutableRefObject<() => Promise<string>>;
+  /** The same save over a transport that survives the tab (`exit-save.ts`). */
+  exitSend: MutableRefObject<() => Promise<string>>;
   /** Refreshes the token without rewriting the payload (`examDrafts.touch`). */
   keepAlive: MutableRefObject<() => Promise<string>>;
   /** Reads the row id back from the server; resolves even when it cannot. */
@@ -161,6 +170,70 @@ function keepAliveVia(
   };
 }
 
+/**
+ * The normal save: the payload the screen holds right now, through the
+ * lost-response recovery (`saveRun`), with the row id learned back once.
+ *
+ * Out here rather than inline in the hook so it sits beside its exit twin
+ * below — the two differ in exactly the round trips an unload cannot afford,
+ * and that difference is the point.
+ */
+function sendVia(
+  refs: PersistenceRefs,
+  snapshotRef: MutableRefObject<RunSnapshot>,
+  io: SaveRunIO,
+): () => Promise<string> {
+  return async (): Promise<string> => {
+    const payload = snapshotRef.current(refs.token.current);
+    if (payload === null) return refs.token.current ?? "";
+    refs.hadToken.current = refs.token.current !== null;
+    // `saveRun`, not the mutation directly: a FIRST save whose response is lost
+    // still created the row, and retrying it as another `token: null` is what
+    // the router answers with OVERWRITE_CONFLICT forever (#79). It probes and
+    // adopts the row only when that row is a verbatim echo of what we sent.
+    const saved = await saveRun(payload, io);
+    // Written the instant the mutation resolves, verbatim.
+    refs.token.current = saved.lastSavedAt;
+    // An adopted row comes WITH its id, so the read below is already paid for.
+    if (saved.draftId !== null) refs.draftId.current = saved.draftId;
+    // One extra read per run, right after the insert that created it. It is
+    // best-effort HERE (the save itself already landed); the exit path tries
+    // again and refuses to record without it.
+    if (refs.draftId.current === null) await refs.learnDraftId.current();
+    return saved.lastSavedAt;
+  };
+}
+
+/**
+ * The save issued while the tab is being destroyed (Codex adversarial review of
+ * #79). Same payload as `send`, deliberately WITHOUT its two extra round trips:
+ *
+ * - no `saveRun` probe — the lost-response recovery is a second request that
+ *   cannot happen during an unload, and on a tab that survives the failure
+ *   re-arms `dirty` so the next normal save recovers exactly as before;
+ * - no `learnDraftId` — the id matters to `sessions.record`, and this write
+ *   exists precisely because nobody is left to record anything here.
+ *
+ * The transport is picked per payload (`exitTransportFor`): `keepalive` while
+ * the body fits the browser's 64 KiB cap, the normal client otherwise.
+ */
+function exitSendVia(
+  refs: PersistenceRefs,
+  snapshotRef: MutableRefObject<RunSnapshot>,
+  save: (input: RunDraftPayload) => Promise<{ lastSavedAt: string }>,
+): () => Promise<string> {
+  return async (): Promise<string> => {
+    const payload = snapshotRef.current(refs.token.current);
+    if (payload === null) return refs.token.current ?? "";
+    refs.hadToken.current = refs.token.current !== null;
+    const saved = await save(payload);
+    // Written the moment it lands — a tab that SURVIVES (a mere
+    // `visibilitychange`) must not keep the token this write just superseded.
+    refs.token.current = saved.lastSavedAt;
+    return saved.lastSavedAt;
+  };
+}
+
 /** One `examDrafts.get` for this run's mode, honest about `null`. */
 type ReadRow = () => Promise<PersistedDraft | null>;
 
@@ -207,6 +280,7 @@ function schedulerOf(refs: PersistenceRefs): SaveScheduler<string> {
   const created = createSaveScheduler<string>({
     send: () => refs.send.current(),
     keepAlive: () => refs.keepAlive.current(),
+    exitSend: () => refs.exitSend.current(),
     onError: (error) => {
       raiseIfConflict(refs, error);
     },
@@ -301,6 +375,7 @@ export function useRunPersistence(mode: RunMode, snapshot: RunSnapshot): RunPers
   const tokenRef = useRef<string | null>(null);
   const hadTokenRef = useRef(false);
   const sendRef = useRef<() => Promise<string>>(() => Promise.resolve(""));
+  const exitSendRef = useRef<() => Promise<string>>(() => Promise.resolve(""));
   const keepAliveRef = useRef<() => Promise<string>>(() => Promise.resolve(""));
   const learnDraftIdRef = useRef<() => Promise<void>>(() => Promise.resolve());
   const probeRowRef = useRef<() => Promise<{ read: boolean; row: PersistedDraft | null }>>(() =>
@@ -312,6 +387,7 @@ export function useRunPersistence(mode: RunMode, snapshot: RunSnapshot): RunPers
     token: tokenRef,
     hadToken: hadTokenRef,
     send: sendRef,
+    exitSend: exitSendRef,
     keepAlive: keepAliveRef,
     learnDraftId: learnDraftIdRef,
     probeRow: probeRowRef,
@@ -328,41 +404,51 @@ export function useRunPersistence(mode: RunMode, snapshot: RunSnapshot): RunPers
   refs.learnDraftId.current = learnDraftIdVia(refs, readRow);
   refs.probeRow.current = probeRowVia(readRow);
 
-  refs.send.current = async (): Promise<string> => {
-    const payload = snapshotRef.current(refs.token.current);
-    if (payload === null) return refs.token.current ?? "";
-    refs.hadToken.current = refs.token.current !== null;
-    // `saveRun`, not the mutation directly: a FIRST save whose response is lost
-    // still created the row, and retrying it as another `token: null` is what
-    // the router answers with OVERWRITE_CONFLICT forever (#79). It probes and
-    // adopts the row only when that row is a verbatim echo of what we sent.
-    const saved = await saveRun(payload, {
-      save: (input) => saveMutation.mutateAsync(input),
-      probe: () => refs.probeRow.current(),
-    });
-    // Written the instant the mutation resolves, verbatim.
-    refs.token.current = saved.lastSavedAt;
-    // An adopted row comes WITH its id, so the read below is already paid for.
-    if (saved.draftId !== null) refs.draftId.current = saved.draftId;
-    // One extra read per run, right after the insert that created it. It is
-    // best-effort HERE (the save itself already landed); the exit path tries
-    // again and refuses to record without it.
-    if (refs.draftId.current === null) await refs.learnDraftId.current();
-    return saved.lastSavedAt;
-  };
+  refs.send.current = sendVia(refs, snapshotRef, {
+    save: (input) => saveMutation.mutateAsync(input),
+    probe: () => refs.probeRow.current(),
+  });
+
+  refs.exitSend.current = exitSendVia(refs, snapshotRef, (input) =>
+    exitTransportFor(input) === "keepalive"
+      ? exitTrpcClient.examDrafts.save.mutate(input)
+      : saveMutation.mutateAsync(input),
+  );
 
   refs.keepAlive.current = keepAliveVia(refs, mode, (input) => touchMutation.mutateAsync(input));
 
   const scheduler = schedulerOf(refs);
 
-  // Closing the tab is honestly BEST-EFFORT: `httpBatchLink` builds the auth
-  // header from Clerk's async `getToken()` and does not use `keepalive`, and
-  // `sendBeacon` cannot carry Authorization. The real guarantee behind
-  // criterion 1 is the 1500 ms debounce having already landed — nobody closes
-  // a tab faster than that after answering.
+  // Closing the tab now issues the owed write over `keepalive` (Codex
+  // adversarial review of #79). `scheduler.flush()` was the bug, twice over: a
+  // normal request is CANCELLED with the document, and when a save was already
+  // in flight the flush awaited it first — an await that never resumes once the
+  // handler has returned, so the owed write was never issued at all. The study
+  // modes could live with that (they are resumable); the Simulado Real is
+  // timed, unrepeatable and cannot be re-entered.
+  //
+  // GUARANTEED now: an owed write with an idle queue leaves this tab inside the
+  // unload handler's own task, and the browser finishes it after the document
+  // is gone.
+  //
+  // NOT guaranteed, and not closable from a browser:
+  //   - a write ALREADY in flight owns the token, so the exit write queues
+  //     behind it (`flushOnExit`) and dies with the tab. Overtaking it would
+  //     make one of the two match 0 rows, and a CONFLICT is TERMINAL for the
+  //     prova real. Loss window: the answers confirmed since that write
+  //     started (≤ ~1.5 s + one round trip).
+  //   - `getToken()` needing a network refresh exactly at `pagehide`: Clerk
+  //     answers from its own cache while the token is valid, but a refresh
+  //     started here never resolves and the request is never issued.
+  //   - a process kill (force-quit, OOM, battery): no handler runs at all.
+  //   - a payload over the keepalive body cap, which falls back to the old
+  //     best-effort (`exit-save.ts`).
+  // In every one of those the run is still on the server as of its last landed
+  // save, and `settleRealRun` settles it at the deadline: what is at risk is
+  // the TAIL of answers, never the whole exam — provided the first save landed.
   useEffect(() => {
     const onHide = (): void => {
-      void scheduler.flush();
+      scheduler.flushOnExit();
     };
     const onVisibility = (): void => {
       if (document.visibilityState === "hidden") onHide();

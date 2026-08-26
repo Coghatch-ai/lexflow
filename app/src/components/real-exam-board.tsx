@@ -42,6 +42,12 @@
 // (`settleWithin`, `DEADLINE_SUBMIT_TIMEOUT_MS`): a request that never answers
 // has to become a verdict, or the actionless card is where the run ends.
 //
+// The flush landing is not the whole story either: `processReal` can time out
+// or throw AFTER it, and that outcome is UNKNOWN, not settled. It gets its own
+// screen (`unconfirmed`), because the review screen asserts a processed exam
+// and here nobody knows — the answers are safe on the server, which is what
+// that copy says while offering to confirm again.
+//
 // A CONFLICT NEVER opens the conflict dialog here. "Recarregar do servidor" and
 // "Descartar esta cópia" are choices about a run that can be continued; this one
 // cannot, and "discard" is precisely what BR-05.5 forbids. A CONFLICT — from the
@@ -63,13 +69,12 @@ import RealExamFailureCard from './real-exam-failure-card';
 import RealExamSubmittingCard from './real-exam-submitting-card';
 import RunFailureDialog from '../pages/testing-run-failure';
 import {
-  DEADLINE_SUBMIT_TIMEOUT_MS,
-  deadlineSettlementFor,
   deadlineSubmitFailure,
   deadlineSubmittingNotice,
+  deadlineUnconfirmedNotice,
   realBoardScreen,
 } from './real-exam-failures';
-import { UNSETTLED, settleWithin } from '../shared/lib/settle-within';
+import { useDeadlineSubmission } from './real-exam-deadline';
 import {
   exitPrompt,
   processableAnswers,
@@ -105,29 +110,6 @@ import {
   useFirstSave,
 } from '../shared/hooks/use-real-exam-lifecycle';
 
-/**
- * `processReal` after a LANDED flush — did it actually settle the row?
- *
- * Deliberately not surfaced when it did not. It is an ACCELERATOR, not the
- * guarantee: the row is on the server with its deadline in the past, so the
- * next authenticated contact settles it (`users.me` / `list` / `startReal`). A
- * "tente de novo" dialog over the result screen would offer a retry that
- * changes nothing, and `settled: false` is not an error either — it means
- * someone else got there first.
- *
- * A call that never ANSWERS is treated exactly like one that threw (third audit
- * round of #79): unbounded, it held the student on the actionless `submitting`
- * card for as long as the request hung. `false` only skips the invalidations —
- * there is no result yet to refetch.
- */
-async function accelerated<T extends object>(run: () => Promise<T>): Promise<boolean> {
-  try {
-    return (await settleWithin(run(), DEADLINE_SUBMIT_TIMEOUT_MS)) !== UNSETTLED;
-  } catch {
-    return false;
-  }
-}
-
 interface RealExamBoardProps {
   start: RealRunStart;
   /** Leave the mode entirely (nothing answered, or nothing left to do). */
@@ -160,10 +142,6 @@ export default function RealExamBoard({
   const [eliminations, setEliminations] = useState<EliminationState>(NO_ELIMINATIONS);
   const [reviewing, setReviewing] = useState(false);
   const [busy, setBusy] = useState(false);
-  // The deadline fired and its flush did NOT land. Terminal for the exam (it
-  // can never be answered again) but NOT for the answers: they are still here
-  // and the screen this raises is how they get sent.
-  const [submitFailed, setSubmitFailed] = useState(false);
   const [exitOpen, setExitOpen] = useState(false);
   const [showConfirmSubmit, setShowConfirmSubmit] = useState(false);
   const now = useTickingNow(!reviewing);
@@ -251,47 +229,27 @@ export default function RealExamBoard({
   };
 
   // The 5 h ran out with the tab open. Same settlement the server would have
-  // done, asked for by the client so the student sees their result now.
-  //
-  // The flush is a GATE, not a formality (audit of #79): it is what puts the
-  // answers on the server, and `processReal` settles the SERVER's row — so a
-  // failed flush means settling would file an exam missing everything typed
-  // since the last save, or (for a run whose first save never landed) an exam
-  // that does not exist at all. There is no manual retry behind this door, so
-  // it holds the run in `submit-failed` instead of discarding it: nothing is
-  // closed, `reviewing` is never set, and the card's button lands right back
-  // here. A CONFLICT also arrives as `ok: false`, and the effect above turns
-  // that one terminal before this screen can be seen.
-  //
-  // BOTH awaits are BOUNDED (`settleWithin`, third audit round of #79). While
-  // they are in the air the board shows `submitting`, a card with no button —
-  // so a request that never answers left the student there forever, never
-  // reaching the retry below. The bound goes on the calls themselves rather
-  // than on a timer watching the screen: it turns the silence into the same
-  // `hold` a failed flush produces, so there is one timeout and one path out.
-  const finishByDeadline = async (): Promise<void> => {
-    setBusy(true);
-    setSubmitFailed(false);
-    const flushed = await settleWithin(persistence.flush(), DEADLINE_SUBMIT_TIMEOUT_MS);
-    if (deadlineSettlementFor(flushed) === 'hold') {
-      setSubmitFailed(true);
-      setBusy(false);
-      return;
-    }
-    if (await accelerated(() => processRealMutation.mutateAsync())) {
+  // done, asked for by the client so the student sees their result now — with
+  // the two claims it may NOT make: the flush must land before anything is
+  // settled, and the settlement must be CONFIRMED before a result is shown
+  // (`real-exam-deadline.ts` owns both, and the cards below are its outcomes).
+  const deadline = useDeadlineSubmission({
+    flush: () => persistence.flush(),
+    processReal: () => processRealMutation.mutateAsync(),
+    onConfirmed: () => {
       void utils.stats.invalidate();
       void utils.sessions.invalidate();
       void utils.examDrafts.invalidate();
-    }
-    persistence.close();
-    setBusy(false);
-    setReviewing(true);
-  };
+      persistence.close();
+      setReviewing(true);
+    },
+    setBusy,
+  });
 
   // Fires exactly once (`useDeadlineAutoSubmit` owns the ref guard and the race
   // `blocked` is there for). The RETRY on a held submission is not this effect —
   // it is the card's button calling `finishByDeadline` again.
-  useDeadlineAutoSubmit({ blocked: reviewing || busy, secondsLeft, submit: finishByDeadline });
+  useDeadlineAutoSubmit({ blocked: reviewing || busy, secondsLeft, submit: deadline.finish });
 
   // "Encerrar" / "Sair da prova" / the sidebar guard: process what was
   // answered through the normal recording path, WITH the claim.
@@ -386,7 +344,12 @@ export default function RealExamBoard({
   // flushing, so without it the board fell back to `ExamPlaying` at 00:00 and
   // accepted answers into an exam that had already ended (audit of #79). That
   // window is `submitting`, NOT a failure — see below.
-  const screen = realBoardScreen({ reviewing, submitFailed, expired: secondsLeft <= 0 });
+  const screen = realBoardScreen({
+    reviewing,
+    submitFailed: deadline.failed,
+    unconfirmed: deadline.unconfirmed,
+    expired: secondsLeft <= 0,
+  });
 
   // 00:00 with the submission under way: the normal end of a prova real taken
   // to the deadline. It reaches here before the auto-submit effect has even
@@ -397,19 +360,24 @@ export default function RealExamBoard({
     return <RealExamSubmittingCard notice={deadlineSubmittingNotice()} />;
   }
 
-  // The deadline passed with answers still in this tab. NOT `ExamPlaying` (the
-  // exam is over) and NOT `ExamReview` (nothing was processed) — the card says
-  // so and its button re-runs the submission. `failure` rides along so the
-  // student is told WHY (offline / session expired / server), and the failure
-  // DIALOG is skipped here: it would only repeat this card behind a backdrop
-  // whose button dismisses instead of retrying.
-  if (screen === 'submit-failed') {
+  // Two outcomes, one card, because the decision is the same shape: an action
+  // that re-runs what did not finish, and a door out. Only the COPY differs,
+  // and the difference is the whole finding — `submit-failed` says the answers
+  // never reached the server (with `failure` riding along so the student is
+  // told why, while the failure DIALOG is skipped: it would repeat this card
+  // behind a backdrop whose button dismisses instead of retrying), and
+  // `unconfirmed` may not say that, because they did.
+  if (screen === 'submit-failed' || screen === 'unconfirmed') {
     return (
       <RealExamFailureCard
-        failure={deadlineSubmitFailure(failure?.body ?? null)}
+        failure={
+          screen === 'submit-failed'
+            ? deadlineSubmitFailure(failure?.body ?? null)
+            : deadlineUnconfirmedNotice()
+        }
         busy={busy}
         onRetry={() => {
-          void finishByDeadline();
+          void deadline.finish();
         }}
         onExit={onExitToModes}
       />

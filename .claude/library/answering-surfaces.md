@@ -267,9 +267,17 @@ answered") is **not** satisfied product-wide until M1 lands.
 - O **flush mora no handler da tela** (`handleSaveAndExit` / `handleQuitAndProcess`), nunca no
   `QuitTestDialog` nem no `RunGuardProvider` — os dois são apresentação e não podem esperar
   promessa. Enquanto ele roda, `busy` desabilita os 3 botões.
-- `pagehide`/`visibilitychange` é **best-effort assumido** (`httpBatchLink` monta o header com o
-  `getToken()` assíncrono do Clerk e não usa `keepalive`; `sendBeacon` não manda `Authorization`).
-  A garantia real é o debounce de 1500 ms já ter pousado.
+- `pagehide`/`visibilitychange` **manda a escrita devida por `keepalive`** (revisão adversarial
+  Codex do #79): `scheduler.flushOnExit()` despacha `exitSend` — um `fetch` com `keepalive: true`
+  (`exitTrpcClient` em `shared/lib/trpc.ts`), o único transporte que leva `Authorization` E é
+  concluído pelo navegador depois que o documento morre (`sendBeacon` não manda header nenhum). O
+  `flush()` de antes **aguardava rede**: request normal é cancelado junto com o documento e, com
+  um save em voo, o `await` nunca retomava — a escrita devida não saía. O que **continua sem
+  garantia**, e está escrito onde é assumido (`use-run-persistence.ts`): save já em voo (a escrita
+  de saída entra na fila atrás dele para não brigar pelo token — janela de perda = respostas dos
+  últimos ~1,5 s), `getToken()` precisando renovar na hora, kill do processo, e payload acima do
+  teto de 64 KiB do `keepalive` (`shared/lib/exit-save.ts` cai para o cliente normal). Em todos
+  eles a corrida continua no servidor no último save que pousou, e o `settleRealRun` a liquida.
 - **Não salvam nada** (por contrato, BR-02.3 / D8): adiar, descartar alternativa, `Conferir`,
   bookmark e nota. Logo `checked` conta como respondida no diálogo mas **não** é persistida — o
   "(n/N)" do card pode mostrar 1 a menos. É desenho, não bug.
@@ -330,18 +338,33 @@ answered") is **not** satisfied product-wide until M1 lands.
    `startReal` do próximo início liquida a órfã com `force`).
 4. **Batimento de 60 s = `examDrafts.touch`** (uma coluna, sem reescrever ~25 KB de jsonb). Ele passa
    pelo `save-scheduler`, não por um `setInterval` solto, porque `touch` e `save` disputam o MESMO
-   token: (a) `beat()` é **pulado** quando há save agendado/em voo/`dirty` — um `save` já refresca
+   token: (a) `beat()` é **pulado** quando há save agendado ou em voo — um `save` já refresca
    `last_saved_at`, ou seja, já É um batimento; (b) os envios são **serializados** (`dispatch`
    encadeia no `inFlight` corrente), então um `schedule()` que caia durante um beat envia depois
    dele e lê o token já atualizado. Sem os dois, o sintoma é um CONFLICT falso ~1×/hora de prova —
    e ele **para o autosave** (`raiseIfConflict` fecha o scheduler): dali em diante a prova só existe
    na aba. Limiar do servidor: `REAL_RUN_STALE_SECONDS = 180` (3 batimentos perdidos).
+   **`dirty` NÃO é motivo para pular** (2ª auditoria do #79): com o re-arme na falha, `dirty` sem
+   nada agendado/em voo significa "o último envio FALHOU", então o beat **reenvia** em vez de calar.
+   E toda escrita tem **teto** — `WRITE_TIMEOUT_MS = 30 s` no `save-scheduler`, via `settleWithin`
+   (revisão adversarial Codex): `fetch` não expira sozinho, e uma escrita pendurada segurava o
+   `inFlight` para sempre — o beat pulava todo minuto, `last_saved_at` passava dos 180 s e o
+   próximo contato autenticado liquidava a prova **debaixo** do aluno. Silêncio vira falha, o
+   slot libera, o próximo beat reenvia.
 5. **Duas portas de auto-submit, uma sessão.** Aba aberta no zero: `flush()` → `processReal()` →
    tela de revisão montada da MEMÓRIA (critério 4). Aba fechada: nada na hora (não há scheduler) —
    liquida no próximo contato autenticado. Os dois podem disparar; o `DELETE` do rascunho é a
    primeira instrução da transação e é o mutex, então o segundo apaga 0 linhas e não escreve nada.
-   `settled: false` é "outro liquidou", não erro. O `processReal` do cliente é **acelerador**, não
-   garantia: se ele falhar, nada é mostrado ao aluno e a liquidação preguiçosa resolve.
+   `settled: false` é "outro liquidou", não erro — o servidor RESPONDEU, então há resultado.
+   O `processReal` do cliente é **acelerador** dos DADOS, não do que a tela pode afirmar (revisão
+   adversarial Codex do #79): se ele estourar o teto (`DEADLINE_SUBMIT_TIMEOUT_MS`) ou falhar, o
+   desfecho é **desconhecido**, e desconhecido não vira tela de revisão — ela diz "sua prova foi
+   processada" e o único botão dela começa OUTRA prova real. Nesse caso o board mostra
+   `unconfirmed` (`deadlineCompletionFor` + `deadlineUnconfirmedNotice`): as respostas JÁ chegaram
+   ao servidor (o `flush` pousou — é pré-requisito), o encerramento é que não foi confirmado, o
+   botão reexecuta a submissão e sair é seguro porque o servidor liquida no prazo. Antes disso:
+   `flush` que não pousa ⇒ `submit-failed` (aí sim "não chegaram ao servidor"), e enquanto os dois
+   estão no ar ⇒ `submitting`, cartão sem botão e por isso **limitado** pelos dois `settleWithin`.
 6. **CONFLICT aqui NUNCA abre o diálogo de conflito.** "Recarregar do servidor" e "Descartar esta
    cópia" são escolhas sobre uma corrida que se retoma; esta não se retoma, e "descartar" é o que a
    BR-05.5 proíbe. CONFLICT (do `save`, do `touch` ou do `record`) = a prova já terminou em outro

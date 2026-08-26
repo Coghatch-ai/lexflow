@@ -2,9 +2,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { UNSETTLED, settleWithin } from '../shared/lib/settle-within';
 import {
   DEADLINE_SUBMIT_TIMEOUT_MS,
+  PROCESS_REJECTED,
+  deadlineCompletionFor,
   deadlineSettlementFor,
   deadlineSubmitFailure,
   deadlineSubmittingNotice,
+  deadlineUnconfirmedNotice,
   realBoardScreen,
   realConflictNotice,
   realFailure,
@@ -123,7 +126,12 @@ describe('the deadline submission is BOUNDED', () => {
 
     // The whole chain, at the pure layer: silence → hold → the retry screen.
     const held = deadlineSettlementFor(await flushed) === 'hold';
-    const screen = realBoardScreen({ reviewing: false, submitFailed: held, expired: true });
+    const screen = realBoardScreen({
+      reviewing: false,
+      submitFailed: held,
+      unconfirmed: false,
+      expired: true,
+    });
     expect(screen).not.toBe('submitting');
     expect(screen).toBe('submit-failed');
     expect(deadlineSubmitFailure(null).retryLabel).toBe('Enviar de novo');
@@ -136,7 +144,7 @@ describe('the deadline submission is BOUNDED', () => {
     expect(deadlineSettlementFor(await flushed)).toBe('settle');
     // …and while it is still in the air, before the bound, the board is the
     // neutral card, never the red one.
-    expect(realBoardScreen({ reviewing: false, submitFailed: false, expired: true })).toBe(
+    expect(realBoardScreen({ reviewing: false, submitFailed: false, unconfirmed: false, expired: true })).toBe(
       'submitting',
     );
   });
@@ -146,19 +154,19 @@ describe('realBoardScreen', () => {
   it('never shows the review screen while a submission is held', () => {
     // `setReviewing(true)` may not be reachable on a path where answers were
     // lost: `submit-failed` outranks `review`.
-    expect(realBoardScreen({ reviewing: true, submitFailed: true, expired: true })).toBe(
+    expect(realBoardScreen({ reviewing: true, submitFailed: true, unconfirmed: false, expired: true })).toBe(
       'submit-failed',
     );
-    expect(realBoardScreen({ reviewing: true, submitFailed: true, expired: true })).not.toBe(
+    expect(realBoardScreen({ reviewing: true, submitFailed: true, unconfirmed: false, expired: true })).not.toBe(
       'review',
     );
   });
 
   it('never falls back to the playing board either — the deadline passed', () => {
-    expect(realBoardScreen({ reviewing: false, submitFailed: true, expired: true })).toBe(
+    expect(realBoardScreen({ reviewing: false, submitFailed: true, unconfirmed: false, expired: true })).toBe(
       'submit-failed',
     );
-    expect(realBoardScreen({ reviewing: false, submitFailed: true, expired: true })).not.toBe(
+    expect(realBoardScreen({ reviewing: false, submitFailed: true, unconfirmed: false, expired: true })).not.toBe(
       'playing',
     );
   });
@@ -167,7 +175,7 @@ describe('realBoardScreen', () => {
     // The retry clears `submitFailed` BEFORE flushing, and the flush can hang
     // for a whole request: without `expired` the board went back to `playing`
     // and an exam that had already ended accepted answers again (audit #79).
-    expect(realBoardScreen({ reviewing: false, submitFailed: false, expired: true })).not.toBe(
+    expect(realBoardScreen({ reviewing: false, submitFailed: false, unconfirmed: false, expired: true })).not.toBe(
       'playing',
     );
   });
@@ -178,28 +186,115 @@ describe('realBoardScreen', () => {
     // with the tab open, answers already saved — got the red "suas respostas
     // ainda NÃO chegaram ao servidor" card for the length of the send. The
     // failure screen is reserved for an actual `hold`.
-    expect(realBoardScreen({ reviewing: false, submitFailed: false, expired: true })).toBe(
+    expect(realBoardScreen({ reviewing: false, submitFailed: false, unconfirmed: false, expired: true })).toBe(
       'submitting',
     );
-    expect(realBoardScreen({ reviewing: false, submitFailed: false, expired: true })).not.toBe(
+    expect(realBoardScreen({ reviewing: false, submitFailed: false, unconfirmed: false, expired: true })).not.toBe(
       'submit-failed',
     );
     // …and a submission that really failed still outranks it.
-    expect(realBoardScreen({ reviewing: false, submitFailed: true, expired: true })).toBe(
+    expect(realBoardScreen({ reviewing: false, submitFailed: true, unconfirmed: false, expired: true })).toBe(
       'submit-failed',
     );
+  });
+
+  it('never shows the review screen for an UNCONFIRMED settlement', () => {
+    // Codex adversarial finding: `finishByDeadline` used to `setReviewing(true)`
+    // whatever `processReal` did. Even with `reviewing` set, an unconfirmed
+    // outcome may not paint the result screen.
+    expect(
+      realBoardScreen({ reviewing: true, submitFailed: false, unconfirmed: true, expired: true }),
+    ).toBe('unconfirmed');
+    expect(
+      realBoardScreen({ reviewing: true, submitFailed: false, unconfirmed: true, expired: true }),
+    ).not.toBe('review');
+    // …and the graver claim still outranks it: "your answers never left" is
+    // about the answers, not about the result.
+    expect(
+      realBoardScreen({ reviewing: false, submitFailed: true, unconfirmed: true, expired: true }),
+    ).toBe('submit-failed');
   });
 
   it('still shows the review of a run that WAS settled after the deadline', () => {
     // `expired` is true for the whole review screen — it may not swallow it.
-    expect(realBoardScreen({ reviewing: true, submitFailed: false, expired: true })).toBe('review');
+    expect(realBoardScreen({ reviewing: true, submitFailed: false, unconfirmed: false, expired: true })).toBe('review');
   });
 
   it('is the normal board and the normal review when nothing is held', () => {
-    expect(realBoardScreen({ reviewing: false, submitFailed: false, expired: false })).toBe(
+    expect(realBoardScreen({ reviewing: false, submitFailed: false, unconfirmed: false, expired: false })).toBe(
       'playing',
     );
-    expect(realBoardScreen({ reviewing: true, submitFailed: false, expired: false })).toBe('review');
+    expect(realBoardScreen({ reviewing: true, submitFailed: false, unconfirmed: false, expired: false })).toBe('review');
+  });
+});
+
+// The Codex ADVERSARIAL finding: after a LANDED flush, `processReal` timing out
+// or throwing was collapsed into "carry on" — `close()` + the review screen —
+// so a student whose settlement nobody confirmed was told their exam was
+// processed. Unknown is not settled; the DATA is safe (the row is on the server
+// and `settleRealRun` finishes it), the SCREEN was the lie.
+describe('deadlineCompletionFor', () => {
+  it('never shows the review screen when processReal never answered', () => {
+    expect(deadlineCompletionFor(UNSETTLED)).toBe('unconfirmed');
+    expect(deadlineCompletionFor(UNSETTLED)).not.toBe('review');
+  });
+
+  it('never shows the review screen when processReal THREW', () => {
+    expect(deadlineCompletionFor(PROCESS_REJECTED)).toBe('unconfirmed');
+    expect(deadlineCompletionFor(PROCESS_REJECTED)).not.toBe('review');
+  });
+
+  it('shows the result once the server ANSWERED — either way', () => {
+    // `settled: false` is a known outcome, not an unknown one: another
+    // settlement got there first, so the exam is finished all the same.
+    expect(deadlineCompletionFor({ settled: true })).toBe('review');
+    expect(deadlineCompletionFor({ settled: false })).toBe('review');
+  });
+
+  it('is the whole chain: silence at the settlement lands on a card with a button', async () => {
+    vi.useFakeTimers();
+    const hung = new Promise<{ settled: boolean }>(() => {
+      // never resolves, never rejects — the shape of the bug
+    });
+    const processed = settleWithin(hung, DEADLINE_SUBMIT_TIMEOUT_MS);
+    await vi.advanceTimersByTimeAsync(DEADLINE_SUBMIT_TIMEOUT_MS);
+
+    const unconfirmed = deadlineCompletionFor(await processed) === 'unconfirmed';
+    const screen = realBoardScreen({
+      reviewing: false,
+      submitFailed: false,
+      unconfirmed,
+      expired: true,
+    });
+    expect(screen).toBe('unconfirmed');
+    // Not the result screen, and not the actionless waiting card either.
+    expect(screen).not.toBe('review');
+    expect(screen).not.toBe('submitting');
+    vi.useRealTimers();
+  });
+});
+
+// The copy of that screen must not borrow either neighbour's claim: the answers
+// DID land (unlike `deadlineSubmitFailure`) and the exam is NOT known to be
+// processed (unlike the review screen).
+describe('deadlineUnconfirmedNotice', () => {
+  it('never says the answers were lost — they are on the server', () => {
+    const copy = deadlineUnconfirmedNotice();
+    expect(copy.body).not.toContain('NÃO chegaram ao servidor');
+    expect(copy.body).not.toContain('será perdido');
+    expect(copy.body).toContain('JÁ chegaram ao servidor');
+  });
+
+  it('never asserts the exam was processed', () => {
+    const copy = deadlineUnconfirmedNotice();
+    expect(copy.title).toContain('não confirmamos o encerramento');
+    expect(copy.body).not.toContain('foi processada');
+  });
+
+  it('offers to confirm again, and says leaving is safe', () => {
+    const copy = deadlineUnconfirmedNotice();
+    expect(copy.retryLabel).toBe('Confirmar de novo');
+    expect(copy.body).toContain('o servidor encerra a prova sozinho');
   });
 });
 

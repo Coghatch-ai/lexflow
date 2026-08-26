@@ -4,7 +4,7 @@
 // so every trpc.*.useQuery / .useMutation call is typed end-to-end.
 
 import { createTRPCReact } from "@trpc/react-query";
-import { httpBatchLink } from "@trpc/client";
+import { createTRPCClient, httpBatchLink } from "@trpc/client";
 import type { inferRouterInputs, inferRouterOutputs } from "@trpc/server";
 import { QueryClient } from "@tanstack/react-query";
 import superjson from "superjson";
@@ -56,15 +56,45 @@ if (apiUrl.length === 0) {
   throw new Error("VITE_API_URL is required");
 }
 
+/** The Clerk bearer, or nothing — shared by both clients below. */
+async function authHeaders(): Promise<Record<string, string>> {
+  const token = getToken !== null ? await getToken() : null;
+  return token !== null && token.length > 0 ? { authorization: `Bearer ${token}` } : {};
+}
+
 export const trpcClient = trpc.createClient({
+  links: [httpBatchLink({ url: apiUrl, transformer: superjson, headers: authHeaders })],
+});
+
+/**
+ * The SAME API, over a `fetch` the browser finishes after this document is
+ * destroyed (Codex adversarial review of #79).
+ *
+ * For the one write that has no second chance: the save issued from `pagehide`
+ * while the student closes the tab mid-exam. A normal request is cancelled with
+ * the document; `keepalive` is completed by the browser, and — unlike
+ * `navigator.sendBeacon` — it carries the `Authorization` header every
+ * `protectedProcedure` needs.
+ *
+ * A separate client rather than a flag on the one above, because `keepalive`
+ * caps the request body at 64 KiB across all in-flight keepalive requests
+ * (`exit-save.ts` owns that budget). Making every call keepalive would put that
+ * cap on the seed, the AI grading and the question catalog, which legitimately
+ * exceed it.
+ *
+ * Deliberately NOT paired with a cached token: `getToken()` resolves from
+ * Clerk's own cache without a round trip while the token is valid, and a cache
+ * of ours would just as often hold an EXPIRED one (Clerk session tokens live
+ * 60 s) — which is a silent 401 where Clerk would have refreshed. The residual
+ * risk is stated where it is taken (`use-run-persistence.ts`).
+ */
+export const exitTrpcClient = createTRPCClient<AppRouter>({
   links: [
     httpBatchLink({
       url: apiUrl,
       transformer: superjson,
-      async headers() {
-        const token = getToken !== null ? await getToken() : null;
-        return token !== null && token.length > 0 ? { authorization: `Bearer ${token}` } : {};
-      },
+      headers: authHeaders,
+      fetch: (url, options) => fetch(url, { ...options, keepalive: true }),
     }),
   ],
 });

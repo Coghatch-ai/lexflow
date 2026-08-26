@@ -221,8 +221,71 @@ export function deadlineSettlementFor(flushed: Settled<{ ok: boolean }>): Deadli
   return flushed.ok ? 'settle' : 'hold';
 }
 
-/** The four things the BOARD can put on screen once the exam is running. */
-export type RealBoardScreen = 'playing' | 'submitting' | 'submit-failed' | 'review';
+/**
+ * What `processReal` answered at the deadline — and, as its third member, that
+ * it did NOT (Codex adversarial review of #79).
+ *
+ * `PROCESS_REJECTED` is the call having thrown; `UNSETTLED` is it never having
+ * answered inside `DEADLINE_SUBMIT_TIMEOUT_MS`. They are ONE state — unknown —
+ * and the point of naming it is that it is not "settled".
+ */
+export const PROCESS_REJECTED = 'process-rejected';
+
+/** What the board may show once the deadline flush landed and `processReal` answered — or did not. */
+export type DeadlineCompletion = 'review' | 'unconfirmed';
+
+/**
+ * A run may only be SHOWN as finished when its settlement was confirmed.
+ *
+ * The flush landed, so the answers are on the server and `settleRealRun`
+ * settles that row on the student's next authenticated contact — the DATA is
+ * safe either way. What is unknown is whether it is settled now, and the review
+ * screen is a claim about exactly that: it says "here is your finished exam"
+ * and its only button starts ANOTHER prova real. Rendering it over an unknown
+ * outcome asserts a result nobody has — the earlier reading ("a timeout is the
+ * same as the existing `catch`, the server settles later") was right about the
+ * data and wrong about the screen.
+ *
+ * `settled: false` is NOT unknown: the server answered, and it means another
+ * settlement got there first — a finished exam either way.
+ */
+export function deadlineCompletionFor(
+  processed: Settled<{ settled: boolean }> | typeof PROCESS_REJECTED,
+): DeadlineCompletion {
+  if (processed === UNSETTLED || processed === PROCESS_REJECTED) return 'unconfirmed';
+  return 'review';
+}
+
+/**
+ * The deadline flush LANDED but the settlement could not be confirmed (Codex
+ * adversarial review of #79).
+ *
+ * Deliberately not `deadlineSubmitFailure`: that copy says the answers never
+ * reached the server, which here is false and would push the student to retry a
+ * send that already succeeded. Deliberately not the review screen either —
+ * nobody knows the exam is settled. So it states the two facts apart: the
+ * answers are safe, the closing was not confirmed. Leaving is explicitly
+ * allowed, because the server finishes this on its own.
+ */
+export function deadlineUnconfirmedNotice(): RealFailureCopy {
+  return {
+    title: 'Suas respostas foram enviadas, mas não confirmamos o encerramento.',
+    body:
+      'A prova encerrou e suas respostas JÁ chegaram ao servidor — elas não serão perdidas. ' +
+      'O que não deu para confirmar agora foi o processamento do resultado. Toque em ' +
+      '"Confirmar de novo"; se preferir sair, o servidor encerra a prova sozinho e o ' +
+      'resultado aparece no seu histórico.',
+    retryLabel: 'Confirmar de novo',
+  };
+}
+
+/** The five things the BOARD can put on screen once the exam is running. */
+export type RealBoardScreen =
+  | 'playing'
+  | 'submitting'
+  | 'submit-failed'
+  | 'unconfirmed'
+  | 'review';
 
 /**
  * What the board renders. `submit-failed` outranks ALL — that precedence is
@@ -251,17 +314,28 @@ export type RealBoardScreen = 'playing' | 'submitting' | 'submit-failed' | 'revi
  * retry. Bound at the call, not by a second timer watching this screen: one
  * timeout, one truth, and the state machine here stays a pure function of what
  * the submission actually said.
+ *
+ * `unconfirmed` is the fourth precedence and the Codex adversarial finding: the
+ * flush landed but `processReal` timed out or threw. It outranks `reviewing`
+ * for the same reason `submit-failed` does — an UNKNOWN outcome may not be
+ * rendered as a settled one — and it sits below `submit-failed` because "the
+ * answers never left" is the graver of the two claims. It cannot fall through
+ * to `submitting` either: that card has no button, and there is a decision to
+ * offer here.
  */
 export function realBoardScreen({
   reviewing,
   submitFailed,
+  unconfirmed,
   expired,
 }: {
   reviewing: boolean;
   submitFailed: boolean;
+  unconfirmed: boolean;
   expired: boolean;
 }): RealBoardScreen {
   if (submitFailed) return 'submit-failed';
+  if (unconfirmed) return 'unconfirmed';
   if (reviewing) return 'review';
   return expired ? 'submitting' : 'playing';
 }
