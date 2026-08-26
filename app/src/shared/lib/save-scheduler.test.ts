@@ -345,4 +345,76 @@ describe("createSaveScheduler — failures", () => {
     await vi.advanceTimersByTimeAsync(SAVE_DEBOUNCE_MS);
     expect(seen).toEqual([boom]);
   });
+
+  it("a BACKGROUND send that failed is RESENT by flush — never reported as landed", async () => {
+    // The audit finding of #79, as a mutation guard: `run()` used to clear
+    // `dirty` before dispatching and never re-armed it on failure, so a
+    // background save that died left NOTHING pending and the deadline's
+    // `flush()` answered `ok: true` having sent nothing. The prova real then
+    // settled a row that did not exist and showed a review screen over
+    // answers that were only in the tab.
+    const boom = new Error("offline");
+    let sends = 0;
+    const scheduler = createSaveScheduler({
+      send: () => {
+        sends += 1;
+        return Promise.reject(boom);
+      },
+    });
+
+    scheduler.schedule();
+    await vi.advanceTimersByTimeAsync(SAVE_DEBOUNCE_MS);
+    expect(sends).toBe(1);
+
+    const flushed = await scheduler.flush();
+
+    // Resent (the payload is still unwritten) and reported as a FAILURE.
+    expect(sends).toBe(2);
+    expect(flushed).toEqual({ ok: false, error: boom });
+    expect(flushed.ok).not.toBe(true);
+  });
+
+  it("flush answers ok:true once the RESEND of a failed background save lands", async () => {
+    // The other half of the contract: `ok: false` must mean "still unsent",
+    // not "a send failed at some point". A retry that lands is a landed run.
+    let sends = 0;
+    const scheduler = createSaveScheduler({
+      send: () => {
+        sends += 1;
+        return sends === 1 ? Promise.reject(new Error("blip")) : Promise.resolve("token-2");
+      },
+    });
+
+    scheduler.schedule();
+    await vi.advanceTimersByTimeAsync(SAVE_DEBOUNCE_MS);
+    const flushed = await scheduler.flush();
+
+    expect(sends).toBe(2);
+    expect(flushed).toEqual({ ok: true, value: "token-2" });
+
+    // And the re-armed flag is consumed: a second flush sends nothing.
+    const again = await scheduler.flush();
+    expect(sends).toBe(2);
+    expect(again).toEqual({ ok: true, value: "token-2" });
+  });
+
+  it("a failed send does not resurrect a CLOSED scheduler", async () => {
+    // `close()` is terminal (a CONFLICT ended this tab's run): the re-armed
+    // `dirty` may not turn into a write after it.
+    let sends = 0;
+    const scheduler = createSaveScheduler({
+      send: () => {
+        sends += 1;
+        return Promise.reject(new Error("offline"));
+      },
+    });
+
+    scheduler.schedule();
+    await vi.advanceTimersByTimeAsync(SAVE_DEBOUNCE_MS);
+    expect(sends).toBe(1);
+
+    scheduler.close();
+    await scheduler.flush();
+    expect(sends).toBe(1);
+  });
 });

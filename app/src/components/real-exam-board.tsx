@@ -350,7 +350,11 @@ export default function RealExamBoard({
     setCurrentIndex(next);
   };
 
-  const screen = realBoardScreen({ reviewing, submitFailed });
+  // `expired` keeps the ended exam off the screen WHILE the deadline
+  // submission is in the air: `finishByDeadline` clears `submitFailed` before
+  // flushing, so without it the board fell back to `ExamPlaying` at 00:00 and
+  // accepted answers into an exam that had already ended (audit of #79).
+  const screen = realBoardScreen({ reviewing, submitFailed, expired: secondsLeft <= 0 });
 
   // The deadline passed with answers still in this tab. NOT `ExamPlaying` (the
   // exam is over) and NOT `ExamReview` (nothing was processed) — the card says

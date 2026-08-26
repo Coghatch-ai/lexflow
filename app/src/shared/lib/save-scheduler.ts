@@ -24,6 +24,12 @@ export const SAVE_DEBOUNCE_MS = 1500;
  * The outcome of a flush. Never a rejected promise: an exit handler awaits
  * this before deciding whether to record/navigate, and a throw there is how a
  * CONFLICT turns into a blank screen instead of a dialog.
+ *
+ * `ok: true` is a CONTRACT the callers depend on — "everything this scheduler
+ * was asked to send has landed on the server", not "no send failed while you
+ * were watching". A send that failed in the background is re-armed (`run`) and
+ * resent by the flush, so it can only be reported as `ok: true` after it
+ * actually lands.
  */
 export type FlushResult<T> = { ok: true; value: T | null } | { ok: false; error: unknown };
 
@@ -120,9 +126,33 @@ export function createSaveScheduler<T>({
     return attempt;
   };
 
+  /**
+   * Sends the current payload, and RE-ARMS `dirty` if that send failed.
+   *
+   * `dirty` is cleared before the dispatch on purpose (a `schedule()` landing
+   * mid-flight must leave it true so `flush` writes again), but a send that
+   * REJECTS never wrote the payload either — so clearing it there would forget
+   * the write for good. That is the audit finding of #79: a background save
+   * that died left nothing pending, and the deadline's `flush()` answered
+   * `ok: true` having sent nothing, so `processReal` settled a row that did
+   * not exist and the review screen was shown over answers that lived only in
+   * the tab. Re-armed, the flush RESENDS and — if that fails too — reports
+   * `ok: false`, which is what `deadlineSettlementFor` turns into `hold`.
+   *
+   * `ok: true` therefore means what every caller already assumes: everything
+   * the scheduler was asked to send has landed.
+   */
   const run = (): Promise<T> => {
     dirty = false;
-    return dispatch(send);
+    const rearmed = dispatch(send).catch((error: unknown) => {
+      dirty = true;
+      throw error;
+    });
+    // `dispatch` only guards ITS promise against an unhandled rejection; this
+    // derived one needs its own handler, because the debounce fires it with
+    // nobody awaiting (`void run()`).
+    void rearmed.catch(() => undefined);
+    return rearmed;
   };
 
   return {

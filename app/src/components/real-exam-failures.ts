@@ -159,6 +159,12 @@ export type DeadlineSettlement = 'settle' | 'hold';
  * A failed flush means the answers are still only in this tab: closing the run
  * drops them and the review screen claims a result that does not exist. `hold`
  * keeps them, and the retry is what completes the submission.
+ *
+ * The premise this leans on lives in `save-scheduler.ts`: `ok: true` means
+ * "everything the scheduler was asked to send has landed", because a send that
+ * failed in the background re-arms `dirty` and is RESENT by this very flush.
+ * Without that, `ok` was only "no send failed while you were watching" and this
+ * predicate settled runs whose first save never reached the server (audit #79).
  */
 export function deadlineSettlementFor(flushed: { ok: boolean }): DeadlineSettlement {
   return flushed.ok ? 'settle' : 'hold';
@@ -172,16 +178,27 @@ export type RealBoardScreen = 'playing' | 'submit-failed' | 'review';
  * the fix: it may not fall back to `playing` (the deadline passed, the exam
  * cannot be answered any more) and it may not become `review` (which is the
  * screen that says "your exam was processed" over answers that never landed).
+ *
+ * `expired` closes the gap the retry opened (audit of #79): `finishByDeadline`
+ * clears `submitFailed` before flushing, and that flush can hang for the length
+ * of a request — so between 00:00 and its answer the board fell back to
+ * `playing` and an exam that had ALREADY ended accepted answers again. Past the
+ * deadline there is no playing board at all: either the run was settled
+ * (`review`) or its submission is still owed (`submit-failed`, whose card shows
+ * the in-flight state through its own `busy`).
  */
 export function realBoardScreen({
   reviewing,
   submitFailed,
+  expired,
 }: {
   reviewing: boolean;
   submitFailed: boolean;
+  expired: boolean;
 }): RealBoardScreen {
   if (submitFailed) return 'submit-failed';
-  return reviewing ? 'review' : 'playing';
+  if (reviewing) return 'review';
+  return expired ? 'submit-failed' : 'playing';
 }
 
 /**
@@ -195,12 +212,21 @@ export function realBoardScreen({
  * the FIRST save hit a row that already exists) is a prova real still running
  * somewhere else; announcing it as "encerrada e processada" is simply false,
  * and it sends the student to a histórico with nothing new in it.
+ *
+ * What `live` may NOT assert either (audit of #79) is the OTHER device: the
+ * same conflict happens in a single tab whose first save committed and lost its
+ * response (`hadToken === false`), so the next save arrives as a "first save"
+ * against the student's OWN row. Telling them to continue "no aparelho onde ela
+ * está aberta" sends them looking for something that does not exist. The fact
+ * that holds in both readings is the row: the run IS on the server and the
+ * server settles it at its deadline.
  */
 export function realConflictNotice(kind: RunConflictKind): string {
   if (kind === 'live') {
     return (
-      'Já existe uma prova real em andamento em outro lugar, então esta aba não pôde ' +
-      'assumi-la. Continue a prova no aparelho onde ela está aberta.'
+      'Já existe uma prova real em andamento registrada no servidor, então esta aba não ' +
+      'pôde assumi-la. Se ela estiver aberta em outro aparelho, continue por lá; quando o ' +
+      'prazo terminar, o servidor encerra a prova e o resultado aparece no seu histórico.'
     );
   }
   return (

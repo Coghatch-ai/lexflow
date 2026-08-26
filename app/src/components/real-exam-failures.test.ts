@@ -94,18 +94,45 @@ describe('realBoardScreen', () => {
   it('never shows the review screen while a submission is held', () => {
     // `setReviewing(true)` may not be reachable on a path where answers were
     // lost: `submit-failed` outranks `review`.
-    expect(realBoardScreen({ reviewing: true, submitFailed: true })).toBe('submit-failed');
-    expect(realBoardScreen({ reviewing: true, submitFailed: true })).not.toBe('review');
+    expect(realBoardScreen({ reviewing: true, submitFailed: true, expired: true })).toBe(
+      'submit-failed',
+    );
+    expect(realBoardScreen({ reviewing: true, submitFailed: true, expired: true })).not.toBe(
+      'review',
+    );
   });
 
   it('never falls back to the playing board either — the deadline passed', () => {
-    expect(realBoardScreen({ reviewing: false, submitFailed: true })).toBe('submit-failed');
-    expect(realBoardScreen({ reviewing: false, submitFailed: true })).not.toBe('playing');
+    expect(realBoardScreen({ reviewing: false, submitFailed: true, expired: true })).toBe(
+      'submit-failed',
+    );
+    expect(realBoardScreen({ reviewing: false, submitFailed: true, expired: true })).not.toBe(
+      'playing',
+    );
+  });
+
+  it('does not re-open the exam at 00:00 while the submission is in flight', () => {
+    // The retry clears `submitFailed` BEFORE flushing, and the flush can hang
+    // for a whole request: without `expired` the board went back to `playing`
+    // and an exam that had already ended accepted answers again (audit #79).
+    expect(realBoardScreen({ reviewing: false, submitFailed: false, expired: true })).toBe(
+      'submit-failed',
+    );
+    expect(realBoardScreen({ reviewing: false, submitFailed: false, expired: true })).not.toBe(
+      'playing',
+    );
+  });
+
+  it('still shows the review of a run that WAS settled after the deadline', () => {
+    // `expired` is true for the whole review screen — it may not swallow it.
+    expect(realBoardScreen({ reviewing: true, submitFailed: false, expired: true })).toBe('review');
   });
 
   it('is the normal board and the normal review when nothing is held', () => {
-    expect(realBoardScreen({ reviewing: false, submitFailed: false })).toBe('playing');
-    expect(realBoardScreen({ reviewing: true, submitFailed: false })).toBe('review');
+    expect(realBoardScreen({ reviewing: false, submitFailed: false, expired: false })).toBe(
+      'playing',
+    );
+    expect(realBoardScreen({ reviewing: true, submitFailed: false, expired: false })).toBe('review');
   });
 });
 
@@ -136,9 +163,20 @@ describe('deadlineSubmitFailure', () => {
 describe('realConflictNotice', () => {
   it('never claims a live conflict was encerrada e processada', () => {
     const live = realConflictNotice('live');
-    expect(live).toContain('em andamento em outro lugar');
+    expect(live).toContain('em andamento');
     expect(live).not.toContain('encerrada e processada');
     expect(live).not.toContain('resultado está no seu histórico');
+  });
+
+  it('does not send the student to a device that may not exist', () => {
+    // A single tab whose first save committed and lost its response hits the
+    // SAME `live` conflict against its own row (`hadToken === false`), so the
+    // copy may only mention another device as a possibility — never as an
+    // instruction. The fact that holds either way is the row on the server.
+    const live = realConflictNotice('live');
+    expect(live).not.toContain('Continue a prova no aparelho onde ela está aberta');
+    expect(live).toContain('Se ela estiver aberta em outro aparelho');
+    expect(live).toContain('registrada no servidor');
   });
 
   it('keeps a remote conflict honest about not knowing which it was', () => {
