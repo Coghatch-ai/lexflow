@@ -11,13 +11,16 @@ import { describe, expect, it } from "vitest";
 import { moveToEnd } from "./exam-queue";
 import {
   adaptiveDraftPayload,
+  realDraftPayload,
   resumeAdaptiveFrom,
+  resumeRealFrom,
   resumeSpacedFrom,
   runSaveFailure,
   saveFailureFor,
   spacedDraftPayload,
   type AdaptiveRunState,
   type PersistedDraft,
+  type RealRunState,
   type SpacedRunState,
 } from "./run-persistence";
 import type { AdaptiveState } from "@shared/domain/adaptive";
@@ -42,6 +45,7 @@ function draft(overrides: Partial<PersistedDraft> = {}): PersistedDraft {
     answers: [answer("q1")],
     modeState: { mode: "standard", carriedTime: { q2: 42 } },
     elapsedSeconds: 130,
+    deadlineAt: null,
     lastSavedAt: PG_TOKEN,
     ...overrides,
   };
@@ -297,6 +301,116 @@ describe("resumeAdaptiveFrom", () => {
 
   it("asks for a discard when NOTHING survived", () => {
     expect(resumeAdaptiveFrom(adaptiveDraft(), [])).toEqual({ discard: true, dropped: 4 });
+  });
+});
+
+// The prova real (epic #67 slice S2d, #79). It persists to be AUTO-SUBMITTED,
+// never to be offered back (BR-05.5), and it is the only mode whose payload
+// carries `deadlineAt` — the absolute clock the auto-submit is judged against.
+const REAL_DEADLINE = "2026-08-21T19:30:04.000Z";
+
+function realRun(overrides: Partial<RealRunState> = {}): RealRunState {
+  return {
+    questionIds: ["q1", "q2", "q3"],
+    cursor: 2,
+    answers: [answer("q1"), answer("q2", "B")],
+    deadlineAt: REAL_DEADLINE,
+    token: PG_TOKEN,
+    ...overrides,
+  };
+}
+
+describe("realDraftPayload", () => {
+  it("carries the absolute deadlineAt — the whole reason this mode persists", () => {
+    expect(realDraftPayload(realRun()).deadlineAt).toBe(REAL_DEADLINE);
+  });
+
+  it("echoes the raw PG deadline back verbatim when the screen rehydrated from one", () => {
+    // A resumed board holds what `get` returned; the router normalises it.
+    const raw = "2026-08-21 19:30:04.210932+00";
+    expect(realDraftPayload(realRun({ deadlineAt: raw })).deadlineAt).toBe(raw);
+  });
+
+  it("sends elapsedSeconds 0 — the time used is DERIVED from the deadline (D8)", () => {
+    expect(realDraftPayload(realRun()).elapsedSeconds).toBe(0);
+  });
+
+  it("keeps setup and modeState bare: the only per-mode thing is the deadline column", () => {
+    const payload = realDraftPayload(realRun());
+    expect(payload.setup).toEqual({ mode: "real" });
+    expect(payload.modeState).toEqual({ mode: "real" });
+  });
+
+  it("agrees with itself on the three discriminators (the router refuses otherwise)", () => {
+    const payload = realDraftPayload(realRun());
+    expect(payload.mode).toBe("real");
+    expect(payload.setup.mode).toBe("real");
+    expect(payload.modeState.mode).toBe("real");
+  });
+
+  it("returns the token VERBATIM — no Date, no toISOString", () => {
+    const payload = realDraftPayload(realRun());
+    expect(payload.token).toBe(PG_TOKEN);
+    expect(payload.token).toContain(".210932");
+  });
+
+  it("carries a null token on the first save (the one that mints the deadline)", () => {
+    expect(realDraftPayload(realRun({ token: null })).token).toBeNull();
+  });
+
+  it("DEDUPLICATES by questionId — the real exam re-answers the same question", () => {
+    // Unlike the study modes, an answer here is written the moment it is picked
+    // and can be changed for 5 h. Two entries for one question would count 4 of
+    // 3, write two `user_answers` rows and step SM-2 twice.
+    const payload = realDraftPayload(
+      realRun({ answers: [answer("q1", "A"), answer("q2", "B"), answer("q1", "C")] }),
+    );
+    expect(payload.answers).toEqual([
+      { questionId: "q1", userAnswer: "C", correct: true, timeSpent: 10 },
+      { questionId: "q2", userAnswer: "B", correct: true, timeSpent: 10 },
+    ]);
+  });
+
+  it("copies the frozen queue instead of aliasing the live array", () => {
+    const questionIds = ["q1", "q2"];
+    const payload = realDraftPayload(realRun({ questionIds }));
+    questionIds.push("q3");
+    expect(payload.questionIds).toEqual(["q1", "q2"]);
+  });
+});
+
+describe("resumeRealFrom", () => {
+  function realDraft(overrides: Partial<PersistedDraft> = {}): PersistedDraft {
+    return draft({
+      mode: "real",
+      setup: { mode: "real" },
+      modeState: { mode: "real" },
+      elapsedSeconds: 0,
+      deadlineAt: REAL_DEADLINE,
+      answers: [answer("q1"), answer("q2", "B")],
+      cursor: 2,
+      ...overrides,
+    });
+  }
+
+  it("re-imposes the frozen queue order and hands the deadline through untouched", () => {
+    const resumed = resumeRealFrom(realDraft(), [{ id: "q3" }, { id: "q1" }, { id: "q2" }]);
+    if (resumed.discard) throw new Error("expected a resumable prova real");
+    expect(resumed.questions.map((q) => q.id)).toEqual(["q1", "q2", "q3"]);
+    expect(resumed.cursor).toBe(2);
+    expect(resumed.deadlineAt).toBe(REAL_DEADLINE);
+  });
+
+  it("drops answers to questions that left the catalog (the FK would kill the recording)", () => {
+    const resumed = resumeRealFrom(realDraft(), [{ id: "q1" }, { id: "q3" }]);
+    if (resumed.discard) throw new Error("expected a resumable prova real");
+    expect(resumed.answers.map((a) => a.questionId)).toEqual(["q1"]);
+    expect(resumed.dropped).toBe(1);
+    expect(resumed.cursor).toBe(1);
+  });
+
+  it("discards when nothing survived", () => {
+    expect(resumeRealFrom(realDraft(), [])).toEqual({ discard: true, dropped: 3 });
   });
 });
 

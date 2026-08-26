@@ -1,6 +1,7 @@
 import type { ReactElement } from 'react';
 import { AlertCircle } from 'lucide-react';
 import type { ExitPrompt } from '@/shared/lib/exit-rules';
+import { offersSaveAndExit } from '@/shared/lib/run-guard';
 
 type QuitTestDialogProps = {
   open: boolean;
@@ -36,7 +37,7 @@ export default function QuitTestDialog({
 }: QuitTestDialogProps): ReactElement | null {
   if (!open) return null;
 
-  const showSave = prompt.saveLabel !== null && onSave !== undefined;
+  const showSave = offersSaveAndExit(prompt, onSave);
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">

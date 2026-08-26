@@ -113,6 +113,16 @@ const saveInput = z
      * matched with `=` against the column, and normalising it through `Date`
      * drops the microseconds and breaks the optimistic guard for good. Two
      * string fields of the same row, opposite rules — hence the note.
+     *
+     * The `transform` is the second half, and it is what keeps a bad input a
+     * BAD_REQUEST instead of a 500: `Date.parse` is far more generous than
+     * Postgres, so the `refine` alone lets through values the driver then dies
+     * on — `"2026"` (a whole YEAR, PG 22007) and a JS `Date.toString()`
+     * (PG 22023). Normalising to ISO here is safe for exactly the reason above
+     * (the column is compared, never echoed) and NEVER acceptable on `token`.
+     * Known cost, accepted: it truncates µs to ms, which is nothing against a
+     * 5 h exam but IS a contract change — the deadline stored is the instant
+     * asked for, to the millisecond.
      */
     deadlineAt: z
       .string()
@@ -120,6 +130,7 @@ const saveInput = z
       .refine((v) => Number.isFinite(Date.parse(v)), {
         message: "deadlineAt precisa ser uma data/hora reconhecível",
       })
+      .transform((v) => new Date(v).toISOString())
       .nullable()
       .optional(),
     /** `last_saved_at` of the row this save is based on; null = first save. */

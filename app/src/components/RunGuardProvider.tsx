@@ -2,7 +2,7 @@ import { useCallback, useMemo, useRef, useState, type ReactElement, type ReactNo
 import { useLocation } from 'wouter';
 import QuitTestDialog from './QuitTestDialog';
 import { RunGuardContext, type RegisteredRun, type RunGuardValue } from '../shared/run-guard-context';
-import { decideNavigation, guardSaveOutcome, pickActiveRun } from '../shared/lib/run-guard';
+import { decideNavigation, guardSaveOutcome, offersSaveAndExit, pickActiveRun } from '../shared/lib/run-guard';
 import type { ExitPrompt } from '../shared/lib/exit-rules';
 
 // Navigation guard for a test still running (BR-05.1, epic #67 slice S1b).
@@ -44,8 +44,13 @@ export default function RunGuardProvider({ children }: { children: ReactNode }):
       const decision = decideNavigation(active, location, targetPath);
       if (decision.action === 'prompt' && active !== null) {
         // Whether the third button exists is decided here, at click time, from
-        // the same registry read — never from a render-time lookup.
-        const canSave = registryRef.current.get(active.id)?.save !== undefined;
+        // the same registry read — never from a render-time lookup — and by the
+        // same pure rule `QuitTestDialog` uses, so the guard can never offer
+        // "Salvar e sair" for a mode whose prompt forbids it (BR-05.5).
+        const canSave = offersSaveAndExit(
+          decision.prompt,
+          registryRef.current.get(active.id)?.save,
+        );
         setPending({ prompt: decision.prompt, id: active.id, next, canSave });
         return;
       }

@@ -44,6 +44,26 @@ export function pickActiveRun(runs: readonly RunRegistration[]): RunRegistration
   return runs.find((run) => isRunGuarded(run)) ?? null;
 }
 
+/**
+ * Whether the exit dialog offers "Salvar e sair" at all — the DOUBLE lock, in
+ * one place instead of two (BR-05.3 / BR-05.5).
+ *
+ * Both halves are load-bearing and neither implies the other. The RULE is per
+ * MODE: `exitPrompt('real')` answers `saveLabel: null`, because a prova real is
+ * never saved to continue later — persisting it (slice S2d) is for the
+ * auto-submit, and that is not the same thing. The HANDLER is per SCREEN: a
+ * mode whose wiring has not landed keeps two buttons without forking a second
+ * rule set.
+ *
+ * The prova real is the case that must never regress: it registers NO save
+ * handler and its prompt has NO label, so the third button cannot come back by
+ * someone wiring a handler in — offering it would be an escape hatch out of an
+ * exam that is not allowed to be paused.
+ */
+export function offersSaveAndExit(prompt: ExitPrompt, save: (() => unknown) | undefined): boolean {
+  return prompt.saveLabel !== null && save !== undefined;
+}
+
 /** What the guard does with its own dialog once the screen's `save()` settled. */
 export interface GuardSaveOutcome {
   /** The pending navigation only runs for a run that is safely on the server. */

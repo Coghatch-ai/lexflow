@@ -51,6 +51,14 @@ export interface FlushOutcome {
 export interface RunPersistence {
   /** An answer was confirmed — arm the trailing debounce. */
   scheduleSave: () => void;
+  /**
+   * The prova real's 60 s heartbeat (BR-05.5, slice S2d) — `examDrafts.touch`,
+   * one column, no jsonb rewrite. The INTERVAL belongs to the screen; this is
+   * only the beat itself. A no-op before the run has a token (nothing to
+   * refresh yet) and skipped by the scheduler whenever a save already did the
+   * job. Every other mode simply never calls it.
+   */
+  beat: () => Promise<void>;
   /** Land everything pending, then hand back the claim built on the FINAL token. */
   flush: () => Promise<FlushOutcome>;
   /** The conflict dialog the screen must render, or null. */
@@ -86,6 +94,8 @@ interface PersistenceRefs {
   /** Whether the FAILING save carried a token — picks the conflict copy. */
   hadToken: MutableRefObject<boolean>;
   send: MutableRefObject<() => Promise<string>>;
+  /** Refreshes the token without rewriting the payload (`examDrafts.touch`). */
+  keepAlive: MutableRefObject<() => Promise<string>>;
   /** Reads the row id back from the server; resolves even when it cannot. */
   learnDraftId: MutableRefObject<() => Promise<void>>;
   scheduler: MutableRefObject<SaveScheduler<string> | null>;
@@ -117,11 +127,38 @@ function raiseFailure(refs: PersistenceRefs, error: unknown): void {
   refs.setFailure(saveFailureFor(error));
 }
 
+/**
+ * The heartbeat itself (`examDrafts.touch`), and THE carried debt it pays
+ * (answering-surfaces.md): `touch` moves `last_saved_at` exactly like `save`
+ * does, so a caller that does not write the new token back leaves the run
+ * holding a token the row no longer has — and the very next save or claim
+ * matches 0 rows and hands the student a CONFLICT caused by their own
+ * heartbeat. Out here rather than inside the hook so the debt is stated once,
+ * where it is paid.
+ */
+function keepAliveVia(
+  refs: PersistenceRefs,
+  mode: RunMode,
+  touch: (input: { mode: RunMode; token: string }) => Promise<{ lastSavedAt: string }>,
+): () => Promise<string> {
+  return async (): Promise<string> => {
+    const token = refs.token.current;
+    if (token === null) return "";
+    // A touch carries a token by definition, so a CONFLICT raised by it is
+    // always the "continued elsewhere" flavour.
+    refs.hadToken.current = true;
+    const beaten = await touch({ mode, token });
+    refs.token.current = beaten.lastSavedAt;
+    return beaten.lastSavedAt;
+  };
+}
+
 function schedulerOf(refs: PersistenceRefs): SaveScheduler<string> {
   const existing = refs.scheduler.current;
   if (existing !== null) return existing;
   const created = createSaveScheduler<string>({
     send: () => refs.send.current(),
+    keepAlive: () => refs.keepAlive.current(),
     onError: (error) => {
       raiseIfConflict(refs, error);
     },
@@ -176,6 +213,7 @@ export type RunSnapshot = (token: string | null) => RunDraftPayload | null;
 export function useRunPersistence(mode: RunMode, snapshot: RunSnapshot): RunPersistence {
   const utils = trpc.useUtils();
   const saveMutation = trpc.examDrafts.save.useMutation();
+  const touchMutation = trpc.examDrafts.touch.useMutation();
   const discardMutation = trpc.examDrafts.discard.useMutation();
   const [conflict, setConflict] = useState<RunConflict | null>(null);
   const [failure, setFailure] = useState<RunSaveFailure | null>(null);
@@ -190,6 +228,7 @@ export function useRunPersistence(mode: RunMode, snapshot: RunSnapshot): RunPers
   const tokenRef = useRef<string | null>(null);
   const hadTokenRef = useRef(false);
   const sendRef = useRef<() => Promise<string>>(() => Promise.resolve(""));
+  const keepAliveRef = useRef<() => Promise<string>>(() => Promise.resolve(""));
   const learnDraftIdRef = useRef<() => Promise<void>>(() => Promise.resolve());
   const schedulerRef = useRef<SaveScheduler<string> | null>(null);
   const refs: PersistenceRefs = {
@@ -197,6 +236,7 @@ export function useRunPersistence(mode: RunMode, snapshot: RunSnapshot): RunPers
     token: tokenRef,
     hadToken: hadTokenRef,
     send: sendRef,
+    keepAlive: keepAliveRef,
     learnDraftId: learnDraftIdRef,
     scheduler: schedulerRef,
     setConflict,
@@ -236,6 +276,8 @@ export function useRunPersistence(mode: RunMode, snapshot: RunSnapshot): RunPers
     return saved.lastSavedAt;
   };
 
+  refs.keepAlive.current = keepAliveVia(refs, mode, (input) => touchMutation.mutateAsync(input));
+
   const scheduler = schedulerOf(refs);
 
   // Closing the tab is honestly BEST-EFFORT: `httpBatchLink` builds the auth
@@ -261,6 +303,12 @@ export function useRunPersistence(mode: RunMode, snapshot: RunSnapshot): RunPers
   return {
     scheduleSave: (): void => {
       schedulerOf(refs).schedule();
+    },
+    beat: async (): Promise<void> => {
+      // Nothing to refresh before the first save landed — the row does not
+      // exist yet, and `touch` has no token to match on.
+      if (refs.token.current === null) return;
+      await schedulerOf(refs).beat();
     },
     flush: (): Promise<FlushOutcome> => flushRun(refs),
     conflict,

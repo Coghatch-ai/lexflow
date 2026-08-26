@@ -36,7 +36,9 @@ import {
 } from "./smoke-exam-drafts-stale";
 import {
   assertClientCannotFileRealAsStudy,
+  assertClientProcessRealRecordsOnce,
   assertDeadlineRoundTrips,
+  assertHeartbeatRotatesTheToken,
 } from "./smoke-exam-drafts-mode";
 import {
   assertAdaptiveTotalIsTheTarget,
@@ -553,6 +555,11 @@ export async function smokeExamDrafts(opts: {
   await assertClientCannotFileRealAsStudy(db, caller, userId, questions);
   await assertDeadlineRoundTrips(caller, db, userId, questions);
 
+  // (t)–(u): the data path slice S2d adds — the 60 s heartbeat's token and the
+  // client's own auto-submit when the 5 h deadline passes.
+  await assertHeartbeatRotatesTheToken(caller, db, userId, questions);
+  await assertClientProcessRealRecordsOnce(caller, db, userId, questions);
+
   // (q)–(s): the data path slice S2c changed — `byIds` + the "N" of the card +
   // the spaced run's own claim. They run last because each needs a clean
   // `exam_drafts` for this user, which the sweep below guarantees for the next.
@@ -563,5 +570,5 @@ export async function smokeExamDrafts(opts: {
 
   // Belt and braces: nothing this block created may outlive it.
   await db.delete(examDrafts).where(eq(examDrafts.userId, userId));
-  console.warn("[smoke] ✓ exam_drafts (a)–(s) OK");
+  console.warn("[smoke] ✓ exam_drafts (a)–(u) OK");
 }

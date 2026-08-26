@@ -8,6 +8,7 @@ import type { AdaptiveState } from "./adaptive";
 import {
   REAL_EXAM_DIFFICULTY,
   REAL_EXAM_DISCIPLINE,
+  REAL_EXAM_DURATION_SECONDS,
   REAL_RUN_STALE_SECONDS,
   RESUMABLE_MODES,
   answeredOf,
@@ -16,6 +17,8 @@ import {
   filingForClaimedMode,
   isRealRunAbandoned,
   isResumableMode,
+  realMountDecision,
+  realSecondsLeft,
   reconcileRun,
   resumeCursor,
   type AnswerDraft,
@@ -329,5 +332,129 @@ describe("isRealRunAbandoned", () => {
 
   it("false on an unparseable timestamp — never auto-submit on a guess", () => {
     expect(isRealRunAbandoned({ deadlineAt: null, lastSavedAt: "not-a-date", now })).toBe(false);
+  });
+});
+
+// The prova real's clock (epic #67 slice S2d, #79). It is DERIVED from the
+// absolute `deadline_at`, never counted locally: reloading the tab must not
+// hand back time (criterion 5) and the exam does not pause.
+describe("realSecondsLeft", () => {
+  const now = "2026-08-21T12:00:00.000Z";
+
+  it("counts down to the absolute deadline", () => {
+    expect(realSecondsLeft({ deadlineAt: "2026-08-21T13:00:00.000Z", now })).toBe(3600);
+  });
+
+  it("is the full 5 h at the instant the exam starts", () => {
+    const deadlineAt = new Date(Date.parse(now) + REAL_EXAM_DURATION_SECONDS * 1000).toISOString();
+    expect(realSecondsLeft({ deadlineAt, now })).toBe(REAL_EXAM_DURATION_SECONDS);
+  });
+
+  it("floors at 0 — a deadline in the past is never a NEGATIVE countdown", () => {
+    expect(realSecondsLeft({ deadlineAt: "2026-08-21T11:00:00.000Z", now })).toBe(0);
+  });
+
+  it("is 0 exactly at the deadline", () => {
+    expect(realSecondsLeft({ deadlineAt: now, now })).toBe(0);
+  });
+
+  it("reads the raw PG text the API hands back, microseconds and all", () => {
+    // `examDrafts.get` returns "2026-08-21 13:00:04.210932+00" (drizzle
+    // overrides the TIMESTAMPTZ parser to identity) — the value a rehydrating
+    // screen actually holds. Refusing it would blank the clock on every reload.
+    expect(realSecondsLeft({ deadlineAt: "2026-08-21 13:00:04.210932+00", now })).toBe(3604);
+  });
+
+  it("is null with no deadline at all — 'do not decide', never '0 left'", () => {
+    expect(realSecondsLeft({ deadlineAt: null, now })).toBeNull();
+  });
+
+  it("is null for the two values Postgres itself refuses", () => {
+    // `Date.parse` accepts both — "2026" as 1 Jan 2026 (a whole YEAR read as an
+    // instant) and a JS Date.toString() as a locale-shaped guess — which is
+    // exactly why the check is stricter than `Date.parse` here.
+    expect(realSecondsLeft({ deadlineAt: "2026", now })).toBeNull();
+    expect(
+      realSecondsLeft({ deadlineAt: new Date("2026-08-21T13:00:00.000Z").toString(), now }),
+    ).toBeNull();
+  });
+
+  it("is null when `now` itself is unreadable", () => {
+    expect(realSecondsLeft({ deadlineAt: "2026-08-21T13:00:00.000Z", now: "amanhã" })).toBeNull();
+  });
+});
+
+// BR-05.5 on mount: a prova real is NEVER offered back to continue — it is
+// resumed only by the tab that owns it, or settled, or replaced.
+describe("realMountDecision", () => {
+  const now = "2026-08-21T12:00:00.000Z";
+  const future = "2026-08-21T16:00:00.000Z";
+
+  it("start: no row at all", () => {
+    expect(realMountDecision({ draft: null, now })).toBe("start");
+  });
+
+  // THE negative case: without it, a student who merely opened the dashboard in
+  // a second tab comes back to an auto-submitted exam (criterion 6).
+  it("resume: FRESH heartbeat before the deadline — the owning tab reloading", () => {
+    expect(
+      realMountDecision({
+        draft: { deadlineAt: future, lastSavedAt: "2026-08-21T11:59:30.000Z" },
+        now,
+      }),
+    ).toBe("resume");
+  });
+
+  it("settle: the deadline passed while the tab was closed", () => {
+    expect(
+      realMountDecision({
+        draft: { deadlineAt: "2026-08-21T11:59:59.000Z", lastSavedAt: "2026-08-21T11:59:50.000Z" },
+        now,
+      }),
+    ).toBe("settle");
+  });
+
+  it("settle: the heartbeat went quiet for 3 beats — dead tab", () => {
+    expect(
+      realMountDecision({
+        draft: { deadlineAt: future, lastSavedAt: "2026-08-21T11:56:00.000Z" },
+        now,
+      }),
+    ).toBe("settle");
+  });
+
+  it("start: a row whose deadline cannot be read is never auto-submitted", () => {
+    // The next `startReal` settles this orphan with `force`. Guessing here
+    // would end an exam that may still be being taken.
+    expect(
+      realMountDecision({
+        draft: { deadlineAt: null, lastSavedAt: "2026-08-21T11:59:30.000Z" },
+        now,
+      }),
+    ).toBe("start");
+    expect(
+      realMountDecision({
+        draft: { deadlineAt: "2026", lastSavedAt: "2026-08-21T11:59:30.000Z" },
+        now,
+      }),
+    ).toBe("settle");
+  });
+
+  it("settle at exactly 0 seconds left, resume at 1", () => {
+    const lastSavedAt = "2026-08-21T11:59:30.000Z";
+    expect(realMountDecision({ draft: { deadlineAt: now, lastSavedAt }, now })).toBe("settle");
+    expect(
+      realMountDecision({ draft: { deadlineAt: "2026-08-21T12:00:01.000Z", lastSavedAt }, now }),
+    ).toBe("resume");
+  });
+
+  it("honours a custom staleSeconds, like isRealRunAbandoned", () => {
+    expect(
+      realMountDecision({
+        draft: { deadlineAt: future, lastSavedAt: "2026-08-21T11:59:00.000Z" },
+        now,
+        staleSeconds: 30,
+      }),
+    ).toBe("settle");
   });
 });

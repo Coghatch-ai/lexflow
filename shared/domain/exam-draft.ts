@@ -141,6 +141,9 @@ export interface ReconciledRun {
 /** No heartbeat for this long ⇒ the prova real tab is dead (3 missed beats). */
 export const REAL_RUN_STALE_SECONDS = 180;
 
+/** The prova real lasts 5 h — the window `deadline_at` is minted from (D8). */
+export const REAL_EXAM_DURATION_SECONDS = 5 * 60 * 60;
+
 /**
  * A blank answer is never recorded (BR-05.6, consistent with BR-03): an
  * unanswered question is not an error, never reaches `user_answers` and never
@@ -258,4 +261,91 @@ export function isRealRunAbandoned({
   const lastSavedMs = Date.parse(lastSavedAt);
   if (Number.isNaN(lastSavedMs)) return false;
   return lastSavedMs < nowMs - staleSeconds * 1000;
+}
+
+/**
+ * The two shapes a `deadline_at` legitimately arrives in, and NOTHING else:
+ * the ISO string the browser mints (`2026-08-21T14:30:04.210Z`) and the raw PG
+ * text drizzle hands back for `mode: "string"` (`2026-08-21 14:30:04.210932+00`).
+ *
+ * Stricter than `Date.parse` ON PURPOSE. `Date.parse` is generous where a clock
+ * must not be: `"2026"` answers 1 Jan 2026 (a whole year read as an instant)
+ * and a JS `Date.toString()` answers a locale-shaped guess — the very two
+ * values Postgres itself refuses (22007 / 22023) and the reason
+ * `examDrafts.save` now normalises the field. A countdown painted from either
+ * one is a number nobody measured, so `realSecondsLeft` answers `null` instead
+ * and the caller falls back to the setup screen (never an auto-submit on a
+ * guess — the same principle as `isRealRunAbandoned`).
+ */
+const TIMESTAMP_TEXT = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?(\d{2})?)?$/;
+
+/** Milliseconds of a timestamp in one of the two accepted shapes, or null. */
+function timestampMs(value: string): number | null {
+  if (!TIMESTAMP_TEXT.test(value)) return null;
+  const ms = Date.parse(value);
+  return Number.isNaN(ms) ? null : ms;
+}
+
+/**
+ * Seconds left of a prova real, derived from the ABSOLUTE `deadline_at` and
+ * never from a local counter (D8): reloading the tab must not hand back time,
+ * and the clock does not pause the way the study modes' `elapsed_seconds` does.
+ *
+ * Floors at 0 — a deadline in the past means "no time left", never a negative
+ * countdown — and answers `null` when there is no usable deadline at all, which
+ * the caller must treat as "do not decide", not as "0 seconds left".
+ */
+export function realSecondsLeft({
+  deadlineAt,
+  now,
+}: {
+  deadlineAt: string | null;
+  now: string;
+}): number | null {
+  if (deadlineAt === null) return null;
+  const deadlineMs = timestampMs(deadlineAt);
+  if (deadlineMs === null) return null;
+  const nowMs = timestampMs(now);
+  if (nowMs === null) return null;
+  return Math.max(0, Math.floor((deadlineMs - nowMs) / 1000));
+}
+
+/**
+ * What the prova real screen does on mount — the whole of BR-05.5 as one pure
+ * decision, so "does the student get their exam back?" is provable without a
+ * browser:
+ *
+ * - `start` — no row at all, or a row whose deadline cannot be read. A prova
+ *   real is NEVER offered back to continue, so "no row" is simply the setup
+ *   screen; an unreadable deadline is settled by the `startReal` of the next
+ *   start (`force`), never auto-submitted here on a guess.
+ * - `resume` — the row is alive: not abandoned AND with time left. This is the
+ *   tab that OWNS the exam coming back from a reload, and it is the branch that
+ *   keeps a student who merely opened a second tab from being auto-submitted.
+ * - `settle` — the deadline passed or the heartbeat went quiet: the exam ended
+ *   while nobody was watching and its answers still owe a session.
+ *
+ * Reuses `isRealRunAbandoned` and `realSecondsLeft` rather than re-deriving
+ * either: the server judges abandonment with the first of those, and a second
+ * copy of the rule here is how the two sides start disagreeing about whose
+ * exam is still running.
+ */
+export type RealMountDecision = "start" | "resume" | "settle";
+
+export function realMountDecision({
+  draft,
+  now,
+  staleSeconds = REAL_RUN_STALE_SECONDS,
+}: {
+  draft: { deadlineAt: string | null; lastSavedAt: string } | null;
+  now: string;
+  staleSeconds?: number;
+}): RealMountDecision {
+  if (draft === null) return "start";
+  if (isRealRunAbandoned({ ...draft, now, staleSeconds })) return "settle";
+  const left = realSecondsLeft({ deadlineAt: draft.deadlineAt, now });
+  // No usable deadline: the row is not judged abandoned (the heartbeat is
+  // fresh) but there is no clock to run it against either. Back to setup.
+  if (left === null) return "start";
+  return left > 0 ? "resume" : "settle";
 }

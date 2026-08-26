@@ -162,6 +162,157 @@ describe("createSaveScheduler — flush, close and failures", () => {
   });
 });
 
+// The prova real's 60 s heartbeat (epic #67 slice S2d, #79). `keepAlive`
+// (`examDrafts.touch`) and `send` (`examDrafts.save`) write the SAME optimistic
+// token, so the whole point of these tests is that they never overlap and never
+// run when the other already did the job.
+describe("createSaveScheduler — beat (the prova real heartbeat)", () => {
+  it("sends keepAlive when the scheduler is idle", async () => {
+    const beats: string[] = [];
+    const scheduler = createSaveScheduler({
+      send: () => Promise.resolve("saved"),
+      keepAlive: () => {
+        beats.push("beat");
+        return Promise.resolve("beaten");
+      },
+    });
+
+    await scheduler.beat();
+
+    expect(beats).toEqual(["beat"]);
+    expect(await scheduler.flush()).toEqual({ ok: true, value: "beaten" });
+  });
+
+  it("is SKIPPED while a save is scheduled — that save is already the heartbeat", async () => {
+    let beats = 0;
+    let saves = 0;
+    const scheduler = createSaveScheduler({
+      send: () => {
+        saves += 1;
+        return Promise.resolve("saved");
+      },
+      keepAlive: () => {
+        beats += 1;
+        return Promise.resolve("beaten");
+      },
+    });
+
+    scheduler.schedule();
+    await scheduler.beat();
+
+    expect(beats).toBe(0);
+    await vi.advanceTimersByTimeAsync(SAVE_DEBOUNCE_MS);
+    expect(saves).toBe(1);
+  });
+
+  it("is SKIPPED while a save is IN FLIGHT", async () => {
+    const flight = deferred<string>();
+    let beats = 0;
+    const scheduler = createSaveScheduler({
+      send: () => flight.promise,
+      keepAlive: () => {
+        beats += 1;
+        return Promise.resolve("beaten");
+      },
+    });
+
+    scheduler.schedule();
+    await vi.advanceTimersByTimeAsync(SAVE_DEBOUNCE_MS);
+    await scheduler.beat();
+    expect(beats).toBe(0);
+
+    flight.resolve("token-1");
+    expect(await scheduler.flush()).toEqual({ ok: true, value: "token-1" });
+    expect(beats).toBe(0);
+  });
+
+  it("never beats across an open flush — the exit's own resend owns the token", async () => {
+    // `dirty` is the third guard, and this is the window it covers: a flush has
+    // already cancelled the debounce (`timer` null) and is draining the flight
+    // before writing once more. A beat slipping in there would take the token
+    // the owed resend is about to claim with.
+    const flight = deferred<string>();
+    let beats = 0;
+    let saves = 0;
+    const scheduler = createSaveScheduler({
+      send: () => {
+        saves += 1;
+        return saves === 1 ? flight.promise : Promise.resolve("token-2");
+      },
+      keepAlive: () => {
+        beats += 1;
+        return Promise.resolve("beaten");
+      },
+    });
+
+    scheduler.schedule();
+    await vi.advanceTimersByTimeAsync(SAVE_DEBOUNCE_MS);
+    // The student answers again while the first save is still in the air.
+    scheduler.schedule();
+    const flushed = scheduler.flush();
+    const beating = scheduler.beat();
+    flight.resolve("token-1");
+
+    await beating;
+    expect(beats).toBe(0);
+    expect(await flushed).toEqual({ ok: true, value: "token-2" });
+    expect(saves).toBe(2);
+  });
+
+  it("does nothing at all without a keepAlive (every study mode)", async () => {
+    const study = createSaveScheduler({ send: () => Promise.resolve("saved") });
+    await study.beat();
+    expect(await study.flush()).toEqual({ ok: true, value: null });
+  });
+});
+
+describe("createSaveScheduler — beat serialization", () => {
+  it("SERIALIZES a schedule() that lands during a beat, and flush returns the LAST token", async () => {
+    // The mutation this kills: drop the skip/serialization and the save goes
+    // out holding the token from BEFORE the beat — a CONFLICT the student never
+    // caused, which stops the autosave for the rest of the exam.
+    const order: string[] = [];
+    const beat = deferred<string>();
+    const scheduler = createSaveScheduler({
+      send: () => {
+        order.push("save");
+        return Promise.resolve("token-from-save");
+      },
+      keepAlive: () => {
+        order.push("beat");
+        return beat.promise;
+      },
+    });
+
+    const beating = scheduler.beat();
+    scheduler.schedule();
+    await vi.advanceTimersByTimeAsync(SAVE_DEBOUNCE_MS);
+    // The save has NOT gone out: it is queued behind the beat still in the air.
+    expect(order).toEqual(["beat"]);
+
+    beat.resolve("token-from-beat");
+    await beating;
+    const flushed = await scheduler.flush();
+
+    expect(order).toEqual(["beat", "save"]);
+    expect(flushed).toEqual({ ok: true, value: "token-from-save" });
+  });
+
+  it("does nothing after close() — the run left this tab", async () => {
+    let beats = 0;
+    const scheduler = createSaveScheduler({
+      send: () => Promise.resolve("saved"),
+      keepAlive: () => {
+        beats += 1;
+        return Promise.resolve("beaten");
+      },
+    });
+    scheduler.close();
+    await scheduler.beat();
+    expect(beats).toBe(0);
+  });
+});
+
 describe("createSaveScheduler — failures", () => {
   it("reports a failed send through onError and answers flush with ok:false", async () => {
     const boom = new Error("CONFLICT");

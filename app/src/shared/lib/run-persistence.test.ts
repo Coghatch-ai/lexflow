@@ -51,6 +51,7 @@ function draft(overrides: Partial<PersistedDraft> = {}): PersistedDraft {
     answers: [answer("q1")],
     modeState: { mode: "standard", carriedTime: { q2: 42 } },
     elapsedSeconds: 130,
+    deadlineAt: null,
     lastSavedAt: PG_TOKEN,
     ...overrides,
   };
