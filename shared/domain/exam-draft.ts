@@ -247,8 +247,15 @@ export function draftTotalOf(draft: {
  */
 const TIMESTAMP_TEXT = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?(\d{2})?)?$/;
 
-/** Milliseconds of a timestamp in one of the two accepted shapes, or null. */
-function timestampMs(value: string): number | null {
+/**
+ * Milliseconds of a timestamp in one of the two accepted shapes, or null.
+ *
+ * Exported because the WRITE path needs the SAME parser, not a second one:
+ * `examDrafts.save` validates `deadlineAt` with this predicate, so a value the
+ * reads below would refuse never gets stored in the first place. Two parsers
+ * for one column is how "accepted on write, unreadable on read" happens.
+ */
+export function timestampMs(value: string): number | null {
   if (!TIMESTAMP_TEXT.test(value)) return null;
   const ms = Date.parse(value);
   return Number.isNaN(ms) ? null : ms;
