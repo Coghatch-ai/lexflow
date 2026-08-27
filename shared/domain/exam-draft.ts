@@ -113,12 +113,31 @@ export type ExamDraftSetup =
  * Per-mode progress that is NOT in the universal columns. Cross-out, `checked`,
  * `flagged` and `postponed` are drafts, not progress, and are never persisted
  * (BR-02.3, epic #67 D8).
+ *
+ * `runNonce` is on EVERY member and is not per-mode progress at all: it is the
+ * per-run identity a tab mints once and stamps into every save
+ * (`run-claimless.ts`), so a row this tab wrote is recognisable as ours even
+ * when its response was lost and the payload has since moved on. It rides in
+ * this jsonb precisely so it needs no column and no migration.
+ *
+ * Optional because a row written before this existed simply has none, and
+ * "absent" must read as "not ours" (fail-closed), never as a match. Written
+ * `?: string | undefined`, not `?: string`, because the API program runs with
+ * `exactOptionalPropertyTypes` and the router's zod `.optional()` hands the
+ * insert exactly a `string | undefined` — the narrower form makes the write of
+ * a nonce-less payload a type error.
  */
 export type ExamDraftModeState =
-  | { mode: "standard"; carriedTime: Record<string, number> }
-  | { mode: "spaced" }
-  | { mode: "adaptive"; adaptive: AdaptiveState; totalQuestions: number; deferredIds: string[] }
-  | { mode: "real" };
+  | { mode: "standard"; carriedTime: Record<string, number>; runNonce?: string | undefined }
+  | { mode: "spaced"; runNonce?: string | undefined }
+  | {
+      mode: "adaptive";
+      adaptive: AdaptiveState;
+      totalQuestions: number;
+      deferredIds: string[];
+      runNonce?: string | undefined;
+    }
+  | { mode: "real"; runNonce?: string | undefined };
 
 /** The universal part of a persisted run — all the pure rules need. */
 export interface ExamDraftSnapshot {

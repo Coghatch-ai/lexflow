@@ -1,12 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  MAX_PENDING_ECHOES,
-  PROBE_TIMEOUT_MS,
-  SAVE_TIMEOUT_MS,
-  createPendingEchoes,
-  saveRun,
-  type PendingEchoes,
-} from "./run-claimless";
+import { PROBE_TIMEOUT_MS, SAVE_TIMEOUT_MS, createRunNonce, saveRun } from "./run-claimless";
 import {
   SAVE_DEBOUNCE_MS,
   WRITE_TIMEOUT_MS,
@@ -133,7 +126,7 @@ describe("saveRun — the write that stalls and commits anyway", () => {
         },
         probe: probeOf(server),
       },
-      createPendingEchoes(),
+      createRunNonce(),
     );
 
     await vi.advanceTimersByTimeAsync(SAVE_TIMEOUT_MS);
@@ -147,7 +140,7 @@ describe("saveRun — the write that stalls and commits anyway", () => {
 
   it("makes the NEXT save an update of that row — never a second claimless insert", async () => {
     const server = fakeDraftsServer();
-    const pending = createPendingEchoes();
+    const nonce = createRunNonce();
     const saving = saveRun(
       realPayload(null),
       {
@@ -157,7 +150,7 @@ describe("saveRun — the write that stalls and commits anyway", () => {
         },
         probe: probeOf(server),
       },
-      pending,
+      nonce,
     );
     await vi.advanceTimersByTimeAsync(SAVE_TIMEOUT_MS);
     const first = await saving;
@@ -168,7 +161,7 @@ describe("saveRun — the write that stalls and commits anyway", () => {
         save: (payload) => Promise.resolve(server.commit(payload)),
         probe: probeOf(server),
       },
-      pending,
+      nonce,
     );
 
     expect(second.lastSavedAt).not.toBe(first.lastSavedAt);
@@ -182,7 +175,7 @@ describe("saveRun — the write that stalls and commits anyway", () => {
     const server = fakeDraftsServer();
     const sent = realPayload(null);
     const late: (() => void)[] = [];
-    const pending = createPendingEchoes();
+    const nonce = createRunNonce();
     const stalled = saveRun(
       sent,
       {
@@ -194,7 +187,7 @@ describe("saveRun — the write that stalls and commits anyway", () => {
         },
         probe: probeOf(server),
       },
-      pending,
+      nonce,
     );
 
     // Nothing to adopt yet: the probe read an empty table, so the write is owed.
@@ -212,7 +205,7 @@ describe("saveRun — the write that stalls and commits anyway", () => {
         save: (payload) => Promise.resolve(server.commit(payload)),
         probe: probeOf(server),
       },
-      pending,
+      nonce,
     );
     expect(retried.draftId).toBe("row-1");
     expect(retried.lastSavedAt).toBe(server.row()?.lastSavedAt);
@@ -233,7 +226,7 @@ describe("saveRun — what a stalled write still refuses", () => {
         },
         probe: () => hung<{ read: boolean; row: PersistedDraft | null }>(),
       },
-      createPendingEchoes(),
+      createRunNonce(),
     );
 
     // The original failure stands: the write is owed again and the next beat
@@ -252,7 +245,7 @@ describe("saveRun — what a stalled write still refuses", () => {
         save: () => hung<{ lastSavedAt: string }>(),
         probe: probeOf(server),
       },
-      createPendingEchoes(),
+      createRunNonce(),
     );
     const refused = expect(saving).rejects.toBeInstanceOf(Error);
     await vi.advanceTimersByTimeAsync(SAVE_TIMEOUT_MS);
@@ -290,18 +283,27 @@ function attempt(answerCount: number): RunDraftPayload {
   );
 }
 
-/** One claimless attempt whose outcome is never learned (probe reads no row). */
-async function unknownOutcome(sent: RunDraftPayload, pending: PendingEchoes): Promise<void> {
+/**
+ * One claimless attempt whose outcome is never learned (probe reads no row).
+ * Hands back the payload as it went ON THE WIRE — stamped with the run's nonce,
+ * i.e. exactly what the server would have stored had that attempt committed.
+ */
+async function unknownOutcome(sent: RunDraftPayload, nonce: string): Promise<RunDraftPayload> {
+  let onTheWire = sent;
   await expect(
     saveRun(
       sent,
       {
-        save: () => Promise.reject(LOST_RESPONSE),
+        save: (payload) => {
+          onTheWire = payload;
+          return Promise.reject(LOST_RESPONSE);
+        },
         probe: () => Promise.resolve({ read: true, row: null }),
       },
-      pending,
+      nonce,
     ),
   ).rejects.toBe(LOST_RESPONSE);
+  return onTheWire;
 }
 
 // ROUND FOUR (Codex). The window the bound inside `saveRun` narrowed but could
@@ -317,12 +319,13 @@ async function unknownOutcome(sent: RunDraftPayload, pending: PendingEchoes): Pr
 //      Foreign ⇒ terminal (`raiseIfConflict`), and the student is locked out of
 //      an exam by their own first write.
 //
-// Fixed by REMEMBERING the echo of every attempt whose outcome stayed unknown,
-// so a row written by any of them is still recognisable as ours later.
+// Fixed by stamping this run's NONCE into every save, so a row written by any
+// attempt of this run is still recognisable as ours later — round five replaced
+// round four's capped echo memory, whose cap was itself a lockout (below).
 describe("saveRun — the write that lands LATE, after the student answered again", () => {
   it("adopts the row its FIRST attempt wrote, and reports the current payload as still owed", async () => {
     const server = fakeDraftsServer();
-    const pending = createPendingEchoes();
+    const nonce = createRunNonce();
     const late: (() => void)[] = [];
     const stalled = saveRun(
       attempt(1),
@@ -335,7 +338,7 @@ describe("saveRun — the write that lands LATE, after the student answered agai
         },
         probe: probeOf(server),
       },
-      pending,
+      nonce,
     );
 
     const owed = expect(stalled).rejects.toBeInstanceOf(Error);
@@ -351,7 +354,7 @@ describe("saveRun — the write that lands LATE, after the student answered agai
         save: (payload) => Promise.resolve(server.commit(payload)),
         probe: probeOf(server),
       },
-      pending,
+      nonce,
     );
 
     expect(adopted.draftId).toBe("row-1");
@@ -368,22 +371,22 @@ describe("saveRun — the write that lands LATE, after the student answered agai
         save: (payload) => Promise.resolve(server.commit(payload)),
         probe: probeOf(server),
       },
-      pending,
+      nonce,
     );
     expect(landed.owed).toBe(false);
     expect(server.row()?.answers).toHaveLength(2);
   });
 });
 
-// The bounds of that memory: what it never adopts, what it never remembers, and
-// how much of it there is.
-describe("the pending echoes — their limits", () => {
-  it("still refuses a row it cannot prove it wrote, however much it remembers", async () => {
+// What the nonce never adopts, and — the ROUND FIVE finding — what it now does
+// adopt where the capped echo memory refused.
+describe("the run nonce — its bounds, and the lockout it removes", () => {
+  it("still refuses a row it cannot prove it wrote, however many attempts it made", async () => {
     const server = fakeDraftsServer();
-    const pending = createPendingEchoes();
-    await unknownOutcome(attempt(1), pending);
+    const nonce = createRunNonce();
+    await unknownOutcome(attempt(1), nonce);
 
-    // What turns up is another device's live run — a remembered echo must not
+    // What turns up is another device's live run — this run's nonce must not
     // become a skeleton key for any row in this mode (BR-05.8 stands).
     server.commit(realPayload(null, [answer("z9", "D")]));
     await expect(
@@ -393,79 +396,83 @@ describe("the pending echoes — their limits", () => {
           save: (payload) => Promise.resolve(server.commit(payload)),
           probe: probeOf(server),
         },
-        pending,
+        nonce,
       ),
     ).rejects.toMatchObject({ data: { code: "CONFLICT" } });
   });
 
-  it("never remembers a payload the server REFUSED — a CONFLICT wrote nothing", async () => {
-    const server = fakeDraftsServer();
-    const pending = createPendingEchoes();
-    server.commit(realPayload(null, [answer("z9", "D")])); // another device got there first
-    const refused = attempt(1);
-    await expect(
-      saveRun(
-        refused,
-        {
-          save: (payload) => Promise.resolve(server.commit(payload)),
-          probe: probeOf(server),
-        },
-        pending,
-      ),
-    ).rejects.toMatchObject({ data: { code: "CONFLICT" } });
-
-    // Even a row that later matches that payload byte for byte is not ours: the
-    // server already answered that this insert wrote 0 rows.
+  it("refuses a row of a DIFFERENT run of this same tab — a rotated nonce is a stranger", async () => {
+    // `close()` / `discardSaved` rotate the nonce (`forgetIdentity`), and this
+    // is what that rotation buys: the previous run's row is not adoptable by
+    // the run that came after it, however identical the two look.
+    const previous = createRunNonce();
+    const written = await unknownOutcome(attempt(1), previous);
     await expect(
       saveRun(
         attempt(2),
         {
           save: () => Promise.reject(LOST_RESPONSE),
-          probe: () => Promise.resolve({ read: true, row: rowOf(refused) }),
+          probe: () => Promise.resolve({ read: true, row: rowOf(written) }),
         },
-        pending,
+        createRunNonce(),
       ),
     ).rejects.toBe(LOST_RESPONSE);
   });
 
-  it(`remembers ${String(MAX_PENDING_ECHOES)} unknown outcomes and keeps the OLDEST`, async () => {
-    const pending = createPendingEchoes();
-    // One more attempt than the cap holds, each with one more answer.
-    for (let count = 1; count <= MAX_PENDING_ECHOES + 1; count += 1) {
-      await unknownOutcome(attempt(count), pending);
+  // THE ROUND FIVE FINDING (Codex, high): `rememberPendingEcho` kept only the
+  // four OLDEST unknown-outcome payloads and dropped every later one. So when
+  // the first four attempts died before committing and the FIFTH was the one
+  // that actually committed late, its payload was never remembered: the sixth
+  // attempt met its own row, `claimlessSaveAdoption` could not match the
+  // current payload, the memory could not match the row either, and the
+  // CONFLICT went terminal (`raiseIfConflict` closes the scheduler) — the
+  // student locked out of their own prova real by their own write.
+  //
+  // The nonce has no cap and no notion of WHICH attempt wrote the row.
+  it("adopts a row written by the FIFTH unknown attempt — past the old 4-slot cap", async () => {
+    const nonce = createRunNonce();
+    // Five claimless attempts, each with one more answer, all unknown: more
+    // than the old MAX_PENDING_ECHOES = 4, so the last one fell off the queue.
+    // The LATE commit is that fifth attempt — the only payload the row matches,
+    // and precisely the one the capped memory threw away.
+    let committed = attempt(1);
+    for (let count = 1; count <= 5; count += 1) {
+      committed = await unknownOutcome(attempt(count), nonce);
     }
 
-    // The attempt past the cap never became adoptable — the honest bound, and
-    // the fail-closed side of it (the BR-05.8 dialog, not a silent adoption).
-    // Asserted FIRST: an adoption clears the memory this test is about.
-    await expect(
-      saveRun(
-        attempt(MAX_PENDING_ECHOES + 2),
-        {
-          save: () => Promise.reject(LOST_RESPONSE),
-          probe: () => Promise.resolve({ read: true, row: rowOf(attempt(MAX_PENDING_ECHOES + 1)) }),
-        },
-        pending,
-      ),
-    ).rejects.toBe(LOST_RESPONSE);
-
-    // The FIRST attempt still is, and deliberately so: the row is created by an
-    // INSERT … `onConflictDoNothing`, so the earliest attempt that reached the
-    // database is the only one that can have written it — which is why the cap
-    // drops the NEW echo instead of evicting the oldest.
-    const oldest = await saveRun(
-      attempt(MAX_PENDING_ECHOES + 2),
+    const adopted = await saveRun(
+      attempt(6),
       {
         save: () => Promise.reject(LOST_RESPONSE),
-        probe: () => Promise.resolve({ read: true, row: rowOf(attempt(1)) }),
+        probe: () => Promise.resolve({ read: true, row: rowOf(committed) }),
       },
-      pending,
+      nonce,
     );
-    expect(oldest).toEqual({
+
+    expect(adopted).toEqual({
       draftId: "row-1",
-      lastSavedAt: rowOf(attempt(1)).lastSavedAt,
+      lastSavedAt: rowOf(committed).lastSavedAt,
+      // Ours, one payload behind: the sixth answer is still only in the tab.
       owed: true,
     });
+  });
+
+  it("adopts it at attempt fifty too — the proof does not decay with queue pressure", async () => {
+    const nonce = createRunNonce();
+    let committed = attempt(1);
+    for (let count = 1; count <= 50; count += 1) {
+      committed = await unknownOutcome(attempt(count), nonce);
+    }
+    const adopted = await saveRun(
+      attempt(51),
+      {
+        save: () => Promise.reject(LOST_RESPONSE),
+        probe: () => Promise.resolve({ read: true, row: rowOf(committed) }),
+      },
+      nonce,
+    );
+    expect(adopted.draftId).toBe("row-1");
+    expect(adopted.owed).toBe(true);
   });
 });
 
@@ -476,7 +483,7 @@ describe("the adoption at the cadence layer", () => {
     // is owed. Answering `ok: true` here with the newest answers still in the
     // tab is what lets `processReal` settle a row without them.
     const server = fakeDraftsServer();
-    const pending = createPendingEchoes();
+    const nonce = createRunNonce();
     const holder: { current: SaveScheduler<string> | null } = { current: null };
     const late: (() => void)[] = [];
     const errors: unknown[] = [];
@@ -500,7 +507,7 @@ describe("the adoption at the cadence layer", () => {
             },
             probe: probeOf(server),
           },
-          pending,
+          nonce,
         );
         token = saved.lastSavedAt;
         if (saved.owed) holder.current?.schedule();
@@ -541,7 +548,7 @@ describe("the bound's placement", () => {
     // `onError` (where `raiseIfConflict` would close the scheduler for good).
     const server = fakeDraftsServer();
     const errors: unknown[] = [];
-    const pending = createPendingEchoes();
+    const nonce = createRunNonce();
     let token: string | null = null;
     let sends = 0;
 
@@ -558,7 +565,7 @@ describe("the bound's placement", () => {
             },
             probe: probeOf(server),
           },
-          pending,
+          nonce,
         );
         token = saved.lastSavedAt;
         return saved.lastSavedAt;

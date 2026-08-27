@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   claimlessSaveAdoption,
   claimlessVerdictFor,
-  createPendingEchoes,
+  createRunNonce,
   needsClaimlessProbe,
   needsClaimlessSaveProbe,
+  runNonceAdoption,
   saveRun,
+  stampRunNonce,
 } from "./run-claimless";
 import {
   claimOutcomeFor,
@@ -298,6 +300,77 @@ function fakeDraftsServer(): {
   };
 }
 
+// Ownership by NONCE (Codex round five): the identity this tab mints once per
+// run and stamps into every save, carried in the mode_state jsonb. Stronger
+// than the content echo — content can coincide, an opaque nonce cannot be
+// produced by another device — and, unlike the capped echo memory it replaced,
+// it does not decay with the number of attempts.
+describe("stampRunNonce / runNonceAdoption", () => {
+  const NONCE = "11111111-2222-4333-8444-555555555555";
+
+  it("carries the nonce in the payload's own jsonb — no column, no migration", () => {
+    const stamped = stampRunNonce(standardDraftPayload(run({ token: null })), NONCE);
+    expect(stamped.modeState).toEqual({
+      mode: "standard",
+      carriedTime: { q2: 42 },
+      runNonce: NONCE,
+    });
+    // Everything else travels untouched — the stamp is not a rewrite.
+    expect(stamped.questionIds).toEqual(["q1", "q2", "q3"]);
+    expect(stamped.token).toBeNull();
+  });
+
+  it("stamps every mode, so no mode is left with the old lockout", () => {
+    const real = stampRunNonce(
+      realDraftPayload({
+        questionIds: ["q1"],
+        cursor: 0,
+        answers: [answer("q1")],
+        deadlineAt: "2026-08-21T19:30:04.210Z",
+        token: null,
+      }),
+      NONCE,
+    );
+    expect(real.modeState).toEqual({ mode: "real", runNonce: NONCE });
+  });
+
+  it("adopts a row carrying THIS run's nonce, whatever its payload has become", () => {
+    // The row holds the FIRST attempt's answers; the run has moved on. Content
+    // can no longer prove anything — the nonce still does.
+    const row = draft({
+      modeState: { mode: "standard", carriedTime: { q2: 42 }, runNonce: NONCE },
+      cursor: 3,
+      answers: [answer("q1"), answer("q2")],
+    });
+    expect(runNonceAdoption({ read: true, row }, NONCE)).toEqual({
+      id: row.id,
+      lastSavedAt: PG_TOKEN,
+    });
+  });
+
+  it("refuses another run's nonce and a row with no nonce at all", () => {
+    const foreign = draft({
+      modeState: { mode: "standard", carriedTime: { q2: 42 }, runNonce: "other-run" },
+    });
+    expect(runNonceAdoption({ read: true, row: foreign }, NONCE)).toBeNull();
+    // A row written before the nonce existed: absent is never a match.
+    expect(runNonceAdoption({ read: true, row: draft() }, NONCE)).toBeNull();
+  });
+
+  it("refuses an unread probe, an absent row and an empty nonce", () => {
+    const row = draft({
+      modeState: { mode: "standard", carriedTime: { q2: 42 }, runNonce: NONCE },
+    });
+    expect(runNonceAdoption({ read: false, row }, NONCE)).toBeNull();
+    expect(runNonceAdoption({ read: true, row: null }, NONCE)).toBeNull();
+    expect(runNonceAdoption({ read: true, row: draft() }, "")).toBeNull();
+  });
+
+  it("mints a different nonce per run — a new run never adopts the old row", () => {
+    expect(createRunNonce()).not.toBe(createRunNonce());
+  });
+});
+
 // THE regression (#79): the first save COMMITS and its response is lost, so the
 // token stays null — and every retry goes out as another `token: null`, which
 // the router reads as "first save" and refuses with OVERWRITE_CONFLICT. The
@@ -319,8 +392,8 @@ describe("saveRun — a first save whose response is lost", () => {
         Promise.resolve({ read: true, row: server.row() }),
     };
 
-    const pending = createPendingEchoes();
-    const first = await saveRun(standardDraftPayload(run({ token: null })), io, pending);
+    const nonce = createRunNonce();
+    const first = await saveRun(standardDraftPayload(run({ token: null })), io, nonce);
     expect(first.draftId).toBe("row-1");
     expect(first.lastSavedAt).toBe(server.row()?.lastSavedAt);
     // The row IS this payload, so nothing is left owed.
@@ -331,7 +404,7 @@ describe("saveRun — a first save whose response is lost", () => {
     const second = await saveRun(
       standardDraftPayload(run({ token: first.lastSavedAt, cursor: 2 })),
       io,
-      pending,
+      nonce,
     );
     expect(second.lastSavedAt).not.toBe(first.lastSavedAt);
     expect(server.row()?.cursor).toBe(2);
@@ -339,7 +412,7 @@ describe("saveRun — a first save whose response is lost", () => {
     const third = await saveRun(
       standardDraftPayload(run({ token: second.lastSavedAt, cursor: 3 })),
       io,
-      pending,
+      nonce,
     );
     expect(server.row()?.lastSavedAt).toBe(third.lastSavedAt);
   });
@@ -350,15 +423,17 @@ describe("saveRun — a first save whose response is lost", () => {
     // what made the student collide with themselves, terminally
     // (`raiseIfConflict` closes the scheduler for good). The echo decides.
     const server = fakeDraftsServer();
+    const nonce = createRunNonce();
     const payload = standardDraftPayload(run({ token: null }));
-    expect(() => server.save(payload)).not.toThrow(); // committed, response lost
+    // The lost write is the one `saveRun` sends, i.e. the STAMPED payload.
+    expect(() => server.save(stampRunNonce(payload, nonce))).not.toThrow();
     const adopted = await saveRun(
       payload,
       {
         save: (input) => Promise.resolve(server.save(input)),
         probe: () => Promise.resolve({ read: true, row: server.row() }),
       },
-      createPendingEchoes(),
+      nonce,
     );
     expect(adopted.draftId).toBe("row-1");
     expect(adopted.lastSavedAt).toBe(server.row()?.lastSavedAt);
@@ -374,7 +449,7 @@ describe("saveRun — a first save whose response is lost", () => {
           save: (input) => Promise.resolve(server.save(input)),
           probe: () => Promise.resolve({ read: true, row: server.row() }),
         },
-        createPendingEchoes(),
+        createRunNonce(),
       ),
     ).rejects.toMatchObject({ data: { code: "CONFLICT" } });
   });
@@ -387,7 +462,7 @@ describe("saveRun — a first save whose response is lost", () => {
           save: () => Promise.reject(LOST_RESPONSE),
           probe: () => Promise.resolve({ read: false, row: null }),
         },
-        createPendingEchoes(),
+        createRunNonce(),
       ),
     ).rejects.toBe(LOST_RESPONSE);
   });
@@ -400,7 +475,7 @@ describe("saveRun — a first save whose response is lost", () => {
           save: () => Promise.reject(LOST_RESPONSE),
           probe: () => Promise.reject(new Error("must not be probed")),
         },
-        createPendingEchoes(),
+        createRunNonce(),
       ),
     ).rejects.toBe(LOST_RESPONSE);
   });

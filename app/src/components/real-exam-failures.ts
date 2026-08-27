@@ -340,6 +340,46 @@ export function realBoardScreen({
   return expired ? 'submitting' : 'playing';
 }
 
+/** The two deadline outcomes that render the failure card. */
+export type DeadlineCardScreen = Extract<RealBoardScreen, 'submit-failed' | 'unconfirmed'>;
+
+/** Whether the deadline card offers a door out of the mode, and nothing else. */
+export type DeadlineExit = 'modes' | 'none';
+
+/** The card the deadline put on screen: its copy AND whether leaving is offered. */
+export interface DeadlineCard {
+  failure: RealFailureCopy;
+  exit: DeadlineExit;
+}
+
+/**
+ * The deadline card, COPY AND EXIT DECIDED TOGETHER (Codex round five of #79).
+ *
+ * They are one decision because they answer one question — is what the student
+ * answered on the server? — and splitting them is what produced the finding:
+ * both states rendered the same card with `onExit={onExitToModes}`, so the
+ * `submit-failed` screen, which exists BECAUSE the code detected the answers
+ * never arrived, offered a button that throws them away in silence. The copy
+ * said "Se sair agora, o que não chegou ao servidor será perdido." right above
+ * a button doing exactly that.
+ *
+ * So `submit-failed` gets `exit: 'none'`: while the submission is held there is
+ * nothing to navigate to that does not lose answers, and the only way forward
+ * is the retry (the run stays in memory precisely so it can be re-sent). It is
+ * not a trap — the retry is the way out, and a successful one lands on `review`
+ * or on `unconfirmed`, both of which do let the student leave.
+ *
+ * `unconfirmed` keeps its exit, and that difference is the whole point: there
+ * the flush LANDED, the answers are on the server, and `settleRealRun` closes
+ * the exam on its own — leaving costs nothing, and its copy says so.
+ */
+export function deadlineCardFor(screen: DeadlineCardScreen, reason: string | null): DeadlineCard {
+  if (screen === 'unconfirmed') {
+    return { failure: deadlineUnconfirmedNotice(), exit: 'modes' };
+  }
+  return { failure: deadlineSubmitFailure(reason), exit: 'none' };
+}
+
 /**
  * What the setup card says after a CONFLICT ended this tab's prova real.
  *

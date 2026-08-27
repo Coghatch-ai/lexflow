@@ -22,7 +22,15 @@ interface RealExamFailureCardProps {
   /** A retry is in flight — both buttons wait it out. */
   busy: boolean;
   onRetry: () => void;
-  onExit: () => void;
+  /**
+   * The door out of the mode, or `null` for NO door at all (Codex round five of
+   * #79). Null is not styling: the deadline's `submit-failed` state exists
+   * because the code detected that the student's answers never reached the
+   * server, and they live only in this tab's memory — a "Voltar aos modos"
+   * there discards them silently, right under copy that says so. The caller
+   * decides with `deadlineCardFor`; this component only renders the decision.
+   */
+  onExit: (() => void) | null;
 }
 
 export default function RealExamFailureCard({
@@ -50,13 +58,15 @@ export default function RealExamFailureCard({
         >
           {busy ? 'Carregando...' : failure.retryLabel}
         </button>
-        <button
-          onClick={onExit}
-          disabled={busy}
-          className="flex-1 border-2 border-gray-300 text-gray-700 py-3 rounded-lg font-semibold hover:bg-gray-50 transition disabled:opacity-50"
-        >
-          Voltar aos modos
-        </button>
+        {onExit !== null && (
+          <button
+            onClick={onExit}
+            disabled={busy}
+            className="flex-1 border-2 border-gray-300 text-gray-700 py-3 rounded-lg font-semibold hover:bg-gray-50 transition disabled:opacity-50"
+          >
+            Voltar aos modos
+          </button>
+        )}
       </div>
     </div>
   );

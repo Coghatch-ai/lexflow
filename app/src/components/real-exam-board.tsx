@@ -69,9 +69,8 @@ import RealExamFailureCard from './real-exam-failure-card';
 import RealExamSubmittingCard from './real-exam-submitting-card';
 import RunFailureDialog from '../pages/testing-run-failure';
 import {
-  deadlineSubmitFailure,
+  deadlineCardFor,
   deadlineSubmittingNotice,
-  deadlineUnconfirmedNotice,
   realBoardScreen,
 } from './real-exam-failures';
 import { useDeadlineSubmission } from './real-exam-deadline';
@@ -360,26 +359,24 @@ export default function RealExamBoard({
     return <RealExamSubmittingCard notice={deadlineSubmittingNotice()} />;
   }
 
-  // Two outcomes, one card, because the decision is the same shape: an action
-  // that re-runs what did not finish, and a door out. Only the COPY differs,
-  // and the difference is the whole finding — `submit-failed` says the answers
-  // never reached the server (with `failure` riding along so the student is
-  // told why, while the failure DIALOG is skipped: it would repeat this card
-  // behind a backdrop whose button dismisses instead of retrying), and
-  // `unconfirmed` may not say that, because they did.
+  // Two outcomes, one card, and `deadlineCardFor` owns BOTH halves of the
+  // difference — the copy and whether there is a door out (Codex round five of
+  // #79). `submit-failed` says the answers never reached the server (with
+  // `failure` riding along so the student is told why, while the failure DIALOG
+  // is skipped: it would repeat this card behind a backdrop whose button
+  // dismisses instead of retrying), so it offers ONLY the retry: an exit there
+  // discards the very answers the code has just detected are unsaved.
+  // `unconfirmed` may not say that, because they did land — it keeps its exit.
   if (screen === 'submit-failed' || screen === 'unconfirmed') {
+    const card = deadlineCardFor(screen, failure?.body ?? null);
     return (
       <RealExamFailureCard
-        failure={
-          screen === 'submit-failed'
-            ? deadlineSubmitFailure(failure?.body ?? null)
-            : deadlineUnconfirmedNotice()
-        }
+        failure={card.failure}
         busy={busy}
         onRetry={() => {
           void deadline.finish();
         }}
-        onExit={onExitToModes}
+        onExit={card.exit === 'modes' ? onExitToModes : null}
       />
     );
   }

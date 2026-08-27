@@ -23,6 +23,7 @@
 import { useEffect, useRef, useState, type MutableRefObject } from "react";
 import { FRESH_READ, exitTrpcClient, trpc } from "../lib/trpc";
 import { exitTransportFor } from "../lib/exit-save";
+import { wireExitFlush } from "../lib/exit-listeners";
 import { createSaveScheduler, type SaveScheduler } from "../lib/save-scheduler";
 import {
   adoptableDraftId,
@@ -40,12 +41,10 @@ import {
 } from "../lib/run-persistence";
 import {
   claimlessVerdictFor,
-  clearPendingEchoes,
-  createPendingEchoes,
+  createRunNonce,
   needsClaimlessProbe,
-  rememberPendingEcho,
   saveRun,
-  type PendingEchoes,
+  stampRunNonce,
   type SaveRunIO,
 } from "../lib/run-claimless";
 import type { RunMode } from "@shared/domain/exam-draft";
@@ -107,12 +106,13 @@ interface PersistenceRefs {
   /** Whether the FAILING save carried a token — picks the conflict copy. */
   hadToken: MutableRefObject<boolean>;
   /**
-   * The echoes of this run's claimless writes with an unknown outcome, so a
-   * commit that lands LATE is still recognisable as ours on a later attempt
-   * (`run-claimless.ts`). A ref, and cleared with the identity: it must outlive
-   * one save and die with the run.
+   * This run's client nonce, stamped into every save it sends, so a claimless
+   * write that lands LATE is still recognisable as ours on any later attempt
+   * (`run-claimless.ts`). A ref, and ROTATED with the identity: it must outlive
+   * one save and die with the run — kept across runs it would offer this run's
+   * proof of ownership over the next run's row.
    */
-  pendingEchoes: MutableRefObject<PendingEchoes>;
+  runNonce: MutableRefObject<string>;
   send: MutableRefObject<() => Promise<string>>;
   /** The same save over a transport that survives the tab (`exit-save.ts`). */
   exitSend: MutableRefObject<() => Promise<string>>;
@@ -209,13 +209,13 @@ function sendVia(
     // still the payload the server was given. A bound applied from outside
     // (`save-scheduler`'s dispatch) could only report the failure — by the next
     // attempt the payload has moved and nothing can prove the row is ours.
-    const saved = await saveRun(payload, io, refs.pendingEchoes.current);
+    const saved = await saveRun(payload, io, refs.runNonce.current);
     // Written the instant the mutation resolves, verbatim.
     refs.token.current = saved.lastSavedAt;
     // An adopted row comes WITH its id, so the read below is already paid for.
     if (saved.draftId !== null) refs.draftId.current = saved.draftId;
-    // Adopted through a PENDING echo: the row is ours, but it holds the payload
-    // of an earlier attempt — the answers of THIS send are not on the server.
+    // Adopted through the run NONCE: the row is ours, but it may hold the
+    // payload of an earlier attempt — the answers of THIS send are not there.
     // Re-arm the debounce so the next write (now carrying the token, so an
     // UPDATE) delivers them. Reporting this as landed would break the `ok: true`
     // contract `flush` gives the deadline door, which is the failure that put
@@ -248,30 +248,21 @@ function exitSendVia(
   save: (input: RunDraftPayload) => Promise<{ lastSavedAt: string }>,
 ): () => Promise<string> {
   return async (): Promise<string> => {
-    const payload = snapshotRef.current(refs.token.current);
-    if (payload === null) return refs.token.current ?? "";
-    const claimless = refs.token.current === null;
-    refs.hadToken.current = !claimless;
-    let saved: { lastSavedAt: string };
-    try {
-      saved = await save(payload);
-    } catch (error: unknown) {
-      // A `keepalive` write is finished by the browser AFTER the document is
-      // gone, so a claimless exit write whose answer we never saw is the same
-      // late commit `saveRun` recovers from — and on a tab that SURVIVES
-      // (`visibilitychange`), the next normal save is the one that would meet
-      // that row and be told it is foreign. Remembering the echo here is what
-      // lets it be recognised; a CONFLICT is excluded for the usual reason (the
-      // server answered that this payload wrote nothing).
-      if (claimless && !isConflictError(error)) {
-        rememberPendingEcho(refs.pendingEchoes.current, payload);
-      }
-      throw error;
-    }
+    const raw = snapshotRef.current(refs.token.current);
+    if (raw === null) return refs.token.current ?? "";
+    refs.hadToken.current = refs.token.current !== null;
+    // STAMPED like every other write of this run, and that is what replaced the
+    // echo bookkeeping this branch used to do (Codex round five): a `keepalive`
+    // write is finished by the browser AFTER the document is gone, so a
+    // claimless exit write whose answer we never saw is the same late commit
+    // `saveRun` recovers from — and on a tab that SURVIVES
+    // (`visibilitychange`), the next normal save is the one that would meet
+    // that row and be told it is foreign. Carrying the nonce is what lets it be
+    // recognised, whatever the payload has become by then.
+    const saved = await save(stampRunNonce(raw, refs.runNonce.current));
     // Written the moment it lands — a tab that SURVIVES (a mere
     // `visibilitychange`) must not keep the token this write just superseded.
     refs.token.current = saved.lastSavedAt;
-    clearPendingEchoes(refs.pendingEchoes.current);
     return saved.lastSavedAt;
   };
 }
@@ -334,9 +325,10 @@ function schedulerOf(refs: PersistenceRefs): SaveScheduler<string> {
 function forgetIdentity(refs: PersistenceRefs): void {
   refs.draftId.current = null;
   refs.token.current = null;
-  // The echoes belong to the run that just left this tab: kept, they would be
-  // offered as proof of ownership over a row the NEXT run wrote.
-  clearPendingEchoes(refs.pendingEchoes.current);
+  // ROTATED, not merely cleared: the nonce belongs to the run that just left
+  // this tab, and kept it would be offered as proof of ownership over a row the
+  // NEXT run wrote — an adoption of somebody else's exam, by us.
+  refs.runNonce.current = createRunNonce();
 }
 
 /**
@@ -413,7 +405,7 @@ function usePersistenceRefs(
   const draftIdRef = useRef<string | null>(null);
   const tokenRef = useRef<string | null>(null);
   const hadTokenRef = useRef(false);
-  const pendingEchoesRef = useRef(createPendingEchoes());
+  const runNonceRef = useRef(createRunNonce());
   const sendRef = useRef<() => Promise<string>>(() => Promise.resolve(""));
   const exitSendRef = useRef<() => Promise<string>>(() => Promise.resolve(""));
   const keepAliveRef = useRef<() => Promise<string>>(() => Promise.resolve(""));
@@ -426,7 +418,7 @@ function usePersistenceRefs(
     draftId: draftIdRef,
     token: tokenRef,
     hadToken: hadTokenRef,
-    pendingEchoes: pendingEchoesRef,
+    runNonce: runNonceRef,
     send: sendRef,
     exitSend: exitSendRef,
     keepAlive: keepAliveRef,
@@ -505,20 +497,15 @@ export function useRunPersistence(mode: RunMode, snapshot: RunSnapshot): RunPers
   // In every one of those the run is still on the server as of its last landed
   // save, and `settleRealRun` settles it at the deadline: what is at risk is
   // the TAIL of answers, never the whole exam — provided the first save landed.
-  useEffect(() => {
-    const onHide = (): void => {
-      scheduler.flushOnExit();
-    };
-    const onVisibility = (): void => {
-      if (document.visibilityState === "hidden") onHide();
-    };
-    window.addEventListener("pagehide", onHide);
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => {
-      window.removeEventListener("pagehide", onHide);
-      document.removeEventListener("visibilitychange", onVisibility);
-    };
-  }, [scheduler]);
+  //
+  // THE THIRD DOOR is this effect's own CLEANUP, and it was worse than any of
+  // the above: the in-SPA exit (browser Back) fires no event at all — the
+  // document stays visible and never unloads — so the board just unmounted with
+  // the answers in memory, including in `submit-failed`, the state that exists
+  // BECAUSE they never reached the server. `wireExitFlush` gives the unmount the
+  // identical best-effort attempt a tab-close gets. Not a stronger promise: one
+  // more door.
+  useEffect(() => wireExitFlush(scheduler, { window, document }), [scheduler]);
 
   return {
     scheduleSave: (): void => {
@@ -539,9 +526,9 @@ export function useRunPersistence(mode: RunMode, snapshot: RunSnapshot): RunPers
     adopt: (draftId: string, token: string): void => {
       refs.draftId.current = draftId;
       refs.token.current = token;
-      // Ownership is now proven the strong way (a token); anything remembered
-      // from before belongs to a write that is no longer this run's identity.
-      clearPendingEchoes(refs.pendingEchoes.current);
+      // The nonce is NOT rotated here: this is the same run continuing in this
+      // tab (a resume), ownership is now proven the strong way (a token), and
+      // the next save stamps this nonce onto the row it already owns.
     },
     close: (): void => {
       refs.scheduler.current?.close();

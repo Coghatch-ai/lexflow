@@ -163,7 +163,10 @@ answered") is **not** satisfied product-wide until M1 lands.
      intercepted the way a click can; wouter 3.10 also has no `useBlocker` and a new dependency is
      out (CLAUDE.md). Persistence, not a guard, is the real net for this — e desde a S2b ela
      existe **no Simulado Padrão**: o Back perde a tela, não a corrida (o último autosave está no
-     servidor e o card oferece "Continuar"). Nos outros 3 modos o Back ainda descarta em silêncio.
+     servidor e o card oferece "Continuar"). Desde a revisão adversarial Codex do #79 o **unmount
+     da tela também dispara a escrita de saída** (`wireExitFlush`, `shared/lib/exit-listeners.ts`):
+     o Back continua sem ser bloqueável, mas a escrita devida sai pelo mesmo `keepalive` que o
+     fechamento de aba já tinha — mesmo best-effort, uma porta a mais, nunca uma garantia maior.
    - **Mobile `QuestionRunner`** (`apps/mobile/`) has no exit dialog and no guard at all — the
      whole of BR-05 above is desktop-only, exactly like the BR-02 gap M1.
    - Known rough edge of the guarded **sign-out**: the run is processed correctly, but the student
@@ -267,8 +270,10 @@ answered") is **not** satisfied product-wide until M1 lands.
 - O **flush mora no handler da tela** (`handleSaveAndExit` / `handleQuitAndProcess`), nunca no
   `QuitTestDialog` nem no `RunGuardProvider` — os dois são apresentação e não podem esperar
   promessa. Enquanto ele roda, `busy` desabilita os 3 botões.
-- `pagehide`/`visibilitychange` **manda a escrita devida por `keepalive`** (revisão adversarial
-  Codex do #79): `scheduler.flushOnExit()` despacha `exitSend` — um `fetch` com `keepalive: true`
+- `pagehide`/`visibilitychange` **e o unmount da tela** mandam a escrita devida por `keepalive`
+  (revisão adversarial Codex do #79; as três portas moram em `shared/lib/exit-listeners.ts` —
+  o unmount é a saída in-SPA, que não dispara evento nenhum do DOM):
+  `scheduler.flushOnExit()` despacha `exitSend` — um `fetch` com `keepalive: true`
   (`exitTrpcClient` em `shared/lib/trpc.ts`), o único transporte que leva `Authorization` E é
   concluído pelo navegador depois que o documento morre (`sendBeacon` não manda header nenhum). O
   `flush()` de antes **aguardava rede**: request normal é cancelado junto com o documento e, com
@@ -363,24 +368,28 @@ answered") is **not** satisfied product-wide until M1 lands.
    `OVERWRITE_CONFLICT` de um save SEM token deixou de ser terminal por suposição e passou a ser
    terminal por **prova**: com `token: null` o CONFLICT só diz "existe linha em (user, mode)",
    nunca de quem; sem eco, o CONFLICT original segue de pé com o diálogo do BR-05.8.
-   **O eco atravessa tentativas** (4ª revisão adversarial): comparar só com o payload da tentativa
-   ATUAL fecha a janela apenas enquanto o payload não anda. Cadeia que sobrava: o 1º save estoura o
-   teto → a sondagem não lê linha nenhuma (o insert ainda não commitou) → a escrita **commita
-   tarde** → o aluno responde mais uma questão → o retry encontra a própria linha, o eco do RETRY
-   não bate, a linha é julgada estrangeira e o `OVERWRITE_CONFLICT` fecha a prova. Agora todo
-   payload com desfecho **desconhecido** vira um eco lembrado (`PendingEchoes`, `run-claimless.ts`):
-   a adoção aceita a linha que ecoa QUALQUER eco pendente, não só o payload atual. Limites, porque
-   a memória é o risco: no máximo `MAX_PENDING_ECHOES = 4`, e o **novo** é descartado quando enche
-   (a linha nasce de um INSERT … `onConflictDoNothing`, então quem a escreveu é a tentativa MAIS
-   ANTIGA que chegou ao banco); um `OVERWRITE_CONFLICT` **nunca** é lembrado (o servidor respondeu
-   que aquele insert gravou 0 linhas); e tudo é esquecido quando a identidade fica conhecida (save
-   que pousa, adoção, `adopt`, `close`, `discardSaved`). Adotar linha estrangeira continua fora de
-   alcance: o eco é o conteúdo inteiro (fila sorteada, cursor, respostas com `timeSpent`,
-   `elapsedSeconds`, e no real o `deadlineAt` ao milissegundo) de um payload que ESTA aba enviou.
-   Adotar por eco antigo devolve a linha com o payload VELHO, então a escrita atual continua
-   **devendo** (`SavedRun.owed`): o `sendVia` re-arma, e o `flush` passou a drenar `dirty` em laço —
-   escrever uma vez só devolvia `ok: true` com a última resposta ainda só na aba, que é exatamente
-   o contrato de que a porta do prazo depende antes do `processReal`.
+   **A posse atravessa tentativas por NONCE** (5ª revisão adversarial, Codex): comparar só com o
+   payload da tentativa ATUAL fecha a janela apenas enquanto o payload não anda. Cadeia que
+   sobrava: o 1º save estoura o teto → a sondagem não lê linha nenhuma (o insert ainda não
+   commitou) → a escrita **commita tarde** → o aluno responde mais uma questão → o retry encontra a
+   própria linha, o conteúdo do RETRY não bate, a linha é julgada estrangeira e o
+   `OVERWRITE_CONFLICT` fecha a prova. A 4ª revisão respondeu com uma MEMÓRIA de ecos
+   (`MAX_PENDING_ECHOES = 4`), e o teto dela era ele próprio um travamento: com as 4 primeiras
+   tentativas mortas e a 5ª sendo a que commitou tarde, o eco da 5ª era **descartado** e o aluno
+   ficava trancado fora da prova pela própria escrita. Agora a posse é um **nonce por corrida**
+   (`createRunNonce` / `stampRunNonce` / `runNonceAdoption`, `run-claimless.ts`): uma string opaca
+   sorteada uma vez pela aba, carimbada em TODO save dela (inclusive o `exitSend` de `keepalive`) e
+   carregada **dentro do jsonb `mode_state`** — sem coluna e sem migração (o zod do router aceita
+   `runNonce`, senão seria removido na entrada). Linha com o nosso nonce foi escrita por nós, ponto:
+   sem fila, sem teto, e não decai com o número de tentativas. Continua fail-closed — linha sem
+   nonce (escrita antes disto existir) ou com nonce de outra corrida não é adotada, e o
+   `OVERWRITE_CONFLICT` original segue de pé com o diálogo do BR-05.8. O nonce **gira** em
+   `forgetIdentity` (`close`, `discardSaved`), senão a próxima corrida adotaria a linha da
+   anterior; um `adopt` (resume) não gira, é a mesma corrida. Adotar por nonce prova de QUEM é a
+   linha, não que ela está fresca: a escrita atual continua **devendo** (`SavedRun.owed`), o
+   `sendVia` re-arma, e o `flush` drena `dirty` em laço — escrever uma vez só devolvia `ok: true`
+   com a última resposta ainda só na aba, que é exatamente o contrato de que a porta do prazo
+   depende antes do `processReal`.
 5. **Duas portas de auto-submit, uma sessão.** Aba aberta no zero: `flush()` → `processReal()` →
    tela de revisão montada da MEMÓRIA (critério 4). Aba fechada: nada na hora (não há scheduler) —
    liquida no próximo contato autenticado. Os dois podem disparar; o `DELETE` do rascunho é a
@@ -395,6 +404,13 @@ answered") is **not** satisfied product-wide until M1 lands.
    botão reexecuta a submissão e sair é seguro porque o servidor liquida no prazo. Antes disso:
    `flush` que não pousa ⇒ `submit-failed` (aí sim "não chegaram ao servidor"), e enquanto os dois
    estão no ar ⇒ `submitting`, cartão sem botão e por isso **limitado** pelos dois `settleWithin`.
+   **`submit-failed` não tem porta de saída** (5ª revisão adversarial, Codex): copy e saída são
+   decididas juntas por `deadlineCardFor` (`real-exam-failures.ts`) — `submit-failed` ⇒
+   `exit: 'none'`, `unconfirmed` ⇒ `exit: 'modes'`. Aquela tela existe porque o código DETECTOU que
+   as respostas não chegaram ao servidor e elas só existem na memória desta aba; um "Voltar aos
+   modos" ali desmontava o board e jogava fora a única cópia, em silêncio, logo abaixo da copy que
+   diz que sair perde tudo. A saída é o retry (que reexecuta a submissão e leva a `review` ou a
+   `unconfirmed`, ambos com porta). O `unconfirmed` mantém a dele porque ali o `flush` POUSOU.
 6. **CONFLICT aqui NUNCA abre o diálogo de conflito.** "Recarregar do servidor" e "Descartar esta
    cópia" são escolhas sobre uma corrida que se retoma; esta não se retoma, e "descartar" é o que a
    BR-05.5 proíbe. CONFLICT (do `save`, do `touch` ou do `record`) = a prova já terminou em outro

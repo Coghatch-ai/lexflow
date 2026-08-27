@@ -67,11 +67,29 @@ const adaptiveState = z.object({
   difficultyHistory: z.array(difficulty),
 });
 
+/**
+ * The client's per-run identity, carried in the mode_state jsonb (Codex round
+ * five of #79). It exists ONLY to be echoed back by `get`: a tab whose first
+ * save committed without answering learns nothing about the row it wrote, and
+ * the nonce is what lets it recognise that row later — with no column and no
+ * migration.
+ *
+ * Declared HERE, on every member, because zod strips unknown keys: without it
+ * the nonce would be dropped on the way in and the recovery would silently
+ * never match. Never read or trusted server-side — it is an opaque string the
+ * client compares against itself.
+ */
+const runNonce = z.string().min(1).max(100).optional();
+
 const modeState = z.discriminatedUnion("mode", [
   // carriedTime keeps the seconds already spent on a postponed question — drop
   // it and the resumed run silently forgets that time (BR-03 + BR-05.10).
-  z.object({ mode: z.literal("standard"), carriedTime: z.record(z.string(), z.number()) }),
-  z.object({ mode: z.literal("spaced") }),
+  z.object({
+    mode: z.literal("standard"),
+    carriedTime: z.record(z.string(), z.number()),
+    runNonce,
+  }),
+  z.object({ mode: z.literal("spaced"), runNonce }),
   z.object({
     mode: z.literal("adaptive"),
     adaptive: adaptiveState,
@@ -79,8 +97,9 @@ const modeState = z.discriminatedUnion("mode", [
     // The FIFO of postponed questions IS progress (BR-03); the candidate pool
     // is not — it is re-drawn from the same filters on resume.
     deferredIds: z.array(z.string()),
+    runNonce,
   }),
-  z.object({ mode: z.literal("real") }),
+  z.object({ mode: z.literal("real"), runNonce }),
 ]);
 
 /**
