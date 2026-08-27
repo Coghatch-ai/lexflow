@@ -62,7 +62,8 @@ function QuestionReviewRow({ question, idx, userAnswer, disciplineLov }: Questio
 
 interface ExamReviewProps {
   questions: ReviewQuestion[];
-  answers: Map<number, string>;
+  /** Answers keyed by QUESTION ID, not by index (epic #67 slice S2d). */
+  answersByQuestionId: ReadonlyMap<string, string>;
   drafts: AnswerDraft[];
   timeUsedLabel: string;
   disciplineLov: Lov;
@@ -75,7 +76,7 @@ interface ExamReviewProps {
 // Every question is still listed, the unanswered ones as "Não respondida".
 export default function ExamReview({
   questions,
-  answers,
+  answersByQuestionId,
   drafts,
   timeUsedLabel,
   disciplineLov,
@@ -124,7 +125,7 @@ export default function ExamReview({
               key={q.id}
               question={q}
               idx={idx}
-              userAnswer={answers.get(idx)}
+              userAnswer={answersByQuestionId.get(q.id)}
               disciplineLov={disciplineLov}
             />
           ))}

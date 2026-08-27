@@ -113,12 +113,31 @@ export type ExamDraftSetup =
  * Per-mode progress that is NOT in the universal columns. Cross-out, `checked`,
  * `flagged` and `postponed` are drafts, not progress, and are never persisted
  * (BR-02.3, epic #67 D8).
+ *
+ * `runNonce` is on EVERY member and is not per-mode progress at all: it is the
+ * per-run identity a tab mints once and stamps into every save
+ * (`run-claimless.ts`), so a row this tab wrote is recognisable as ours even
+ * when its response was lost and the payload has since moved on. It rides in
+ * this jsonb precisely so it needs no column and no migration.
+ *
+ * Optional because a row written before this existed simply has none, and
+ * "absent" must read as "not ours" (fail-closed), never as a match. Written
+ * `?: string | undefined`, not `?: string`, because the API program runs with
+ * `exactOptionalPropertyTypes` and the router's zod `.optional()` hands the
+ * insert exactly a `string | undefined` — the narrower form makes the write of
+ * a nonce-less payload a type error.
  */
 export type ExamDraftModeState =
-  | { mode: "standard"; carriedTime: Record<string, number> }
-  | { mode: "spaced" }
-  | { mode: "adaptive"; adaptive: AdaptiveState; totalQuestions: number; deferredIds: string[] }
-  | { mode: "real" };
+  | { mode: "standard"; carriedTime: Record<string, number>; runNonce?: string | undefined }
+  | { mode: "spaced"; runNonce?: string | undefined }
+  | {
+      mode: "adaptive";
+      adaptive: AdaptiveState;
+      totalQuestions: number;
+      deferredIds: string[];
+      runNonce?: string | undefined;
+    }
+  | { mode: "real"; runNonce?: string | undefined };
 
 /** The universal part of a persisted run — all the pure rules need. */
 export interface ExamDraftSnapshot {
@@ -140,6 +159,9 @@ export interface ReconciledRun {
 
 /** No heartbeat for this long ⇒ the prova real tab is dead (3 missed beats). */
 export const REAL_RUN_STALE_SECONDS = 180;
+
+/** The prova real lasts 5 h — the window `deadline_at` is minted from (D8). */
+export const REAL_EXAM_DURATION_SECONDS = 5 * 60 * 60;
 
 /**
  * A blank answer is never recorded (BR-05.6, consistent with BR-03): an
@@ -227,6 +249,38 @@ export function draftTotalOf(draft: {
 }
 
 /**
+ * The two shapes a timestamp column legitimately arrives in, and NOTHING else:
+ * the ISO string the browser mints (`2026-08-21T14:30:04.210Z`) and the raw PG
+ * text drizzle hands back for `mode: "string"` (`2026-08-21 14:30:04.210932+00`).
+ *
+ * Stricter than `Date.parse` ON PURPOSE, and this is the parser EVERY read-path
+ * decision below uses — `Date.parse` reached for directly is a bug here.
+ * `Date.parse` is generous exactly where a clock must not be: `"2026"` answers
+ * 1 Jan 2026 (a whole year read as an instant) and a JS `Date.toString()`
+ * answers a locale-shaped guess. Those are the very values Postgres itself
+ * refuses (22007 / 22023) and the reason `examDrafts.save` normalises the field
+ * with a `.transform` — but that guards the WRITE path only. A row written
+ * before it existed, or by anything other than that mutation, still reaches
+ * these functions, and reading a guess out of one is how a student's exam gets
+ * force-submitted on a value nobody measured.
+ */
+const TIMESTAMP_TEXT = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?(\d{2})?)?$/;
+
+/**
+ * Milliseconds of a timestamp in one of the two accepted shapes, or null.
+ *
+ * Exported because the WRITE path needs the SAME parser, not a second one:
+ * `examDrafts.save` validates `deadlineAt` with this predicate, so a value the
+ * reads below would refuse never gets stored in the first place. Two parsers
+ * for one column is how "accepted on write, unreadable on read" happens.
+ */
+export function timestampMs(value: string): number | null {
+  if (!TIMESTAMP_TEXT.test(value)) return null;
+  const ms = Date.parse(value);
+  return Number.isNaN(ms) ? null : ms;
+}
+
+/**
  * Whether a prova real must be settled server-side. There is no scheduler in
  * this project (Lambda behind API Gateway, no EventBridge), so an abrupt exit
  * is detected lazily on the student's next authenticated contact: the clock ran
@@ -234,7 +288,16 @@ export function draftTotalOf(draft: {
  *
  * A fresh heartbeat before the deadline is NOT abandonment — that is the case
  * that keeps a student who merely opened another tab from being auto-submitted.
- * Unparseable timestamps also answer `false`: never auto-submit on a guess.
+ *
+ * FAILS CLOSED, per field, through `timestampMs`: a value that cannot be read
+ * STRICTLY disables the half of the judgement that needed it, and never stands
+ * in for it. Settling force-submits an exam and DELETEs its draft — it is
+ * irreversible and it is the student's grade, so the two errors are not
+ * symmetric. The cost of failing closed is bounded: an unreadable `deadline_at`
+ * leaves only the heartbeat judging (a quiet one still settles), and a row that
+ * no half can judge is cleared by the `force` of the next `startReal`
+ * (BR-05.5), so nothing is stranded forever. The cost of failing open is a
+ * student mid-exam losing it to a value `Date.parse` invented.
  */
 export function isRealRunAbandoned({
   deadlineAt,
@@ -247,15 +310,83 @@ export function isRealRunAbandoned({
   now: string;
   staleSeconds?: number;
 }): boolean {
-  const nowMs = Date.parse(now);
-  if (Number.isNaN(nowMs)) return false;
+  const nowMs = timestampMs(now);
+  if (nowMs === null) return false;
 
   if (deadlineAt !== null) {
-    const deadlineMs = Date.parse(deadlineAt);
-    if (!Number.isNaN(deadlineMs) && deadlineMs <= nowMs) return true;
+    const deadlineMs = timestampMs(deadlineAt);
+    if (deadlineMs !== null && deadlineMs <= nowMs) return true;
   }
 
-  const lastSavedMs = Date.parse(lastSavedAt);
-  if (Number.isNaN(lastSavedMs)) return false;
+  const lastSavedMs = timestampMs(lastSavedAt);
+  if (lastSavedMs === null) return false;
   return lastSavedMs < nowMs - staleSeconds * 1000;
+}
+
+/**
+ * Seconds left of a prova real, derived from the ABSOLUTE `deadline_at` and
+ * never from a local counter (D8): reloading the tab must not hand back time,
+ * and the clock does not pause the way the study modes' `elapsed_seconds` does.
+ *
+ * Floors at 0 — a deadline in the past means "no time left", never a negative
+ * countdown — and answers `null` when there is no usable deadline at all, which
+ * the caller must treat as "do not decide", not as "0 seconds left". "Usable"
+ * is `timestampMs`, the same strict read `isRealRunAbandoned` makes: a countdown
+ * painted from a guess is a number nobody measured.
+ */
+export function realSecondsLeft({
+  deadlineAt,
+  now,
+}: {
+  deadlineAt: string | null;
+  now: string;
+}): number | null {
+  if (deadlineAt === null) return null;
+  const deadlineMs = timestampMs(deadlineAt);
+  if (deadlineMs === null) return null;
+  const nowMs = timestampMs(now);
+  if (nowMs === null) return null;
+  return Math.max(0, Math.floor((deadlineMs - nowMs) / 1000));
+}
+
+/**
+ * What the prova real screen does on mount — the whole of BR-05.5 as one pure
+ * decision, so "does the student get their exam back?" is provable without a
+ * browser:
+ *
+ * - `start` — no row at all, or a row whose deadline cannot be read. A prova
+ *   real is NEVER offered back to continue, so "no row" is simply the setup
+ *   screen; an unreadable deadline is settled by the `startReal` of the next
+ *   start (`force`), never auto-submitted here on a guess. "Cannot be read" is
+ *   `timestampMs`, not `Date.parse`: `null` and `"2026"` carry the same amount
+ *   of information about when this exam ends, so they get the same verdict.
+ * - `resume` — the row is alive: not abandoned AND with time left. This is the
+ *   tab that OWNS the exam coming back from a reload, and it is the branch that
+ *   keeps a student who merely opened a second tab from being auto-submitted.
+ * - `settle` — the deadline passed or the heartbeat went quiet: the exam ended
+ *   while nobody was watching and its answers still owe a session.
+ *
+ * Reuses `isRealRunAbandoned` and `realSecondsLeft` rather than re-deriving
+ * either: the server judges abandonment with the first of those, and a second
+ * copy of the rule here is how the two sides start disagreeing about whose
+ * exam is still running.
+ */
+export type RealMountDecision = "start" | "resume" | "settle";
+
+export function realMountDecision({
+  draft,
+  now,
+  staleSeconds = REAL_RUN_STALE_SECONDS,
+}: {
+  draft: { deadlineAt: string | null; lastSavedAt: string } | null;
+  now: string;
+  staleSeconds?: number;
+}): RealMountDecision {
+  if (draft === null) return "start";
+  if (isRealRunAbandoned({ ...draft, now, staleSeconds })) return "settle";
+  const left = realSecondsLeft({ deadlineAt: draft.deadlineAt, now });
+  // No usable deadline: the row is not judged abandoned (the heartbeat is
+  // fresh) but there is no clock to run it against either. Back to setup.
+  if (left === null) return "start";
+  return left > 0 ? "resume" : "settle";
 }

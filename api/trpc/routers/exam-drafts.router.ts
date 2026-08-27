@@ -26,6 +26,7 @@ import {
   answeredOf,
   draftTotalOf,
   isResumableMode,
+  timestampMs,
 } from "../../../shared/domain/exam-draft";
 
 // Built FROM the shared `RUN_MODES` tuple, not from a second hand-written list:
@@ -66,11 +67,29 @@ const adaptiveState = z.object({
   difficultyHistory: z.array(difficulty),
 });
 
+/**
+ * The client's per-run identity, carried in the mode_state jsonb (Codex round
+ * five of #79). It exists ONLY to be echoed back by `get`: a tab whose first
+ * save committed without answering learns nothing about the row it wrote, and
+ * the nonce is what lets it recognise that row later — with no column and no
+ * migration.
+ *
+ * Declared HERE, on every member, because zod strips unknown keys: without it
+ * the nonce would be dropped on the way in and the recovery would silently
+ * never match. Never read or trusted server-side — it is an opaque string the
+ * client compares against itself.
+ */
+const runNonce = z.string().min(1).max(100).optional();
+
 const modeState = z.discriminatedUnion("mode", [
   // carriedTime keeps the seconds already spent on a postponed question — drop
   // it and the resumed run silently forgets that time (BR-03 + BR-05.10).
-  z.object({ mode: z.literal("standard"), carriedTime: z.record(z.string(), z.number()) }),
-  z.object({ mode: z.literal("spaced") }),
+  z.object({
+    mode: z.literal("standard"),
+    carriedTime: z.record(z.string(), z.number()),
+    runNonce,
+  }),
+  z.object({ mode: z.literal("spaced"), runNonce }),
   z.object({
     mode: z.literal("adaptive"),
     adaptive: adaptiveState,
@@ -78,9 +97,40 @@ const modeState = z.discriminatedUnion("mode", [
     // The FIFO of postponed questions IS progress (BR-03); the candidate pool
     // is not — it is re-drawn from the same filters on resume.
     deferredIds: z.array(z.string()),
+    runNonce,
   }),
-  z.object({ mode: z.literal("real") }),
+  z.object({ mode: z.literal("real"), runNonce }),
 ]);
+
+/**
+ * The WRITE half of the deadline contract, and the mirror of the read half:
+ * the `refine` is the SAME strict parser the reads use (`timestampMs`), never
+ * `Date.parse`.
+ *
+ * `Date.parse` is far more generous than both Postgres and `timestampMs`:
+ * `"2026"` (a whole YEAR, PG 22007) and a JS `Date.toString()` (PG 22023) both
+ * PASS it, and the `transform` then turned `"2026"` into
+ * `"2026-01-01T00:00:00.000Z"` — a legitimate-looking deadline nobody asked
+ * for, stored on the column that force-submits a student's exam. Unreadable is
+ * now a BAD_REQUEST at the door, never a normalised guess.
+ *
+ * The `transform` stays, for the values that ARE readable: normalising to ISO
+ * is safe here for the reason spelled out on the field below (the column is
+ * COMPARED, never echoed as a token) and is NEVER acceptable on `token`.
+ * Known cost, accepted: it truncates µs to ms, which is nothing against a 5 h
+ * exam but IS a contract change — the deadline stored is the instant asked
+ * for, to the millisecond.
+ *
+ * Exported for `exam-drafts.router.test.ts`, which asserts the refusals
+ * against THIS schema, not a copy of it.
+ */
+export const deadlineAtInput = z
+  .string()
+  .min(1)
+  .refine((v) => timestampMs(v) !== null, {
+    message: "deadlineAt precisa ser uma data/hora reconhecível",
+  })
+  .transform((v) => new Date(v).toISOString());
 
 const saveInput = z
   .object({
@@ -107,21 +157,19 @@ const saveInput = z
      * D8 absolute deadline the auto-submit depends on.
      *
      * Parseability is the whole contract here: `deadline_at` is COMPARED
-     * (`isRealRunAbandoned` does `Date.parse`), never echoed as a token, so
-     * normalising is harmless and only the instant matters. That is the exact
+     * (`isRealRunAbandoned` reads it through the strict `timestampMs`, NOT
+     * `Date.parse`), never echoed as a token, so normalising is harmless and
+     * only the instant matters. That is the exact
      * opposite of `token`/`lastSavedAt` below, which must travel VERBATIM: it is
      * matched with `=` against the column, and normalising it through `Date`
      * drops the microseconds and breaks the optimistic guard for good. Two
      * string fields of the same row, opposite rules — hence the note.
+     *
+     * Shape defined by `deadlineAtInput` above — strict `timestampMs` refine
+     * (unreadable ⇒ BAD_REQUEST, never normalised) + ISO transform for the
+     * values that ARE readable.
      */
-    deadlineAt: z
-      .string()
-      .min(1)
-      .refine((v) => Number.isFinite(Date.parse(v)), {
-        message: "deadlineAt precisa ser uma data/hora reconhecível",
-      })
-      .nullable()
-      .optional(),
+    deadlineAt: deadlineAtInput.nullable().optional(),
     /** `last_saved_at` of the row this save is based on; null = first save. */
     token: z.string().nullable(),
   })

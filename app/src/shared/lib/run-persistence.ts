@@ -199,13 +199,77 @@ export function adaptiveDraftPayload(run: AdaptiveRunState): AdaptiveDraftPayloa
   };
 }
 
+/** The live prova real, as the board holds it (BR-05.5, slice S2d). */
+export interface RealRunState {
+  /** The 80 drawn questions, in the FROZEN order — never re-drawn (D8). */
+  questionIds: readonly string[];
+  cursor: number;
+  answers: readonly AnswerDraft[];
+  /**
+   * The absolute end of the 5 h. The one field only this mode sends, and the
+   * reason it persists at all: the clock is derived from it, so reloading the
+   * tab cannot hand back time and the exam does not pause (D8).
+   */
+  deadlineAt: string;
+  token: string | null;
+}
+
+/** Exactly the input `examDrafts.save` takes for a prova real. */
+export interface RealDraftPayload {
+  mode: "real";
+  setup: Extract<ExamDraftSetup, { mode: "real" }>;
+  questionIds: string[];
+  cursor: number;
+  answers: AnswerDraft[];
+  modeState: Extract<ExamDraftModeState, { mode: "real" }>;
+  /** Always 0: the real exam's clock is the ABSOLUTE `deadlineAt` (D8). */
+  elapsedSeconds: 0;
+  deadlineAt: string;
+  token: string | null;
+}
+
 /**
- * Any study mode's save payload. The hook (`use-run-persistence.ts`) takes ONE
- * of these from the screen's own snapshot instead of building it: the three
- * modes disagree about `setup`/`modeState` and about nothing else, so the
- * plumbing has no business knowing which one it is carrying.
+ * The prova real payload: the universal columns plus `deadlineAt`, and nothing
+ * else. `setup` and `modeState` are both the bare `{ mode: 'real' }` — the only
+ * per-mode thing this exam has is the deadline, and the deadline has a COLUMN
+ * of its own (`isRealRunAbandoned` reads it server-side, not out of jsonb).
+ *
+ * `elapsedSeconds: 0` for the same reason the Espaçada sends 0: the time used
+ * is DERIVED from `deadlineAt`, so persisting a second number would only give
+ * the two a chance to disagree.
+ *
+ * The answers are deduplicated here, not at the exit: unlike the study modes,
+ * the real exam writes an answer the moment it is picked and lets the student
+ * change it until the exam ends, so the same question is answered many times
+ * over 5 h. One entry per question, last word wins — two `user_answers` rows
+ * for one question would count 81 of 80 and step SM-2 twice.
  */
-export type RunDraftPayload = StandardDraftPayload | SpacedDraftPayload | AdaptiveDraftPayload;
+export function realDraftPayload(run: RealRunState): RealDraftPayload {
+  return {
+    mode: "real",
+    setup: { mode: "real" },
+    questionIds: [...run.questionIds],
+    cursor: run.cursor,
+    answers: dedupeAnswers(run.answers),
+    modeState: { mode: "real" },
+    elapsedSeconds: 0,
+    deadlineAt: run.deadlineAt,
+    // Verbatim. See the file header: normalising this kills the guard.
+    token: run.token,
+  };
+}
+
+/**
+ * Any persisted run's save payload. The hook (`use-run-persistence.ts`) takes
+ * ONE of these from the screen's own snapshot instead of building it: the four
+ * modes disagree about `setup`/`modeState`/`deadlineAt` and about nothing else,
+ * so the plumbing has no business knowing which one it is carrying.
+ */
+export type RunDraftPayload =
+  | StandardDraftPayload
+  | SpacedDraftPayload
+  | AdaptiveDraftPayload
+  | RealDraftPayload;
 
 /** The columns of an `exam_drafts` row a resume reads (`examDrafts.get`). */
 export interface PersistedDraft {
@@ -217,6 +281,8 @@ export interface PersistedDraft {
   answers: AnswerDraft[];
   modeState: ExamDraftModeState;
   elapsedSeconds: number;
+  /** Absolute end of a prova real; null on every study mode (S2d). */
+  deadlineAt: string | null;
   lastSavedAt: string;
 }
 
@@ -484,6 +550,49 @@ export function resumeAdaptiveFrom<Q extends { id: string }>(
   };
 }
 
+/** What the prova real must put back on the board to keep running (S2d). */
+export type RealResume<Q> =
+  | { discard: true; dropped: number }
+  | {
+      discard: false;
+      /** The frozen 80, in the persisted order. */
+      questions: Q[];
+      cursor: number;
+      answers: AnswerDraft[];
+      /** The absolute deadline the clock is derived from; null = unusable. */
+      deadlineAt: string | null;
+      dropped: number;
+    };
+
+/**
+ * Rebuilds a prova real from the saved row plus `questions.byIds` — the ONLY
+ * resume this mode has, and it is not an offer: it is the tab that owns the
+ * exam coming back from a reload (BR-05.5, criterion 5).
+ *
+ * It reconciles like every other resume, and that is load-bearing rather than
+ * symmetry: `user_answers.question_id` has an FK to `oab_questions`, so an
+ * answer to a question that left the catalog takes the whole recording
+ * transaction down — the very transaction this exam ends by.
+ *
+ * `deadlineAt` travels through UNTOUCHED (it is raw PG text here): the caller
+ * hands it straight back to `realSecondsLeft`, which knows both shapes.
+ */
+export function resumeRealFrom<Q extends { id: string }>(
+  draft: PersistedDraft,
+  fetched: readonly Q[],
+): RealResume<Q> {
+  const { reconciled, questions } = rebuildQueue(draft, fetched);
+  if (reconciled.discard) return { discard: true, dropped: reconciled.dropped };
+  return {
+    discard: false,
+    questions,
+    cursor: reconciled.cursor,
+    answers: reconciled.answers,
+    deadlineAt: draft.deadlineAt,
+    dropped: reconciled.dropped,
+  };
+}
+
 /** The draft claim `sessions.record` consumes the run with. */
 export interface DraftClaim {
   id: string;
@@ -530,6 +639,12 @@ export function claimOutcomeFor(draftId: string | null, token: string | null): C
   if (claim === undefined) return { ok: false, claim: undefined, failure: runSaveFailure("claim") };
   return { ok: true, claim, failure: null };
 }
+
+// What happens when a run IS persisted but cannot be CLAIMED — the write
+// committed and its response was lost — lives next door, in `run-claimless.ts`:
+// `needsClaimlessProbe` / `claimlessVerdictFor` (the record path) and
+// `needsClaimlessSaveProbe` / `claimlessSaveAdoption` / `saveRun` (the save
+// path). One cause, one file.
 
 /** Which copy of a CONFLICT the student is looking at. */
 export type RunConflictKind = "remote" | "live";

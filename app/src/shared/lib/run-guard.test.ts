@@ -4,6 +4,7 @@ import {
   decideNavigation,
   guardSaveOutcome,
   isRunGuarded,
+  offersSaveAndExit,
   pickActiveRun,
   type RunRegistration,
 } from "./run-guard";
@@ -90,6 +91,34 @@ describe("pickActiveRun", () => {
 
     expect(pickActiveRun(runs)).toBeNull();
     expect(isRunGuarded(null)).toBe(false);
+  });
+});
+
+// Whether the third button exists at all (BR-05.3 / BR-05.5, slices S2b+S2d).
+// The prova real persists since S2d, and persisting is exactly what could make
+// someone "restore" a save handler to it — so the refusal is locked in a test
+// instead of in a review comment.
+describe("offersSaveAndExit", () => {
+  const saveHandler = (): Promise<boolean> => Promise.resolve(true);
+
+  it("offers it on a study mode that registered a save handler", () => {
+    expect(offersSaveAndExit(exitPrompt("standard", 3, 10), saveHandler)).toBe(true);
+  });
+
+  it("REFUSES it on the prova real even with a save handler registered", () => {
+    // The rule is the mode's, not the screen's: a prova real that persists is
+    // persisting to be auto-submitted, never to be picked back up (BR-05.5).
+    expect(offersSaveAndExit(exitPrompt("real", 5, 80), saveHandler)).toBe(false);
+  });
+
+  it("refuses it on the prova real as this slice actually registers it — with NO handler", () => {
+    expect(offersSaveAndExit(exitPrompt("real", 5, 80), undefined)).toBe(false);
+    expect(exitPrompt("real", 5, 80).saveLabel).toBeNull();
+    expect(exitPrompt("real", 5, 80).optionCount).toBe(2);
+  });
+
+  it("refuses it on a study mode whose screen registered no handler", () => {
+    expect(offersSaveAndExit(exitPrompt("spaced", 2, 5), undefined)).toBe(false);
   });
 });
 

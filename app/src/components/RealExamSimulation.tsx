@@ -1,354 +1,231 @@
-import { useState, useEffect, useCallback, type ReactElement } from 'react';
-import { AlertCircle, Flag } from 'lucide-react';
-import { useLov } from '../shared/hooks/use-lov';
-import { trpc } from '../shared/lib/trpc';
-import { shuffle } from '../shared/lib/shuffle';
-import { findNextUnanswered } from '../shared/lib/exam-queue';
-import ExamPlaying from './real-exam-playing';
-import ExamReview from './real-exam-review';
-import QuitTestDialog from './QuitTestDialog';
-import type { AiExplanation } from '@shared/domain/ai-eval';
-import { useNotesAndBookmarks } from '../shared/hooks/use-notes-bookmarks';
-import { useLeaveWarning } from '../shared/hooks/use-leave-warning';
-import { useRegisterRun } from '../shared/run-guard-context';
-import { type AnswerDraft, exitPrompt, processableAnswers, shouldPromptOnExit } from '../shared/lib/exit-rules';
+// Entry point of the Simulado Real (BR-05.5, epic #67 slice S2d): what the
+// screen does ON MOUNT, the draw of a fresh exam, and the settlement of one
+// that ended while the student was away. The exam itself lives in
+// `RealExamBoard`, mounted with a `key` per run so every run gets a clean
+// scheduler and a clean draft identity.
+//
+// The mount decision is `realMountDecision` — pure, shared with the server's
+// own `isRealRunAbandoned`, and NEVER an offer to continue (BR-05.5). The three
+// answers are: setup card, rehydrate the tab that owns the exam, or settle.
+//
+// Rehydration replays the FROZEN `questionIds` through `questions.byIds`.
+// `questions.list` must never be re-queried here: it orders by `random()`, so
+// it would swap the 80 questions out from under a student mid-exam.
+//
+// "Iniciar Simulado Real" calls `examDrafts.startReal` BEFORE drawing. That
+// settles any pending real exam with `force` — the prova real has no `discard`
+// door (BR-05.5) — and without it the first save of the new run, which carries
+// `token: null`, would hit the OVERWRITE_CONFLICT guard and the student would
+// be stuck with no way forward.
+//
+// Because `startReal` is destructive, NEITHER entry may fail in silence. Both
+// are imperative (`utils.*.fetch` / `mutateAsync`), so nothing renders an error
+// for them; a rejected `examDrafts.get` used to land on the setup card, which
+// is the same pixels as "no pending exam" and puts that force-settle one click
+// away. Every failure here becomes a `RealFailure` and its own screen
+// (`real-exam-failures.ts` owns the rule and the copy).
+
+import { useEffect, useRef, useState, useCallback, type ReactElement } from 'react';
+import { FRESH_READ, trpc } from '../shared/lib/trpc';
 import {
-  NO_ELIMINATIONS,
-  eliminatedFor,
-  eliminationDropsAnswer,
-  toggleElimination,
-  type EliminationState,
-} from '../shared/lib/eliminations';
+  persistedDraftOf,
+  resumeRealFrom,
+  type RunConflictKind,
+} from '../shared/lib/run-persistence';
+import { REAL_EXAM_DURATION_SECONDS, realMountDecision } from '@shared/domain/exam-draft';
+import ExamSetup from './real-exam-setup';
+import RealExamBoard from './real-exam-board';
+import RealExamFailureCard from './real-exam-failure-card';
+import {
+  realConflictNotice,
+  realFailure,
+  realScreen,
+  realStartFailureKind,
+  retryActionFor,
+  type RealFailure,
+} from './real-exam-failures';
+import { QUESTIONS_PER_EXAM, toExamQuestion, type RealRunStart } from './real-exam-types';
 
-type Status = 'setup' | 'playing' | 'review' | 'finished';
+/**
+ * BR-05.5 in one line: the exam simply ENDED. There is no result screen to
+ * come back to (reading a finished session's answers back is a slice of its
+ * own), so the student is told where the result went and offered a new exam.
+ *
+ * Best-effort by design: it is only shown when THIS mount's `processReal` was
+ * the one that settled the run. When `users.me` already settled it during the
+ * app's boot, the setup card is silent — which is still honest.
+ */
+const SETTLED_NOTICE =
+  'Sua prova real anterior foi encerrada e as respostas foram processadas. O resultado está no seu histórico.';
 
-type ExamQuestion = {
-  id: string;
-  questionText: string;
-  options: string[];
-  correctAnswer: string;
-  difficulty: string;
-  discipline: string;
-  examBoard: string;
-  explanation: string;
-  aiExplanation: AiExplanation | null;
-  legislationTitle: string | null;
-};
-
-const EXAM_DURATION = 5 * 60 * 60;
-const QUESTIONS_PER_EXAM = 80;
-
-function formatTime(seconds: number): string {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = seconds % 60;
-  return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-}
-
-interface ExamSetupProps {
-  loading: boolean;
-  onStart: () => void;
-}
-
-function ExamSetup({ loading, onStart }: ExamSetupProps): ReactElement {
-  return (
-    <div className="bg-white rounded-xl p-6 shadow">
-      <div className="flex items-center gap-3 mb-6">
-        <div className="bg-[#16161a] p-3 rounded-lg">
-          <Flag className="w-6 h-6 text-white" />
-        </div>
-        <div>
-          <h3 className="text-xl font-bold text-[#16161a]">Simulado Estilo Prova Real</h3>
-          <p className="text-sm text-gray-600">Simule as condições reais do exame</p>
-        </div>
-      </div>
-
-      <div className="bg-[#16161a]/5 rounded-lg p-4 mb-6 space-y-2">
-        <h4 className="font-semibold text-[#16161a]">Configuração do Simulado:</h4>
-        <ul className="space-y-1 text-sm text-gray-700">
-          <li>- {QUESTIONS_PER_EXAM} questões (como a prova real)</li>
-          <li>- 5 horas de duração</li>
-          <li>- Sem feedback durante o simulado</li>
-          <li>- Pode sinalizar questões para revisar depois</li>
-          <li>- Pode adiar questões para responder depois</li>
-          <li>- Navegue livremente entre questões</li>
-          <li>- É preciso responder todas as questões para encerrar manualmente</li>
-          <li>- Timer regressivo como na prova real</li>
-        </ul>
-      </div>
-
-      <div className="bg-red-50 border-2 border-red-200 rounded-lg p-4 mb-6">
-        <div className="flex items-start gap-3">
-          <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
-          <div>
-            <p className="font-semibold text-red-700">Atenção!</p>
-            <p className="text-sm text-red-600">
-              Este simulado simula condições reais de prova. Não haverá feedback
-              durante o exame. Certifique-se de ter tempo disponível.
-            </p>
-          </div>
-        </div>
-      </div>
-
-      <button
-        onClick={onStart}
-        disabled={loading}
-        className="w-full bg-gradient-to-r from-[#26262c] to-[#26262c] text-white py-3 rounded-lg font-semibold hover:shadow-lg transition disabled:opacity-50 flex items-center justify-center gap-2"
-      >
-        <Flag className="w-5 h-5" />
-        {loading ? 'Carregando...' : 'Iniciar Simulado Real'}
-      </button>
-    </div>
-  );
-}
+/** Nothing of the saved exam survived in the catalog. */
+const ALL_DROPPED_NOTICE =
+  'As questões da sua prova real anterior saíram do catálogo, então ela foi encerrada.';
 
 export default function RealExamSimulation({ onExit }: { onExit: () => void }): ReactElement {
-  const disciplineLov = useLov('DISCIPLINE');
-  const examBoardLov = useLov('EXAM_BOARD');
-  const [status, setStatus] = useState<Status>('setup');
-  const [questions, setQuestions] = useState<ExamQuestion[]>([]);
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [answers, setAnswers] = useState<Map<number, string>>(new Map());
-  const [flagged, setFlagged] = useState<Set<number>>(new Set());
-  const [postponed, setPostponed] = useState<Set<number>>(new Set());
-  const [timeLeft, setTimeLeft] = useState(EXAM_DURATION);
-  const [loading, setLoading] = useState(false);
-  const [showConfirmSubmit, setShowConfirmSubmit] = useState(false);
-  // Crossed-out alternatives (BR-02) — session-only, never recorded. In the real
-  // exam they live for the WHOLE run: the student navigates back and forth and
-  // may change an answer until the exam ends, so a cross-out is only dropped
-  // when the exam leaves 'playing' (startExam / onReset), never per question.
-  const [eliminations, setEliminations] = useState<EliminationState>(NO_ELIMINATIONS);
-  // "Encerrar e processar" confirmation (BR-05.5) — the exam stays mounted behind it.
-  const [exitOpen, setExitOpen] = useState(false);
-
   const utils = trpc.useUtils();
-  const recordMutation = trpc.sessions.record.useMutation({
-    onSuccess: () => {
-      void utils.stats.invalidate();
-      void utils.sessions.invalidate();
-    },
-  });
+  const startRealMutation = trpc.examDrafts.startReal.useMutation();
+  const processRealMutation = trpc.examDrafts.processReal.useMutation();
 
-  const notesAndBookmarks = useNotesAndBookmarks();
+  const [start, setStart] = useState<RealRunStart | null>(null);
+  const [runKey, setRunKey] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [failure, setFailure] = useState<RealFailure | null>(null);
 
-  const handleSubmit = useCallback(() => {
-    setStatus('review');
+  const backToSetup = useCallback((why: string | null): void => {
+    setStart(null);
+    setNotice(why);
   }, []);
 
-  useEffect(() => {
-    if (status !== 'playing') return;
-    const interval = setInterval(() => {
-      setTimeLeft((prev) => {
-        if (prev <= 1) {
-          clearInterval(interval);
-          handleSubmit();
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-    return () => { clearInterval(interval); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status]);
+  // A CONFLICT ended this tab's exam. The copy comes from the conflict's KIND:
+  // a `live` one is a prova real still RUNNING somewhere else, and the old
+  // single line announced it as "encerrada e processada" — sending the student
+  // to a histórico with nothing in it, for an exam still on the clock.
+  const onSettledElsewhere = useCallback(
+    (kind: RunConflictKind): void => {
+      backToSetup(realConflictNotice(kind));
+    },
+    [backToSetup],
+  );
 
-  const startExam = async () => {
+  /** Rehydrates the tab that OWNS the exam (a reload), or falls back to setup. */
+  const rehydrate = async (
+    draft: NonNullable<ReturnType<typeof persistedDraftOf>>,
+  ): Promise<void> => {
+    const rows = await utils.questions.byIds.fetch({ ids: draft.questionIds });
+    const state = resumeRealFrom(draft, rows.map(toExamQuestion));
+    if (state.discard || state.deadlineAt === null) {
+      // Nothing left to run: `user_answers` has an FK to `oab_questions`, so a
+      // queue with no survivors can neither be resumed nor recorded. The next
+      // `startReal` clears the row with `force`.
+      backToSetup(state.discard ? ALL_DROPPED_NOTICE : null);
+      return;
+    }
+    setNotice(null);
+    setStart({
+      questions: state.questions,
+      cursor: state.cursor,
+      answers: state.answers,
+      deadlineAt: state.deadlineAt,
+      draft: { id: draft.id, token: draft.lastSavedAt },
+    });
+    setRunKey((key) => key + 1);
+  };
+
+  const decideOnMount = async (): Promise<void> => {
     setLoading(true);
+    setFailure(null);
     try {
-      const rows = await utils.questions.list.fetch({ limit: QUESTIONS_PER_EXAM, phase: '1st' });
-      const mapped: ExamQuestion[] = rows.map((r) => ({
-        id: r.id,
-        questionText: r.questionText,
-        options: shuffle(r.options),
-        correctAnswer: r.correctAnswer,
-        difficulty: r.difficulty,
-        discipline: r.discipline,
-        examBoard: r.examBoard,
-        explanation: r.explanation,
-        aiExplanation: r.aiExplanation ?? null,
-        legislationTitle: r.legislationTitle,
-      }));
-      setQuestions(mapped);
-      setAnswers(new Map());
-      setFlagged(new Set());
-      setPostponed(new Set());
-      setEliminations(NO_ELIMINATIONS);
-      setCurrentIndex(0);
-      setTimeLeft(EXAM_DURATION);
-      setStatus('playing');
+      // FRESH_READ: this read decides whether an exam is still running, and the
+      // client's 5-minute default would answer it from a cached copy.
+      const draft = persistedDraftOf(
+        await utils.examDrafts.get.fetch({ mode: 'real' }, FRESH_READ),
+      );
+      const decision = realMountDecision({ draft, now: new Date().toISOString() });
+      if (decision === 'start') return;
+      if (decision === 'resume' && draft !== null) {
+        await rehydrate(draft);
+        return;
+      }
+      const settled = await processRealMutation.mutateAsync();
+      await utils.examDrafts.invalidate();
+      void utils.stats.invalidate();
+      void utils.sessions.invalidate();
+      // `settled: false` means someone else got there first (`users.me` at
+      // boot, another tab): the exam still ended, so no second announcement.
+      setNotice(settled.settled ? SETTLED_NOTICE : null);
+    } catch {
+      // The decision could NOT be taken. Never the setup card: that card reads
+      // as "no pending exam" and its button force-settles the exam we just
+      // failed to look for.
+      setNotice(null);
+      setFailure(realFailure('mount'));
     } finally {
       setLoading(false);
     }
   };
 
-  // Every draft, answered or not — the review screen lists all 80 questions.
-  const drafts: AnswerDraft[] = questions.map((q, idx) => ({
-    questionId: q.id,
-    userAnswer: answers.get(idx) ?? '',
-    correct: answers.get(idx) === q.correctAnswer,
-    timeSpent: 0,
-  }));
-
-  // The single recording path of the exam: the normal "Encerrar", the 5h timer
-  // and "Sair da prova" all just move the status to 'review'. Only ANSWERED
-  // questions are recorded — a blank is never an error (BR-05.6 / BR-03).
+  // No dependency array by design (same pattern as `useRegisterRun`): the ref
+  // is what makes it run exactly once, without a hand-maintained dep list.
+  const decidedRef = useRef(false);
   useEffect(() => {
-    if (status !== 'review') return;
-    const log = processableAnswers(
-      questions.map((q, idx) => ({
-        questionId: q.id,
-        userAnswer: answers.get(idx) ?? '',
-        correct: answers.get(idx) === q.correctAnswer,
-        timeSpent: 0,
-      })),
-    );
-    if (log.length > 0) {
-      recordMutation.mutate({ discipline: 'Prova Real', difficulty: 'hard', answers: log });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status]);
+    if (decidedRef.current) return;
+    decidedRef.current = true;
+    void decideOnMount();
+  });
 
-  // Closing the tab or reloading during the exam warns first (BR-05.1).
-  useLeaveWarning(status === 'playing' && shouldPromptOnExit(answers.size));
-  // Leaving through the sidebar asks the same question, with the prova real
-  // warning (BR-05.5), and processes through the same 'review' path (slice S1b).
-  useRegisterRun(
-    { mode: 'real', running: status === 'playing', answeredCount: answers.size, totalQuestions: questions.length },
-    () => { handleQuitAndProcess(); },
-  );
-
-  // Leaving the exam asks first and warns it cannot be saved (BR-05.5); with
-  // nothing answered there is nothing to process, so it exits silently.
-  const requestExit = () => {
-    if (!shouldPromptOnExit(answers.size)) {
-      onExit();
-      return;
-    }
-    setExitOpen(true);
-  };
-
-  // "Encerrar e processar respostas": only moves to 'review'. The effect above
-  // is what records, so the exam still makes exactly ONE sessions.record call.
-  const handleQuitAndProcess = () => {
-    setExitOpen(false);
-    setStatus('review');
-  };
-
-  const selectAnswer = (option: string) => {
-    const newAnswers = new Map(answers);
-    newAnswers.set(currentIndex, option);
-    setAnswers(newAnswers);
-    // Answering clears the postpone mark — the set only holds unanswered indexes.
-    setPostponed((prev) => {
-      if (!prev.has(currentIndex)) return prev;
-      const next = new Set(prev);
-      next.delete(currentIndex);
-      return next;
-    });
-  };
-
-  // Cross out / restore an alternative (BR-02). Crossing out the alternative
-  // currently chosen drops that answer (BR-02.2) — the question goes back to
-  // unanswered, so it counts out of `x/80` again. It is NOT re-marked as
-  // "Adiada" and its flag is untouched.
-  const handleToggleEliminate = (option: string) => {
-    const question = questions.at(currentIndex);
-    if (question === undefined) return;
-    setEliminations((prev) => toggleElimination(prev, question.id, option));
-    if (eliminationDropsAnswer(answers.get(currentIndex) ?? '', option)) {
-      setAnswers((prev) => {
-        const next = new Map(prev);
-        next.delete(currentIndex);
-        return next;
+  const startExam = async (): Promise<void> => {
+    setLoading(true);
+    setFailure(null);
+    // Load-bearing for HONESTY, not for control flow: once `startReal` has
+    // resolved, any pending prova real is already settled, so a failure after
+    // this point may not tell the student "nothing was changed".
+    let startRealDone = false;
+    try {
+      // BEFORE the draw, always — including through "Fazer Outro Simulado Real".
+      await startRealMutation.mutateAsync();
+      startRealDone = true;
+      await utils.examDrafts.invalidate();
+      void utils.stats.invalidate();
+      void utils.sessions.invalidate();
+      const rows = await utils.questions.list.fetch({ limit: QUESTIONS_PER_EXAM, phase: '1st' });
+      setNotice(null);
+      setStart({
+        questions: rows.map(toExamQuestion),
+        cursor: 0,
+        answers: [],
+        // Minted here and persisted by the board's first save. From then on the
+        // clock is the SERVER's copy of this instant (D8).
+        deadlineAt: new Date(Date.now() + REAL_EXAM_DURATION_SECONDS * 1000).toISOString(),
+        draft: null,
       });
+      setRunKey((key) => key + 1);
+    } catch {
+      setNotice(null);
+      setFailure(realFailure(realStartFailureKind(startRealDone)));
+    } finally {
+      setLoading(false);
     }
   };
 
-  const postponeCurrent = () => {
-    const next = findNextUnanswered(questions.length, currentIndex, answers);
-    if (next === null) return;
-    setPostponed((prev) => new Set(prev).add(currentIndex));
-    setCurrentIndex(next);
-  };
+  const screen = realScreen({ started: start !== null, failure });
 
-  const goToFirstUnanswered = () => {
-    setShowConfirmSubmit(false);
-    const first = questions.findIndex((_, idx) => !answers.has(idx));
-    if (first >= 0) setCurrentIndex(first);
-  };
-
-  const toggleFlag = () => {
-    const newFlagged = new Set(flagged);
-    if (newFlagged.has(currentIndex)) {
-      newFlagged.delete(currentIndex);
-    } else {
-      newFlagged.add(currentIndex);
-    }
-    setFlagged(newFlagged);
-  };
-
-  if (status === 'setup') {
-    return <ExamSetup loading={loading} onStart={() => { void startExam(); }} />;
-  }
-
-  if (status === 'playing') {
+  if (screen === 'exam' && start !== null) {
     return (
-      <>
-        <ExamPlaying
-          questions={questions}
-          currentIndex={currentIndex}
-          answers={answers}
-          flagged={flagged}
-          postponed={postponed}
-          timeLeft={timeLeft}
-          examDuration={EXAM_DURATION}
-          showConfirmSubmit={showConfirmSubmit}
-          notesAndBookmarks={notesAndBookmarks}
-          disciplineLov={disciplineLov}
-          examBoardLov={examBoardLov}
-          canPostpone={!answers.has(currentIndex) && findNextUnanswered(questions.length, currentIndex, answers) !== null}
-          eliminatedOptions={eliminatedFor(eliminations, questions.at(currentIndex)?.id ?? '')}
-          formatTime={formatTime}
-          onSelectAnswer={selectAnswer}
-          onToggleEliminate={handleToggleEliminate}
-          onSetIndex={setCurrentIndex}
-          onToggleFlag={toggleFlag}
-          onPostpone={postponeCurrent}
-          onGoToUnanswered={goToFirstUnanswered}
-          onShowConfirmSubmit={() => { setShowConfirmSubmit(true); }}
-          onHideConfirmSubmit={() => { setShowConfirmSubmit(false); }}
-          onSubmit={handleSubmit}
-          onRequestExit={requestExit}
-        />
-        <QuitTestDialog
-          open={exitOpen}
-          prompt={exitPrompt('real', answers.size, questions.length)}
-          onContinue={() => { setExitOpen(false); }}
-          onQuit={handleQuitAndProcess}
-        />
-      </>
-    );
-  }
-
-  if (status === 'review') {
-    return (
-      <ExamReview
-        questions={questions}
-        answers={answers}
-        drafts={drafts}
-        timeUsedLabel={formatTime(EXAM_DURATION - timeLeft)}
-        disciplineLov={disciplineLov}
-        onReset={() => {
-          setStatus('setup');
-          setQuestions([]);
-          setAnswers(new Map());
-          setFlagged(new Set());
-          setPostponed(new Set());
-          setEliminations(NO_ELIMINATIONS);
+      <RealExamBoard
+        key={runKey}
+        start={start}
+        onExitToModes={onExit}
+        onRestart={() => {
+          backToSetup(null);
         }}
+        onSettledElsewhere={onSettledElsewhere}
       />
     );
   }
 
-  return <div />;
+  if (screen === 'failure' && failure !== null) {
+    return (
+      <RealExamFailureCard
+        failure={failure}
+        busy={loading}
+        onRetry={() => {
+          if (retryActionFor(failure.kind) === 'decide') void decideOnMount();
+          else void startExam();
+        }}
+        onExit={onExit}
+      />
+    );
+  }
+
+  return (
+    <ExamSetup
+      loading={loading}
+      notice={notice}
+      onStart={() => {
+        void startExam();
+      }}
+    />
+  );
 }

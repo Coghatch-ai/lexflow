@@ -15,12 +15,12 @@ both optional — a screen that passes neither gets the pre-#66 card).
 Callers (the four MC test screens). Since #70 (epic #65 D2) **all four** have cross-out (BR-02)
 AND "Responder depois" (BR-03):
 
-| Screen              | File                                        | Cross-out dies when                                      | "Responder depois" mechanics                                |
-| ------------------- | ------------------------------------------- | -------------------------------------------------------- | ----------------------------------------------------------- |
-| Simulado Padrão     | `app/src/pages/testing-standard-board.tsx`  | answer recorded; frozen at Conferir (`locked={checked}`) | `moveToEnd`, cursor stays                                   |
-| Simulado Real       | `app/src/components/RealExamSimulation.tsx` | exam leaves `playing` / reset                            | `findNextUnanswered` (cursor jumps; "Adiada" badge)         |
-| Repetição Espaçada  | `app/src/components/spaced-board.tsx`       | answer recorded                                          | `moveToEnd` on the ≤5 review queue; SM-2 untouched          |
-| Simulado Adaptativo | `app/src/components/adaptive-board.tsx`     | answer recorded                                          | `deferred` FIFO drained at the tail (`shouldServeDeferred`) |
+| Screen              | File                                       | Cross-out dies when                                      | "Responder depois" mechanics                                |
+| ------------------- | ------------------------------------------ | -------------------------------------------------------- | ----------------------------------------------------------- |
+| Simulado Padrão     | `app/src/pages/testing-standard-board.tsx` | answer recorded; frozen at Conferir (`locked={checked}`) | `moveToEnd`, cursor stays                                   |
+| Simulado Real       | `app/src/components/real-exam-board.tsx`   | exam leaves `playing` / reset                            | `findNextUnanswered` (cursor jumps; "Adiada" badge)         |
+| Repetição Espaçada  | `app/src/components/spaced-board.tsx`      | answer recorded                                          | `moveToEnd` on the ≤5 review queue; SM-2 untouched          |
+| Simulado Adaptativo | `app/src/components/adaptive-board.tsx`    | answer recorded                                          | `deferred` FIFO drained at the tail (`shouldServeDeferred`) |
 
 The three screens outside the Padrão have **no "checked" state** (feedback is a separate screen, and
 the real exam never reveals during the run), so they never pass `locked` — BR-02.5 ("after checking,
@@ -39,6 +39,13 @@ A S2c (#78) fez a MESMA divisão nas outras duas telas de estudo: `SpacedRepetit
 reidratação), e a corrida mudou para `spaced-board.tsx` e `adaptive-board.tsx` (+
 `adaptive-board-view.tsx`, só render), com `spaced-types.ts` / `adaptive-types.ts` guardando o
 `RunStart` de cada uma. Ambas montam o board com `key` por corrida, como o Padrão.
+
+A S2d (#79) fechou a divisão na prova real: `RealExamSimulation.tsx` virou só a ENTRADA (decisão de
+montagem + sorteio + liquidação), `real-exam-board.tsx` é a corrida (com persistência, batimento e
+auto-submit), `real-exam-setup.tsx` é o card de configuração (+ o slot de aviso) e
+`real-exam-types.ts` guarda `ExamQuestion`/`RealRunStart`/`toExamQuestion`. As respostas da real
+deixaram de ser `Map<number, string>` e passaram a ser `AnswerDraft[]` por `questionId` — índice só
+existe DERIVADO (`answeredIndexes`), para o `ExamQuestionNav` e o `findNextUnanswered`.
 
 Supporting pure modules (unit-tested with plain vitest, no RTL):
 
@@ -125,19 +132,21 @@ answered") is **not** satisfied product-wide until M1 lands.
      `questions.reviewQueue` (a fila muda com o SM-2 e com o dia). O adaptativo repõe a escada
      (`AdaptiveState` verbatim) e a FIFO de adiadas (`deferredIds`), e re-sorteia só o pool
      candidato.
-   - **Prova real (#79) — ainda só em memória.** Reusará o mesmo hook; até lá o diálogo dela
-     segue com 2 botões (BR-05.5: a real nunca é oferecida de volta).
+   - **Prova real (S2d, #79) — grava, mas NUNCA retoma.** Mesmo hook, mesma cadência; o que ela
+     persiste é para ser AUTO-SUBMETIDA, não para ser oferecida de volta. O diálogo dela continua
+     com 2 botões e o board **não registra handler de `save`** (BR-05.5). Detalhe abaixo, em
+     "Como a prova real persiste".
 
    Não há `localStorage`/`sessionStorage` em lugar nenhum do repo: na prova real, "processar"
-   continua significando "gravar o que foi respondido AGORA via `sessions.record`", nunca
-   "retomar depois".
+   continua significando "gravar o que foi respondido AGORA via `sessions.record`" (ou
+   `settleRealRun`, que é o mesmo caminho), nunca "retomar depois".
    Nothing is asked when nothing was answered (`shouldPromptOnExit`): there is nothing to process
    and `sessions.record` requires `answers.min(1)`.
 
    Covered exits:
    - **In-screen exit, all 4 screens** (#68): each of `testing-standard-board.tsx`,
-     `RealExamSimulation.tsx`, `spaced-board.tsx` e `adaptive-board.tsx` (as duas últimas desde a
-     S2c, #78) renders its own `QuitTestDialog` and owns the `quit` handler that calls
+     `real-exam-board.tsx`, `spaced-board.tsx` e `adaptive-board.tsx` (as três últimas desde a
+     S2c/S2d, #78/#79) renders its own `QuitTestDialog` and owns the `quit` handler that calls
      `sessions.record` over the answers so far.
    - **Global navigation guard** (#69): `RunGuardProvider` sits inside `<Router>` and above
      `<Layout>`. Each running screen registers itself via `useRegisterRun`; `Layout.tsx` routes the
@@ -154,7 +163,10 @@ answered") is **not** satisfied product-wide until M1 lands.
      intercepted the way a click can; wouter 3.10 also has no `useBlocker` and a new dependency is
      out (CLAUDE.md). Persistence, not a guard, is the real net for this — e desde a S2b ela
      existe **no Simulado Padrão**: o Back perde a tela, não a corrida (o último autosave está no
-     servidor e o card oferece "Continuar"). Nos outros 3 modos o Back ainda descarta em silêncio.
+     servidor e o card oferece "Continuar"). Desde a revisão adversarial Codex do #79 o **unmount
+     da tela também dispara a escrita de saída** (`wireExitFlush`, `shared/lib/exit-listeners.ts`):
+     o Back continua sem ser bloqueável, mas a escrita devida sai pelo mesmo `keepalive` que o
+     fechamento de aba já tinha — mesmo best-effort, uma porta a mais, nunca uma garantia maior.
    - **Mobile `QuestionRunner`** (`apps/mobile/`) has no exit dialog and no guard at all — the
      whole of BR-05 above is desktop-only, exactly like the BR-02 gap M1.
    - Known rough edge of the guarded **sign-out**: the run is processed correctly, but the student
@@ -194,7 +206,10 @@ answered") is **not** satisfied product-wide until M1 lands.
   pendente por mais fresca que esteja (BR-05.5). **A S2b já cumpre isso no Padrão**: os dois
   caminhos de gravação (`handleNext` na última questão e `handleQuitAndProcess`) dão `flush()`
   ANTES e mandam `claimFor(draftId, token)`; sem o par, o rascunho sobreviveria à própria sessão
-  e voltaria como "Continuar" de uma corrida já processada.
+  e voltaria como "Continuar" de uma corrida já processada. **A S2d cumpre no lado mais
+  perigoso**: a prova real tem DUAS portas de auto-submit (o cronômetro na aba aberta e a
+  liquidação preguiçosa), então nenhum caminho dela grava sem `draftId` — é exatamente isso que
+  transforma o `DELETE` mutex em "1 corrida = 1 sessão" em vez de duas.
 - **A LINHA REIVINDICADA decide o arquivamento, nunca o payload do cliente.**
   `filingForClaimedMode` (`shared/domain/exam-draft.ts`): se o rascunho apagado era `mode: 'real'`,
   a sessão vira sempre `"Prova Real"`/`hard`, venha por `sessions.record` (a submissão do próprio
@@ -203,9 +218,9 @@ answered") is **not** satisfied product-wide until M1 lands.
   liquidação existe só para a prova real, e os modos de estudo terminam por `discard` ou por uma
   gravação normal.
 - **Assimetria de dois campos string da MESMA linha — não uniformizar:**
-  - `deadline_at` é **COMPARADO** (`isRealRunAbandoned` faz `Date.parse`), nunca ecoado como
-    token. É normalizável e o validador aceita de propósito os dois formatos (o ISO do browser e
-    o texto cru do PG). Só o instante importa.
+  - `deadline_at` é **COMPARADO** (`isRealRunAbandoned` lê pelo `timestampMs` estrito, **nunca**
+    por `Date.parse`), nunca ecoado como token. É normalizável e o validador aceita de propósito
+    os dois formatos (o ISO do browser e o texto cru do PG). Só o instante importa.
   - `last_saved_at` / `token` é **casado com `=` dentro do SQL** e viaja **VERBATIM**
     (`"2026-08-21 14:30:04.210932+00"`: µs, sem `T`, sem `Z` — drizzle usa parser identidade em
     `mode: "string"`). Passá-lo por `new Date(...)`, `toISOString()`, `Date.parse` ou por
@@ -235,8 +250,10 @@ answered") is **not** satisfied product-wide until M1 lands.
 - **`RunSaveFailureKind` ganhou `'busy'`** ("Ainda estamos salvando este teste.") — a saída pedida
   durante um flush respondia `false` em silêncio e o aluno clicava no vazio. Nenhum código de erro
   mapeia para ela: é recusa local, não resposta do servidor.
-- **O que NÃO entrou:** `examDrafts.touch` (batimento da prova real) segue sem chamador — é linha
-  da S2d/#79, junto com a obrigação de escrever `refs.token.current = res.lastSavedAt`.
+- **~~O que NÃO entrou~~ — pago na S2d (#79):** `examDrafts.touch` ganhou seu primeiro chamador de
+  app (o batimento de 60 s), e com ele a dívida registrada aqui: `keepAliveVia`
+  (`use-run-persistence.ts`) escreve `refs.token.current = beaten.lastSavedAt`. Sem isso o próximo
+  `save`/claim casa 0 linhas e o aluno leva um CONFLICT causado pelo próprio batimento.
 
 ### Como o Padrão persiste (S2b, #77 — o desenho que #78/#79 reusam)
 
@@ -253,9 +270,19 @@ answered") is **not** satisfied product-wide until M1 lands.
 - O **flush mora no handler da tela** (`handleSaveAndExit` / `handleQuitAndProcess`), nunca no
   `QuitTestDialog` nem no `RunGuardProvider` — os dois são apresentação e não podem esperar
   promessa. Enquanto ele roda, `busy` desabilita os 3 botões.
-- `pagehide`/`visibilitychange` é **best-effort assumido** (`httpBatchLink` monta o header com o
-  `getToken()` assíncrono do Clerk e não usa `keepalive`; `sendBeacon` não manda `Authorization`).
-  A garantia real é o debounce de 1500 ms já ter pousado.
+- `pagehide`/`visibilitychange` **e o unmount da tela** mandam a escrita devida por `keepalive`
+  (revisão adversarial Codex do #79; as três portas moram em `shared/lib/exit-listeners.ts` —
+  o unmount é a saída in-SPA, que não dispara evento nenhum do DOM):
+  `scheduler.flushOnExit()` despacha `exitSend` — um `fetch` com `keepalive: true`
+  (`exitTrpcClient` em `shared/lib/trpc.ts`), o único transporte que leva `Authorization` E é
+  concluído pelo navegador depois que o documento morre (`sendBeacon` não manda header nenhum). O
+  `flush()` de antes **aguardava rede**: request normal é cancelado junto com o documento e, com
+  um save em voo, o `await` nunca retomava — a escrita devida não saía. O que **continua sem
+  garantia**, e está escrito onde é assumido (`use-run-persistence.ts`): save já em voo (a escrita
+  de saída entra na fila atrás dele para não brigar pelo token — janela de perda = respostas dos
+  últimos ~1,5 s), `getToken()` precisando renovar na hora, kill do processo, e payload acima do
+  teto de 64 KiB do `keepalive` (`shared/lib/exit-save.ts` cai para o cliente normal). Em todos
+  eles a corrida continua no servidor no último save que pousou, e o `settleRealRun` a liquida.
 - **Não salvam nada** (por contrato, BR-02.3 / D8): adiar, descartar alternativa, `Conferir`,
   bookmark e nota. Logo `checked` conta como respondida no diálogo mas **não** é persistida — o
   "(n/N)" do card pode mostrar 1 a menos. É desenho, não bug.
@@ -289,6 +316,120 @@ answered") is **not** satisfied product-wide until M1 lands.
   `{children}` (em z-index igual, quem vem depois no DOM ganha); e o guard **fecha** o próprio
   diálogo quando o `save()` da tela devolve `false` (`guardSaveOutcome`), para a mensagem de erro
   não ficar atrás do backdrop dele. Sair pela barra lateral e sair pela tela mostram a mesma falha.
+
+### Como a prova real persiste (S2d, #79) — para AUTO-SUBMETER, nunca para retomar
+
+1. **O que a linha guarda.** Colunas universais (`question_ids` na ordem sorteada congelada,
+   `cursor`, `answers` como `AnswerDraft[]` por `questionId` com `timeSpent: 0`) + `deadline_at` +
+   `last_saved_at`. `elapsed_seconds` grava **0** e `mode_state` fica **vazio** (`{ mode: 'real' }`):
+   a única coisa por-modo da real é o prazo, e o prazo tem COLUNA própria — quem o lê é
+   `isRealRunAbandoned`, do lado do servidor, não jsonb. Persistir o decorrido além do prazo só
+   criaria dois números para discordar. `flagged`/`postponed`/cross-out continuam rascunho
+   (BR-02.3 / D8) — e na real são duplamente irrelevantes: a liquidação só lê `answers`.
+   O payload é `realDraftPayload` (`run-persistence.ts`), e ele **deduplica por `questionId`**:
+   ao contrário do Padrão, a real grava a resposta na hora e o aluno pode trocá-la por 5 h.
+2. **Cronômetro derivado, nunca contado.** `realSecondsLeft({ deadlineAt, now })`
+   (`shared/domain/exam-draft.ts`, puro) — recarregar a aba **não** devolve tempo e o relógio não
+   pausa (D8). O `now` anda de 1 em 1 s (`useTickingNow`); o prazo é sempre o do servidor.
+   `realSecondsLeft` é de propósito **mais estrito que `Date.parse`**: `"2026"` e um
+   `Date.toString()` respondem `null` (são justamente os dois valores que o PG recusa, 22007/22023),
+   porque um cronômetro pintado a partir de um chute é pior que nenhum.
+3. **Decisão de montagem — `realMountDecision`, e nunca uma oferta.** `null` ⇒ setup; viva
+   (não abandonada **e** com tempo) ⇒ **reidrata direto**, sem diálogo (é a aba DONA voltando de um
+   reload — critério 5; por isso `examDrafts.get({ mode: 'real' })` continua aceito enquanto `list`
+   nunca devolve `real` e `discard` recusa `real`); abandonada ⇒ `processReal()` + aviso pt-BR
+   **só se aquele `processReal` devolveu `settled: true`** (se `users.me` já liquidou no boot, é
+   setup mudo, e está certo: a prova simplesmente acabou); prazo nulo/ilegível ⇒ setup (o
+   `startReal` do próximo início liquida a órfã com `force`).
+4. **Batimento de 60 s = `examDrafts.touch`** (uma coluna, sem reescrever ~25 KB de jsonb). Ele passa
+   pelo `save-scheduler`, não por um `setInterval` solto, porque `touch` e `save` disputam o MESMO
+   token: (a) `beat()` é **pulado** quando há save agendado ou em voo — um `save` já refresca
+   `last_saved_at`, ou seja, já É um batimento; (b) os envios são **serializados** (`dispatch`
+   encadeia no `inFlight` corrente), então um `schedule()` que caia durante um beat envia depois
+   dele e lê o token já atualizado. Sem os dois, o sintoma é um CONFLICT falso ~1×/hora de prova —
+   e ele **para o autosave** (`raiseIfConflict` fecha o scheduler): dali em diante a prova só existe
+   na aba. Limiar do servidor: `REAL_RUN_STALE_SECONDS = 180` (3 batimentos perdidos).
+   **`dirty` NÃO é motivo para pular** (2ª auditoria do #79): com o re-arme na falha, `dirty` sem
+   nada agendado/em voo significa "o último envio FALHOU", então o beat **reenvia** em vez de calar.
+   E toda escrita tem **teto** (revisão adversarial Codex): `fetch` não expira sozinho, e uma
+   escrita pendurada segurava o `inFlight` para sempre — o beat pulava todo minuto,
+   `last_saved_at` passava dos 180 s e o próximo contato autenticado liquidava a prova **debaixo**
+   do aluno. Silêncio vira falha, o slot libera, o próximo beat reenvia.
+   **Onde o teto mora importa** (3ª revisão adversarial): `SAVE_TIMEOUT_MS = 15 s` mora DENTRO do
+   `saveRun` (`run-claimless.ts`), com `PROBE_TIMEOUT_MS = 5 s` para a sondagem, e
+   `WRITE_TIMEOUT_MS = 30 s` no `save-scheduler` é só **rede de segurança** para quem não tem
+   recuperação própria (`keepAlive`, `exitSend`) — 15+5 < 30 por construção, com teste que fixa a
+   ordem. Um teto aplicado de FORA só sabia relatar a falha: a requisição abandonada podia **ter
+   commitado**, o `token` continuava `null`, e o retry saía como outro `token: null` que o router
+   recusa com `OVERWRITE_CONFLICT` — conflito do aluno contra a própria escrita, e TERMINAL
+   (`raiseIfConflict` fecha o scheduler). Dentro do `saveRun` o estouro é só mais uma resposta
+   perdida: a sondagem compara a linha com **o mesmo payload** que estourou — único instante em
+   que o eco prova a posse, porque um beat depois o payload já mudou — e adota. Por isso também o
+   `OVERWRITE_CONFLICT` de um save SEM token deixou de ser terminal por suposição e passou a ser
+   terminal por **prova**: com `token: null` o CONFLICT só diz "existe linha em (user, mode)",
+   nunca de quem; sem eco, o CONFLICT original segue de pé com o diálogo do BR-05.8.
+   **A posse atravessa tentativas por NONCE** (5ª revisão adversarial, Codex): comparar só com o
+   payload da tentativa ATUAL fecha a janela apenas enquanto o payload não anda. Cadeia que
+   sobrava: o 1º save estoura o teto → a sondagem não lê linha nenhuma (o insert ainda não
+   commitou) → a escrita **commita tarde** → o aluno responde mais uma questão → o retry encontra a
+   própria linha, o conteúdo do RETRY não bate, a linha é julgada estrangeira e o
+   `OVERWRITE_CONFLICT` fecha a prova. A 4ª revisão respondeu com uma MEMÓRIA de ecos
+   (`MAX_PENDING_ECHOES = 4`), e o teto dela era ele próprio um travamento: com as 4 primeiras
+   tentativas mortas e a 5ª sendo a que commitou tarde, o eco da 5ª era **descartado** e o aluno
+   ficava trancado fora da prova pela própria escrita. Agora a posse é um **nonce por corrida**
+   (`createRunNonce` / `stampRunNonce` / `runNonceAdoption`, `run-claimless.ts`): uma string opaca
+   sorteada uma vez pela aba, carimbada em TODO save dela (inclusive o `exitSend` de `keepalive`) e
+   carregada **dentro do jsonb `mode_state`** — sem coluna e sem migração (o zod do router aceita
+   `runNonce`, senão seria removido na entrada). Linha com o nosso nonce foi escrita por nós, ponto:
+   sem fila, sem teto, e não decai com o número de tentativas. Continua fail-closed — linha sem
+   nonce (escrita antes disto existir) ou com nonce de outra corrida não é adotada, e o
+   `OVERWRITE_CONFLICT` original segue de pé com o diálogo do BR-05.8. O nonce **gira** em
+   `forgetIdentity` (`close`, `discardSaved`), senão a próxima corrida adotaria a linha da
+   anterior; um `adopt` (resume) não gira, é a mesma corrida. Adotar por nonce prova de QUEM é a
+   linha, não que ela está fresca: a escrita atual continua **devendo** (`SavedRun.owed`), o
+   `sendVia` re-arma, e o `flush` drena `dirty` em laço — escrever uma vez só devolvia `ok: true`
+   com a última resposta ainda só na aba, que é exatamente o contrato de que a porta do prazo
+   depende antes do `processReal`.
+5. **Duas portas de auto-submit, uma sessão.** Aba aberta no zero: `flush()` → `processReal()` →
+   tela de revisão montada da MEMÓRIA (critério 4). Aba fechada: nada na hora (não há scheduler) —
+   liquida no próximo contato autenticado. Os dois podem disparar; o `DELETE` do rascunho é a
+   primeira instrução da transação e é o mutex, então o segundo apaga 0 linhas e não escreve nada.
+   `settled: false` é "outro liquidou", não erro — o servidor RESPONDEU, então há resultado.
+   O `processReal` do cliente é **acelerador** dos DADOS, não do que a tela pode afirmar (revisão
+   adversarial Codex do #79): se ele estourar o teto (`DEADLINE_SUBMIT_TIMEOUT_MS`) ou falhar, o
+   desfecho é **desconhecido**, e desconhecido não vira tela de revisão — ela diz "sua prova foi
+   processada" e o único botão dela começa OUTRA prova real. Nesse caso o board mostra
+   `unconfirmed` (`deadlineCompletionFor` + `deadlineUnconfirmedNotice`): as respostas JÁ chegaram
+   ao servidor (o `flush` pousou — é pré-requisito), o encerramento é que não foi confirmado, o
+   botão reexecuta a submissão e sair é seguro porque o servidor liquida no prazo. Antes disso:
+   `flush` que não pousa ⇒ `submit-failed` (aí sim "não chegaram ao servidor"), e enquanto os dois
+   estão no ar ⇒ `submitting`, cartão sem botão e por isso **limitado** pelos dois `settleWithin`.
+   **`submit-failed` não tem porta de saída** (5ª revisão adversarial, Codex): copy e saída são
+   decididas juntas por `deadlineCardFor` (`real-exam-failures.ts`) — `submit-failed` ⇒
+   `exit: 'none'`, `unconfirmed` ⇒ `exit: 'modes'`. Aquela tela existe porque o código DETECTOU que
+   as respostas não chegaram ao servidor e elas só existem na memória desta aba; um "Voltar aos
+   modos" ali desmontava o board e jogava fora a única cópia, em silêncio, logo abaixo da copy que
+   diz que sair perde tudo. A saída é o retry (que reexecuta a submissão e leva a `review` ou a
+   `unconfirmed`, ambos com porta). O `unconfirmed` mantém a dele porque ali o `flush` POUSOU.
+6. **CONFLICT aqui NUNCA abre o diálogo de conflito.** "Recarregar do servidor" e "Descartar esta
+   cópia" são escolhas sobre uma corrida que se retoma; esta não se retoma, e "descartar" é o que a
+   BR-05.5 proíbe. CONFLICT (do `save`, do `touch` ou do `record`) = a prova já terminou em outro
+   lugar ⇒ **fim terminal**: aviso pt-BR + volta ao setup. Por isso o board monta
+   `RunFailureDialog` direto, e não o `RunOverlays` inteiro.
+7. **"Salvar e sair" não existe, e não pode voltar.** Trava tripla: `exitPrompt('real')` devolve
+   `saveLabel: null` + `optionCount: 2`; o board **não registra handler de `save`** em
+   `useRegisterRun`; e a regra virou função pura `offersSaveAndExit` (`run-guard.ts`), usada TANTO
+   pelo `QuitTestDialog` quanto pelo `RunGuardProvider` — travada em `run-guard.test.ts`.
+8. **Mudança de contrato registrada:** `examDrafts.save` agora normaliza `deadlineAt`
+   (`.transform((v) => new Date(v).toISOString())` **depois** do `refine`). Isso troca 500 por
+   BAD_REQUEST nos valores que o `Date.parse` aceita e o PG recusa, ao custo de **truncar µs → ms**
+   no `deadline_at`. Irrelevante para 5 h, mas é contrato. **NUNCA no `token`/`lastSavedAt`**, que
+   viaja verbatim e é casado com `=`. `pnpm smoke` (p) segue verde porque o valor entra por `save`
+   (ISO, ms) e a ida-e-volta é idempotente em ms; se algum dia a fixture entrar por `db.insert` com
+   µs, a asserção certa passa a ser comparar INSTANTE (`Date.parse`), não texto.
+   Cobertura nova em `pnpm smoke`: **(t)** o batimento roda o token (o velho ⇒ CONFLICT, o novo ⇒
+   aceito) e **(u)** o `processReal` do cliente ⇒ 1 sessão "Prova Real"/hard, linha apagada, segunda
+   chamada `settled: false`.
 
 ## Functional definitions attached to these surfaces
 
