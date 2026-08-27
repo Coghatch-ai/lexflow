@@ -8,7 +8,7 @@
 // the 500-line ESLint cap; same module under test, same fixtures shape.
 
 import { describe, expect, it } from "vitest";
-import { moveToEnd } from "./exam-queue";
+import { moveToEnd } from "@shared/domain/exam-queue";
 import {
   adaptiveDraftPayload,
   realDraftPayload,

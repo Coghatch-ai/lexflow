@@ -49,12 +49,20 @@ existe DERIVADO (`answeredIndexes`), para o `ExamQuestionNav` e o `findNextUnans
 
 Supporting pure modules (unit-tested with plain vitest, no RTL):
 
-- `app/src/shared/lib/exam-queue.ts` — `moveToEnd` (standard + spaced postpone),
+- `shared/domain/exam-queue.ts` — `moveToEnd` (standard + spaced + **mobile** postpone),
   `findNextUnanswered` (real-exam postpone), `canPostponeGuard`, `canPostponeAdaptive`,
-  `shouldServeDeferred` (adaptive deferred FIFO). Never records a blank answer.
-- `app/src/shared/lib/eliminations.ts` — cross-out state (`toggleElimination`, `eliminatedFor`,
+  `shouldServeDeferred` (adaptive deferred FIFO), `carryTime`/`totalTimeFor` (#85: the seconds
+  already spent on a postponed question, banked so the next one is not billed for them). Never
+  records a blank answer.
+- `shared/domain/eliminations.ts` — cross-out state (`toggleElimination`, `eliminatedFor`,
   `clearForQuestion`), `eliminationDropsAnswer` (BR-02.2), swipe/latch rules. Session-only: nothing
   here reaches `sessions.record`, the stats or SM-2.
+
+Both moved out of `app/src/shared/lib/` in #85 (M1): the mobile bundle resolves only
+`@shared`/`@api`/`@drizzle` (`apps/mobile/vite.config.ts`) and `deploy-mobile.yml` does not even
+trigger on `app/**`, so a rule shared by desktop AND mobile cannot live under `app/`. Desktop
+imports are `@shared/domain/…`; nothing else about them changed.
+
 - `app/src/pages/testing-flow-guards.ts` — `primaryLabel`, `primaryDisabled`.
 - `app/src/shared/hooks/use-notes-bookmarks.ts` — notes (debounced upsert) + bookmark toggle.
 - `app/src/shared/lib/shuffle.ts`, `shared/domain/scoring.ts` (`accuracyPct`).
@@ -93,14 +101,29 @@ admin forms (`admin-question-form.tsx`). Discursive 2ª fase has its own non-MC 
 Single immersive runner: **`apps/mobile/src/components/QuestionRunner.tsx`** — used by
 `PracticePage.tsx` (Praticar), `DrillPage.tsx` (Drill) and `ReviewPage.tsx` (Revisão) via
 `RunnerQuestion`. Select → instant reveal (single step, no Conferir) → Próxima; records the whole
-session on finish. Has the bookmark button; **no postpone today** (must answer to advance).
+session on finish. Has the bookmark button. One row = `RunnerOption.tsx` (#85).
 State container: `apps/mobile/src/state/practice-context.ts`. Result: `ResultPage.tsx`.
 `FlashcardsPage.tsx` and `SavedPage.tsx` render options with their own local UI.
 
-**Mobile has NO cross-out (BR-02) yet — gap M1.** `QuestionRunner` renders no eliminate affordance
-and never imports `shared/lib/eliminations.ts`. The "**all four**" in the desktop section above is
-scoped to the desktop `QuestionCard` screens only, so BR-02.1 ("EVERY surface where a question is
-answered") is **not** satisfied product-wide until M1 lands.
+**Desde a M1 (#85) o runner mobile tem riscar (BR-02) e "Responder depois" (BR-03)** — a mesma
+lógica pura das telas desktop, importada de `@shared/domain/…`. BR-02.1 ("EVERY surface") está
+satisfeita produto-afora.
+
+| Surface                 | Cross-out dies when                               | "Responder depois" mechanics                            |
+| ----------------------- | ------------------------------------------------- | ------------------------------------------------------- |
+| Mobile `QuestionRunner` | answer committed in `next()` (`clearForQuestion`) | `moveToEnd(queue, index)`, cursor stays; `n/total` idem |
+
+**Ciclo de vida do riscado no mobile (decidido na M1):** só se risca **antes** de escolher;
+**congela na escolha** (o reveal instantâneo do mobile é o "Conferir" do desktop, logo o ✕ some e
+BR-02.5 vale); **morre ao confirmar** em `next()`; **sobrevive ao adiar** (BR-03.3); morre com o
+unmount do runner. Nada persistido, nada em `sessions.record`. "Riscada-e-selecionada" é impossível
+aqui, então `eliminationDropsAnswer` não é usado no runner.
+
+A fila do runner é `useState(questions)` semeada **uma vez** — `finish()` invalida
+`questions.reviewQueue`/`list`, então o prop muda depois de gravar e um effect de sync reordenaria a
+corrida no meio. O tempo já gasto numa questão adiada fica guardado em `carryTime` e é cobrado no
+`totalTimeFor` da resposta final; `postpone()` reinicia `startRef` à mão porque o effect do
+cronômetro depende de `index`, e adiar não move o índice.
 
 ## Backend touched by answering
 
@@ -168,7 +191,8 @@ answered") is **not** satisfied product-wide until M1 lands.
      o Back continua sem ser bloqueável, mas a escrita devida sai pelo mesmo `keepalive` que o
      fechamento de aba já tinha — mesmo best-effort, uma porta a mais, nunca uma garantia maior.
    - **Mobile `QuestionRunner`** (`apps/mobile/`) has no exit dialog and no guard at all — the
-     whole of BR-05 above is desktop-only, exactly like the BR-02 gap M1.
+     whole of BR-05 above is desktop-only. (BR-02/BR-03 no longer are: a M1/#85 fechou aquela
+     metade; esta continua aberta e é fatia própria.)
    - Known rough edge of the guarded **sign-out**: the run is processed correctly, but the student
      is not actually signed out and must click "Sair" again — the provider drops the pending `next`
      (which holds the `signOut()`) by design. Tracked in #73.

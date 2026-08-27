@@ -10,7 +10,7 @@
 // materialized queue, so a postponed question left in `questions` is treated as
 // already seen by `fetchQuestion` and never comes back. The FIFO is what makes
 // "goes to the end of the queue" true here; `shouldServeDeferred`
-// (shared/lib/exam-queue.ts) decides when to drain it.
+// (shared/domain/exam-queue.ts) decides when to drain it.
 
 import { useCallback, useRef, useState } from 'react';
 import { shuffle } from '../shared/lib/shuffle';

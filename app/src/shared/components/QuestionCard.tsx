@@ -13,7 +13,7 @@ import {
   consumeClick,
   endSwipe,
   startSwipe,
-} from "../lib/eliminations";
+} from "@shared/domain/eliminations";
 
 type QuestionCardProps = {
   disciplineLabel: string;

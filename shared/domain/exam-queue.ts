@@ -1,4 +1,8 @@
-// app/src/shared/lib/exam-queue.ts
+// shared/domain/exam-queue.ts — the "responder depois" (BR-03) queue rules.
+//
+// Lives under shared/ (not app/src/shared/lib) since #85: the mobile bundle
+// resolves only @shared/@api/@drizzle, so a rule the desktop screens AND the
+// mobile runner share cannot live under app/. One home, one definition.
 //
 // Also the adaptive simulado's "what comes next" rule (`nextAdaptiveStep`),
 // which a resumed run replays over its persisted ladder.
@@ -13,7 +17,7 @@ import {
   type AdaptiveConfig,
   type AdaptiveState,
   type Difficulty,
-} from "@shared/domain/adaptive";
+} from "./adaptive";
 
 export function moveToEnd<T>(items: readonly T[], index: number): T[] {
   if (index < 0 || index >= items.length) return [...items];
@@ -36,10 +40,99 @@ export function findNextUnanswered(
 }
 
 /**
+ * Seconds already spent on each postponed question, keyed by question id.
+ * Treat as immutable. Empty = nothing was ever postponed.
+ */
+export type CarriedTime = ReadonlyMap<string, number>;
+
+/** Stable empty carry: the starting value for a run. */
+export const NO_CARRIED_TIME: CarriedTime = Object.freeze(new Map<string, number>());
+
+/**
+ * Bank the `seconds` already spent on `questionId` before it goes to the end of
+ * the queue (BR-03.1). Accumulates across repeated postpones; returns a new Map
+ * and never mutates the input.
+ *
+ * Without this the time a student spent reading a question before postponing it
+ * is simply lost: the timer restarts when the question comes back, and
+ * `user_answers.timeSpent` under-reports every postponed question.
+ */
+export function carryTime(carried: CarriedTime, questionId: string, seconds: number): CarriedTime {
+  const updated = new Map(carried);
+  updated.set(questionId, (carried.get(questionId) ?? 0) + seconds);
+  return updated;
+}
+
+/**
+ * The `timeSpent` to record for `questionId`: everything banked by earlier
+ * postpones plus the `seconds` of the current visit. Equals `seconds` when the
+ * question was never postponed.
+ */
+export function totalTimeFor(carried: CarriedTime, questionId: string, seconds: number): number {
+  return (carried.get(questionId) ?? 0) + seconds;
+}
+
+/** Outcome of one guarded "responder depois" event. */
+export type PostponeOutcome<T> =
+  /** Duplicate event for the SAME rendered question: nothing moves. */
+  | Readonly<{ applied: false }>
+  /** The single transition: the new queue plus the banked reading time. */
+  | Readonly<{ applied: true; queue: T[]; carried: CarriedTime }>;
+
+/**
+ * ONE "responder depois" transition (BR-03.1), single-flight per RENDERED
+ * question: `moveToEnd` and `carryTime` are computed from a single snapshot, so
+ * the queue move and the banked reading time can never disagree.
+ *
+ * `consumedQueue` is the queue reference an earlier postpone already consumed.
+ * It collapses SAME-TASK / re-entrant double-firing — two calls that run before
+ * React commits the new queue still see the old reference, so the second is
+ * answered with `applied: false` instead of skipping an unseen question and
+ * banking the same seconds twice into `timeSpent`.
+ *
+ * It is NOT a debounce for a human double-tap: a click is a discrete event
+ * (SyncLane, flushed at the end of its task), so two taps are two tasks and the
+ * second one already sees the committed queue, gets `consumedQueue !== queue`
+ * and legitimately APPLIES. That is benign — it postpones the question that just
+ * slid into the slot, with a carry near zero, and that question returns at the
+ * tail.
+ *
+ * The token is the queue REFERENCE, not the question id (an id-based token would
+ * behave identically here): every applied postpone returns a fresh array, so a
+ * question that comes back at the tail is postponable again (BR-03.1) instead of
+ * being latched shut forever.
+ */
+export function postponeOnce<T>({
+  queue,
+  index,
+  questionId,
+  elapsedSeconds,
+  carried,
+  consumedQueue,
+}: {
+  queue: readonly T[];
+  index: number;
+  questionId: string;
+  elapsedSeconds: number;
+  carried: CarriedTime;
+  consumedQueue: readonly T[] | null;
+}): PostponeOutcome<T> {
+  if (consumedQueue === queue) return { applied: false };
+  return {
+    applied: true,
+    queue: moveToEnd(queue, index),
+    carried: carryTime(carried, questionId, elapsedSeconds),
+  };
+}
+
+/**
  * Whether the "Responder depois" button should be offered in the Simulado
  * Padrão two-step flow (BR-03): only before the "Conferir" step and while
  * there are more questions in the queue. Lives here, next to `moveToEnd`,
  * because `components/` must not import from `pages/`.
+ *
+ * The mobile runner reuses it verbatim with `checked` = the instant reveal:
+ * there the answer IS checked the moment it is chosen (BR-03.2).
  */
 export function canPostponeGuard({
   checked,

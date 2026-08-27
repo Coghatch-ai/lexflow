@@ -57,7 +57,7 @@
 import { useEffect, useMemo, useState, type ReactElement } from 'react';
 import { useLov } from '../shared/hooks/use-lov';
 import { trpc } from '../shared/lib/trpc';
-import { findNextUnanswered } from '../shared/lib/exam-queue';
+import { findNextUnanswered } from '@shared/domain/exam-queue';
 import { useNotesAndBookmarks } from '../shared/hooks/use-notes-bookmarks';
 import { useLeaveWarning } from '../shared/hooks/use-leave-warning';
 import { useRegisterRun } from '../shared/run-guard-context';
@@ -99,7 +99,7 @@ import {
   eliminationDropsAnswer,
   toggleElimination,
   type EliminationState,
-} from '../shared/lib/eliminations';
+} from '@shared/domain/eliminations';
 import { answeredIndexes, formatTime, type RealRunStart } from './real-exam-types';
 import { useHeartbeat, useTickingNow } from '../shared/hooks/use-real-exam-clock';
 import { useRealExamMarks } from '../shared/hooks/use-real-exam-marks';

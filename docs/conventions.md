@@ -31,6 +31,13 @@ here already exists and is tested — adopt it; don't reinvent it.
    - `shared/domain/spaced-repetition.ts` — `nextReviewIntervalDays`, `DEFAULT_REVIEW_INTERVALS_DAYS`
    - `shared/domain/exam-calendar.ts` — `deriveEventDate` (`DD/MM/YYYY` → `YYYY-MM-DD`)
    - `shared/domain/exam-countdown.ts` — `daysUntil`, `nextUpcomingEvent`
+   - `shared/domain/eliminations.ts` — BR-02 cross-out state + swipe/latch rules
+   - `shared/domain/exam-queue.ts` — BR-03 postpone (`moveToEnd`, `findNextUnanswered`,
+     the `canPostpone*` guards, `carryTime`/`totalTimeFor`)
+
+   Those last two live under `shared/` (not `app/src/shared/`) because the **mobile** bundle
+   resolves only `@shared`/`@api`/`@drizzle`: a rule both frontends answer questions with cannot
+   live under `app/`, or the mobile copy drifts.
 
    **Exam calendar dates:** `exam_calendar_events.date_text` is the canonical human-entered
    value (free text, e.g. `20/12/2026`). `event_date` is DERIVED from it via `deriveEventDate`
