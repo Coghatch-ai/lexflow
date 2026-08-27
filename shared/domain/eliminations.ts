@@ -143,3 +143,14 @@ export function consumeClick(latch: SwipeLatch): Readonly<{ latch: SwipeLatch; s
 export function eliminationDropsAnswer(selectedAnswer: string, option: string): boolean {
   return selectedAnswer.length > 0 && selectedAnswer === option;
 }
+
+/**
+ * React key of one alternative row. Carries the QUESTION identity, not just the
+ * position and the text: the row owns touch state (`SwipeLatch`), so two
+ * questions offering the same option text at the same position would otherwise
+ * reuse one element — and the armed click-swallow of a cross-out swipe on the
+ * first question would eat the first tap on the second one.
+ */
+export function optionRowKey(questionId: string, index: number, option: string): string {
+  return `${questionId}-${String(index)}-${option}`;
+}

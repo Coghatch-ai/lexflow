@@ -7,14 +7,14 @@ import {
   type EliminationState,
   clearForQuestion,
   eliminatedFor,
+  optionRowKey,
   toggleElimination,
 } from "@shared/domain/eliminations";
 import {
   NO_CARRIED_TIME,
   type CarriedTime,
   canPostponeGuard,
-  carryTime,
-  moveToEnd,
+  postponeOnce,
   totalTimeFor,
 } from "@shared/domain/exam-queue";
 import { trpc } from "../lib/trpc";
@@ -81,6 +81,13 @@ export function QuestionRunner({
   // Seconds already spent on questions that were postponed (BR-03.1) — a
   // postpone must not throw the reading time away, nor bill it to the next one.
   const carriedRef = useRef<CarriedTime>(NO_CARRIED_TIME);
+  // The queue reference a postpone already consumed — the single-flight token.
+  // It collapses same-task / re-entrant double-firing: two calls before React
+  // commits the new queue would otherwise both move it (skipping an unseen
+  // question) and bank the same seconds twice. A human double-tap is NOT that
+  // case — two taps are two tasks, so the second sees the committed queue and
+  // legitimately applies (benign: carry near zero, question returns at the tail).
+  const consumedQueueRef = useRef<RunnerQuestion[] | null>(null);
 
   // Reset the per-question timer whenever the question changes.
   useEffect(() => {
@@ -187,8 +194,21 @@ export function QuestionRunner({
   // cursor stays, nothing is recorded and the cross-outs travel with it.
   function postpone(): void {
     if (current === undefined) return;
-    carriedRef.current = carryTime(carriedRef.current, current.id, elapsedSeconds());
-    setQueue((prev) => moveToEnd(prev, index));
+    // ONE guarded snapshot decides both the queue move and the carried time, so
+    // a second tap on the same rendered question is a no-op (not a second
+    // transition that skips a question and double-counts its seconds).
+    const outcome = postponeOnce({
+      queue,
+      index,
+      questionId: current.id,
+      elapsedSeconds: elapsedSeconds(),
+      carried: carriedRef.current,
+      consumedQueue: consumedQueueRef.current,
+    });
+    if (!outcome.applied) return;
+    consumedQueueRef.current = queue;
+    carriedRef.current = outcome.carried;
+    setQueue(outcome.queue);
     setSelected(null);
     // The timer effect keys on `index`, and postponing does NOT move it (the
     // next question slides into the same slot) — so restart it by hand or the
@@ -261,9 +281,10 @@ export function QuestionRunner({
         <div className="mt-5 flex flex-col gap-2.5">
           {current.options.map((option, idx) => (
             <RunnerOption
-              // Index + text: the row owns touch state, so a bare index would
-              // let React reuse a row instance (and its latch) across questions.
-              key={`${String(idx)}-${option}`}
+              // Question id + index + text: the row owns touch state, so a key
+              // without the question identity lets React reuse a row instance
+              // (and its swipe latch) across questions that share an option.
+              key={optionRowKey(current.id, idx, option)}
               option={option}
               selected={selected}
               correctAnswer={current.correctAnswer}

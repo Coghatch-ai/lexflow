@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   NO_CARRIED_TIME,
+  type CarriedTime,
   canPostponeAdaptive,
   canPostponeGuard,
   carryTime,
   findNextUnanswered,
   moveToEnd,
   nextAdaptiveStep,
+  postponeOnce,
   shouldServeDeferred,
   totalTimeFor,
 } from "./exam-queue";
@@ -396,5 +398,105 @@ describe("nextAdaptiveStep", () => {
         config: { ...DEFAULT_ADAPTIVE_CONFIG, stepUpAfter: 1 },
       }),
     ).toEqual({ kind: "draw", difficulty: "medium" });
+  });
+});
+
+// Regression guard for the double-tap on "Responder depois" (#85 review): the
+// runner's handler is re-entrant, so two events for the SAME rendered question
+// used to advance the queue twice — skipping an unseen question — and bank the
+// same reading seconds twice into `timeSpent`.
+describe("postponeOnce", () => {
+  const QUEUE = ["q1", "q2", "q3", "q4"];
+
+  // Replays what the runner does with a burst of taps on ONE rendered question:
+  // every event sees the same queue reference (React has not re-rendered yet),
+  // and only an applied outcome moves the queue / the carry.
+  function burst(taps: number): {
+    queue: readonly string[];
+    carried: CarriedTime;
+    applied: number;
+  } {
+    let queue: readonly string[] = QUEUE;
+    let carried: CarriedTime = NO_CARRIED_TIME;
+    let consumedQueue: readonly string[] | null = null;
+    let applied = 0;
+    const rendered = queue;
+    const renderedId = "q1";
+    for (let tap = 0; tap < taps; tap++) {
+      const outcome = postponeOnce({
+        queue: rendered,
+        index: 0,
+        questionId: renderedId,
+        elapsedSeconds: 12,
+        carried,
+        consumedQueue,
+      });
+      if (!outcome.applied) continue;
+      consumedQueue = rendered;
+      queue = outcome.queue;
+      carried = outcome.carried;
+      applied++;
+    }
+    return { queue, carried, applied };
+  }
+
+  it("applies exactly ONE queue transition for duplicate events at the same index", () => {
+    expect(burst(2).queue).toEqual(["q2", "q3", "q4", "q1"]);
+    expect(burst(2).applied).toBe(1);
+    expect(burst(5).queue).toEqual(["q2", "q3", "q4", "q1"]);
+  });
+
+  it("banks the carried time exactly ONCE for duplicate events", () => {
+    expect(burst(2).carried.get("q1")).toBe(12);
+    expect(burst(5).carried.get("q1")).toBe(12);
+  });
+
+  it("still postpones a single legitimate tap", () => {
+    const single = burst(1);
+    expect(single.applied).toBe(1);
+    expect(single.queue).toEqual(["q2", "q3", "q4", "q1"]);
+    expect(single.carried.get("q1")).toBe(12);
+  });
+
+  it("keeps a question postponable when it comes back later (BR-03.1)", () => {
+    // First visit: q1 goes to the tail and its token is consumed.
+    const first = postponeOnce({
+      queue: QUEUE,
+      index: 0,
+      questionId: "q1",
+      elapsedSeconds: 12,
+      carried: NO_CARRIED_TIME,
+      consumedQueue: null,
+    });
+    if (!first.applied) throw new Error("first postpone must apply");
+    // q1 is back at index 3 on a NEW queue reference: postponing it again is a
+    // legitimate second transition, and its earlier seconds keep accumulating.
+    const again = postponeOnce({
+      queue: first.queue,
+      index: 3,
+      questionId: "q1",
+      elapsedSeconds: 8,
+      carried: first.carried,
+      consumedQueue: QUEUE,
+    });
+    if (!again.applied) throw new Error("a later postpone of the same question must apply");
+    expect(again.queue).toEqual(["q2", "q3", "q4", "q1"]);
+    expect(again.carried.get("q1")).toBe(20);
+  });
+
+  it("never mutates the queue or the carry it was given", () => {
+    const input = [...QUEUE];
+    const carried = carryTime(NO_CARRIED_TIME, "q1", 5);
+    const outcome = postponeOnce({
+      queue: input,
+      index: 1,
+      questionId: "q2",
+      elapsedSeconds: 3,
+      carried,
+      consumedQueue: null,
+    });
+    expect(input).toEqual(QUEUE);
+    expect(carried.get("q2")).toBeUndefined();
+    expect(outcome.applied).toBe(true);
   });
 });
