@@ -21,7 +21,7 @@ import { useEffect, useRef, useState, type ReactElement } from 'react';
 import { useSession } from '../auth';
 import { useLov } from '../shared/hooks/use-lov';
 import { trpc } from '../shared/lib/trpc';
-import { canPostponeGuard, moveToEnd } from '../shared/lib/exam-queue';
+import { canPostponeGuard, moveToEnd } from '@shared/domain/exam-queue';
 import { useNotesAndBookmarks } from '../shared/hooks/use-notes-bookmarks';
 import { useLeaveWarning } from '../shared/hooks/use-leave-warning';
 import { useRegisterRun } from '../shared/run-guard-context';
@@ -50,7 +50,7 @@ import {
   eliminationDropsAnswer,
   toggleElimination,
   type EliminationState,
-} from '../shared/lib/eliminations';
+} from '@shared/domain/eliminations';
 
 interface StandardBoardProps {
   start: StandardRunStart;

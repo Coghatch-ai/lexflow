@@ -2,9 +2,15 @@
 // screens. Pure module: no React, no persistence, no tRPC — a cross-out never
 // reaches the sessions.record payload, the grade, the stats or SM-2.
 //
+// Lives under shared/ (not app/src/shared/lib) since #85: the mobile bundle
+// resolves only @shared/@api/@drizzle, so the desktop `QuestionCard` screens and
+// the mobile `QuestionRunner` share this one definition instead of two copies.
+//
 // The state is a Map keyed by question id holding the eliminated option texts.
-// A Map (not a Record) because the frontend tsconfig runs without
-// `noUncheckedIndexedAccess`, so a Record index would lie about its type.
+// A Map (not a Record) because a Record index is only as honest as the tsconfig
+// reading it: this file is now checked by tsconfig.api.json (max-strict) AND
+// consumed by the two frontend programs, which run without
+// `noUncheckedIndexedAccess` — there the index would lie about its type.
 
 /** Eliminated option texts per question id. Treat as immutable. */
 export type EliminationState = ReadonlyMap<string, readonly string[]>;

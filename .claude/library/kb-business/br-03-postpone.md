@@ -20,12 +20,13 @@ Rules:
 
 "End of the current test queue" is literal only where a queue is materialized. Per screen:
 
-| Screen              | Queue shape                                                 | "End of the queue" means                                                                                                    |
-| ------------------- | ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| Simulado Padrão     | materialized array + cursor                                 | `moveToEnd(questions, currentIndex)`, cursor stays put                                                                      |
-| Repetição Espaçada  | materialized array of ≤5 reviews + forward-only cursor      | `moveToEnd(reviewQuestions, currentIndex)`, cursor stays put                                                                |
-| Simulado Real       | fixed 80 questions, free navigation                         | cursor jumps to the next unanswered (`findNextUnanswered`); the question keeps its slot and an "Adiada" badge               |
-| Simulado Adaptativo | NO queue — each question is drawn from a pool by difficulty | explicit FIFO `deferred`, drained at the TAIL of the simulado (`shouldServeDeferred` in `app/src/shared/lib/exam-queue.ts`) |
+| Screen              | Queue shape                                                 | "End of the queue" means                                                                                               |
+| ------------------- | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Simulado Padrão     | materialized array + cursor                                 | `moveToEnd(questions, currentIndex)`, cursor stays put                                                                 |
+| Repetição Espaçada  | materialized array of ≤5 reviews + forward-only cursor      | `moveToEnd(reviewQuestions, currentIndex)`, cursor stays put                                                           |
+| Simulado Real       | fixed 80 questions, free navigation                         | cursor jumps to the next unanswered (`findNextUnanswered`); the question keeps its slot and an "Adiada" badge          |
+| Simulado Adaptativo | NO queue — each question is drawn from a pool by difficulty | explicit FIFO `deferred`, drained at the TAIL of the simulado (`shouldServeDeferred` in `shared/domain/exam-queue.ts`) |
+| Runner mobile (#85) | materialized array + cursor                                 | `moveToEnd(queue, currentIndex)`, cursor stays put; offered only before the instant reveal                             |
 
 Adaptive specifics (they follow from rule 1, they are not new intent):
 

@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
+  NO_CARRIED_TIME,
   canPostponeAdaptive,
   canPostponeGuard,
+  carryTime,
   findNextUnanswered,
   moveToEnd,
   nextAdaptiveStep,
   shouldServeDeferred,
+  totalTimeFor,
 } from "./exam-queue";
-import { DEFAULT_ADAPTIVE_CONFIG, type AdaptiveState } from "@shared/domain/adaptive";
+import { DEFAULT_ADAPTIVE_CONFIG, type AdaptiveState } from "./adaptive";
 
 describe("moveToEnd", () => {
   it("moves the element at index to the end, preserving relative order", () => {
@@ -38,6 +41,62 @@ describe("moveToEnd", () => {
     expect(moveToEnd(["a", "b"], -1)).toEqual(["a", "b"]);
     expect(moveToEnd(["a", "b"], 2)).toEqual(["a", "b"]);
     expect(moveToEnd([], 0)).toEqual([]);
+  });
+});
+
+// #85 (M1): o runner mobile é uma fila materializada com cursor parado, como o
+// Simulado Padrão. O cronômetro dele reinicia por MUDANÇA DE ÍNDICE, e adiar não
+// muda o índice — daí os dois helpers de tempo carregado.
+describe("fila do runner mobile", () => {
+  it("devolve a adiada na ÚLTIMA posição e a seguinte no slot do cursor", () => {
+    const queue = ["q1", "q2", "q3", "q4"];
+    const after = moveToEnd(queue, 1);
+    expect(after.at(1)).toBe("q3");
+    expect(after.at(-1)).toBe("q2");
+  });
+
+  it("não muda o denominador do progresso (n/total)", () => {
+    const queue = ["q1", "q2", "q3", "q4"];
+    expect(moveToEnd(queue, 0)).toHaveLength(queue.length);
+  });
+
+  it("proíbe adiar depois de escolher — no mobile `checked` é o reveal instantâneo", () => {
+    expect(canPostponeGuard({ checked: true, hasMoreQuestions: true })).toBe(false);
+  });
+
+  it("proíbe adiar a última pendente da fila", () => {
+    expect(canPostponeGuard({ checked: false, hasMoreQuestions: false })).toBe(false);
+  });
+});
+
+describe("carryTime", () => {
+  it("acumula dois adiamentos da mesma questão", () => {
+    const once = carryTime(NO_CARRIED_TIME, "q1", 10);
+    const twice = carryTime(once, "q1", 7);
+    expect(twice.get("q1")).toBe(17);
+  });
+
+  it("não toca outras chaves", () => {
+    const carried = carryTime(carryTime(NO_CARRIED_TIME, "q1", 10), "q2", 3);
+    expect(carryTime(carried, "q1", 5).get("q2")).toBe(3);
+  });
+
+  it("devolve um Map novo e não muta a entrada", () => {
+    const before = carryTime(NO_CARRIED_TIME, "q1", 10);
+    const after = carryTime(before, "q1", 7);
+    expect(after).not.toBe(before);
+    expect(before.get("q1")).toBe(10);
+  });
+});
+
+describe("totalTimeFor", () => {
+  it("soma o carregado ao tempo da visita atual", () => {
+    expect(totalTimeFor(carryTime(NO_CARRIED_TIME, "q1", 10), "q1", 7)).toBe(17);
+  });
+
+  it("devolve só o atual quando a questão nunca foi adiada", () => {
+    expect(totalTimeFor(NO_CARRIED_TIME, "q1", 12)).toBe(12);
+    expect(totalTimeFor(carryTime(NO_CARRIED_TIME, "q2", 30), "q1", 12)).toBe(12);
   });
 });
 

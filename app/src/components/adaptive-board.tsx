@@ -5,7 +5,7 @@
 // Mounted with a `key` per run (see `AdaptiveSimulation`), so a fresh simulado
 // gets a fresh scheduler and a fresh draft identity without any reset path to
 // get wrong. Everything it DECIDES comes from pure modules
-// (`shared/domain/adaptive`, `shared/lib/exam-queue`,
+// (`shared/domain/adaptive`, `shared/domain/exam-queue`,
 // `shared/lib/run-persistence`); this file only wires.
 //
 // What is persisted (D8): the SERVED list (`questionIds`, duplicates and all),
@@ -17,7 +17,7 @@ import { useRef, useState, type ReactElement } from 'react';
 import { useSession } from '../auth';
 import { useLov } from '../shared/hooks/use-lov';
 import { trpc } from '../shared/lib/trpc';
-import { canPostponeAdaptive, nextAdaptiveStep } from '../shared/lib/exam-queue';
+import { canPostponeAdaptive, nextAdaptiveStep } from '@shared/domain/exam-queue';
 import { useNotesAndBookmarks } from '../shared/hooks/use-notes-bookmarks';
 import { useLeaveWarning } from '../shared/hooks/use-leave-warning';
 import { useRegisterRun } from '../shared/run-guard-context';
@@ -41,7 +41,7 @@ import {
   eliminationDropsAnswer,
   toggleElimination,
   type EliminationState,
-} from '../shared/lib/eliminations';
+} from '@shared/domain/eliminations';
 import { useAdaptivePool } from './adaptive-pool';
 import {
   type AdaptiveQuestion,
