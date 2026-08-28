@@ -31,7 +31,7 @@ import {
   persistedDraftOf,
   resumeRealFrom,
   type RunConflictKind,
-} from '../shared/lib/run-persistence';
+} from '@shared/run/run-persistence';
 import { REAL_EXAM_DURATION_SECONDS, realMountDecision } from '@shared/domain/exam-draft';
 import ExamSetup from './real-exam-setup';
 import RealExamBoard from './real-exam-board';

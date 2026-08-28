@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { UNSETTLED, settleWithin } from '../shared/lib/settle-within';
+import { UNSETTLED, settleWithin } from '@shared/run/settle-within';
 import {
   DEADLINE_SUBMIT_TIMEOUT_MS,
   PROCESS_REJECTED,

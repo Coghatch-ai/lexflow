@@ -4,7 +4,7 @@
 // Mounted with a `key` per run (see `SpacedRepetition`), so a fresh review gets
 // a fresh scheduler and a fresh draft identity without any reset path to get
 // wrong. Everything it DECIDES comes from pure modules
-// (`shared/lib/run-persistence`, `shared/lib/exit-rules`); this file only wires.
+// (`shared/run/run-persistence`, `shared/run/exit-rules`); this file only wires.
 //
 // Two things are deliberately NOT persisted here (D8): the per-question timer's
 // carried time — a review postponed and answered later starts its clock at zero
@@ -18,12 +18,12 @@
 import { useRef, useState, type ReactElement } from 'react';
 import { useSession } from '../auth';
 import { useLov } from '../shared/hooks/use-lov';
-import { trpc } from '../shared/lib/trpc';
+import { runPersistenceIO, trpc } from '../shared/lib/trpc';
 import { moveToEnd } from '@shared/domain/exam-queue';
 import { useNotesAndBookmarks } from '../shared/hooks/use-notes-bookmarks';
 import { useLeaveWarning } from '../shared/hooks/use-leave-warning';
 import { useRegisterRun } from '../shared/run-guard-context';
-import { useRunPersistence } from '../shared/hooks/use-run-persistence';
+import { useRunPersistence } from '@shared/react/use-run-persistence';
 import QuitTestDialog from './QuitTestDialog';
 import RunOverlays from '../pages/testing-run-overlays';
 import {
@@ -31,13 +31,13 @@ import {
   processableAnswers,
   shouldPromptOnExit,
   type AnswerDraft,
-} from '../shared/lib/exit-rules';
+} from '@shared/run/exit-rules';
 import {
   appendAnswer,
   dedupeAnswers,
   spacedDraftPayload,
   type DraftClaim,
-} from '../shared/lib/run-persistence';
+} from '@shared/run/run-persistence';
 import { displayIntervalDays } from '@shared/domain/spaced-repetition';
 import {
   NO_ELIMINATIONS,
@@ -108,6 +108,7 @@ export default function SpacedBoard({
           answers,
           token,
         }),
+    runPersistenceIO,
   );
 
   // A resumed run already owns its row: adopting during render (a ref write,

@@ -1,4 +1,4 @@
-// app/src/shared/lib/run-persistence.ts
+// shared/run/run-persistence.ts
 //
 // Everything the persisted-run wiring DECIDES (BR-05, epic #67 slice S2b), as
 // pure functions: the payload a save carries, what a resume rehydrates, the
@@ -15,7 +15,7 @@
 // `deadlineAt` is the exact opposite — it is COMPARED, never echoed, so it is
 // normalisable. Two string fields of the same row, opposite rules.
 
-import type { AdaptiveState } from "@shared/domain/adaptive";
+import type { AdaptiveState } from "../domain/adaptive";
 import {
   reconcileRun,
   type AnswerDraft,
@@ -23,7 +23,7 @@ import {
   type ExamDraftSetup,
   type ReconciledRun,
   type RunMode,
-} from "@shared/domain/exam-draft";
+} from "../domain/exam-draft";
 
 /** The Simulado Padrão filters, as the setup column stores them. */
 export interface StandardSetup {
@@ -799,9 +799,15 @@ export function saveFailureFor(error: unknown): RunSaveFailure {
  * run back on screen and the student clicks again) can never grow the payload.
  * Recording the same question twice would write two `user_answers` rows, count
  * 11 questions in a run of 10 and step the SM-2 schedule twice.
+ *
+ * Generic over the answer type (#86 M2b) so a screen that keeps MORE than the
+ * draft on each entry keeps it through the dedupe: the mobile runner tracks the
+ * question text and options alongside the answer for its result recap, and a
+ * signature fixed to `AnswerDraft` would silently return those fields stripped.
+ * The rule is unchanged — one entry per `questionId`, last word wins.
  */
-export function dedupeAnswers(answers: readonly AnswerDraft[]): AnswerDraft[] {
-  const byQuestion = new Map<string, AnswerDraft>();
+export function dedupeAnswers<A extends AnswerDraft>(answers: readonly A[]): A[] {
+  const byQuestion = new Map<string, A>();
   for (const answer of answers) byQuestion.set(answer.questionId, answer);
   return [...byQuestion.values()];
 }
@@ -811,7 +817,7 @@ export function dedupeAnswers(answers: readonly AnswerDraft[]): AnswerDraft[] {
  * has (in place, so the queue order the student answered in survives). This is
  * the only way the screens build the payload — see `dedupeAnswers`.
  */
-export function appendAnswer(answers: readonly AnswerDraft[], answer: AnswerDraft): AnswerDraft[] {
+export function appendAnswer<A extends AnswerDraft>(answers: readonly A[], answer: A): A[] {
   return dedupeAnswers([...answers, answer]);
 }
 

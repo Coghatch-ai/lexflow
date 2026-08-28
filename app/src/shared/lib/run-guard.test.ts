@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { exitPrompt } from "./exit-rules";
+import { exitPrompt } from "@shared/run/exit-rules";
 import {
   decideNavigation,
   guardSaveOutcome,

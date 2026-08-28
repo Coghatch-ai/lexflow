@@ -10,8 +10,8 @@
 import type { ReactElement } from 'react';
 import QuitTestDialog from './QuitTestDialog';
 import RunOverlays from '../pages/testing-run-overlays';
-import { exitPrompt } from '../shared/lib/exit-rules';
-import type { RunPersistence } from '../shared/hooks/use-run-persistence';
+import { exitPrompt } from '@shared/run/exit-rules';
+import type { RunPersistence } from '@shared/react/use-run-persistence';
 import type { NotesAndBookmarks } from '../shared/hooks/use-notes-bookmarks';
 import {
   AdaptiveFeedback,

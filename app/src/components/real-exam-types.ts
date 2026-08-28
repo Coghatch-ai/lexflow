@@ -6,7 +6,7 @@
 
 import { shuffle } from '../shared/lib/shuffle';
 import type { AiExplanation } from '@shared/domain/ai-eval';
-import type { AnswerDraft } from '../shared/lib/exit-rules';
+import type { AnswerDraft } from '@shared/run/exit-rules';
 
 /** 80 questions, like the real OAB 1ª fase. */
 export const QUESTIONS_PER_EXAM = 80;

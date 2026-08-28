@@ -3,7 +3,7 @@ import { useLocation } from "wouter";
 import { toQuestion, type Question } from "@shared/domain/question";
 import { trpc } from "../lib/trpc";
 import { usePracticeState } from "../state/practice-context";
-import { QuestionRunner } from "../components/QuestionRunner";
+import { RunStartGate } from "../components/RunStartGate";
 import { Centered } from "../components/Centered";
 
 const QUESTION_LIMIT = 10;
@@ -46,5 +46,7 @@ export function PracticePage(): ReactElement {
     );
   }
 
-  return <QuestionRunner questions={questions} sessionDiscipline={discipline} mode="practice" />;
+  // The gate asks for a saved run first (BR-05.8) — Praticar and Treino focado
+  // share the `standard` slot, so one may be waiting when the other starts.
+  return <RunStartGate surface="practice" questions={questions} sessionDiscipline={discipline} />;
 }

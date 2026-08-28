@@ -1,4 +1,4 @@
-// app/src/shared/lib/save-scheduler.ts
+// shared/run/save-scheduler.ts
 //
 // The save CADENCE of a run being persisted server-side (BR-05, epic #67 slice
 // S2b). Pure module: no React, no tRPC, no timers of its own beyond

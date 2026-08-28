@@ -9,7 +9,7 @@
 import type { ReactElement } from 'react';
 import RunConflictDialog from './testing-run-conflict';
 import RunFailureDialog from './testing-run-failure';
-import type { RunPersistence } from '../shared/hooks/use-run-persistence';
+import type { RunPersistence } from '@shared/react/use-run-persistence';
 
 interface RunOverlaysProps {
   persistence: RunPersistence;

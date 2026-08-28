@@ -11,7 +11,7 @@
 import { useEffect, useRef, useState, type ReactElement } from 'react';
 import { FRESH_READ, trpc } from '../shared/lib/trpc';
 import { useLov } from '../shared/hooks/use-lov';
-import { persistedDraftOf, resumeAdaptiveFrom } from '../shared/lib/run-persistence';
+import { persistedDraftOf, resumeAdaptiveFrom } from '@shared/run/run-persistence';
 import AdaptiveBoard from './adaptive-board';
 import { mapAdaptiveRows } from './adaptive-pool';
 import { AdaptiveSetup, type AdaptiveQuestion } from './adaptive-screens';

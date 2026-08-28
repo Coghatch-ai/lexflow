@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react';
 import { AlertCircle } from 'lucide-react';
-import type { ExitPrompt } from '@/shared/lib/exit-rules';
+import type { ExitPrompt } from '@shared/run/exit-rules';
 import { offersSaveAndExit } from '@/shared/lib/run-guard';
 
 type QuitTestDialogProps = {
@@ -16,7 +16,7 @@ type QuitTestDialogProps = {
 
 // Confirmation shown when the student tries to leave a test still running
 // (BR-05, slices S1 + S2b). Presentational only: the rules — which labels,
-// whether to warn, whether to ask at all — live in `shared/lib/exit-rules.ts`.
+// whether to warn, whether to ask at all — live in `shared/run/exit-rules.ts`.
 //
 // The third action is rendered when the RULE allows it (`prompt.saveLabel`,
 // BR-05.3) AND the screen actually handed over an `onSave`. Both conditions on

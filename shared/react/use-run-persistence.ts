@@ -1,4 +1,4 @@
-// app/src/shared/hooks/use-run-persistence.ts
+// shared/react/use-run-persistence.ts
 //
 // The plumbing that keeps an in-flight run on the server (BR-05, epic #67 slice
 // S2b): the debounce, the tRPC calls, the two refs that hold the draft's
@@ -11,20 +11,31 @@
 // "just reuse the hook" impossible — the mode is now an argument and the
 // payload comes from the screen's own snapshot.
 //
+// PARAMETRIC in the tRPC CLIENT since M2a (#86): the hook lives under `shared/`
+// so both frontends can reach it, and the client arrives as an ARGUMENT rather
+// than an import. `createTRPCReact()` builds one React context PER instance, so
+// the desktop instance called from the mobile tree would run `useUtils()` with
+// no provider above it — a runtime failure, not merely coupling. The file sits
+// in `shared/react/`, excluded from `tsconfig.api.json`: the backend program
+// compiles `shared/**` with `lib: ["esnext"]` and no DOM, and `shared/domain/`
+// is React-free by doctrine. The PURE rules stay in `shared/run/`.
+//
 // It decides nothing. Every rule lives in the two pure modules it wraps —
-// `../lib/save-scheduler` (cadence) and `../lib/run-persistence` (payload,
-// claim, conflict copies) — which is what keeps the rules testable with plain
-// vitest and this file free of anything worth arguing about.
+// `shared/run/save-scheduler` (cadence) and `shared/run/run-persistence`
+// (payload, claim, conflict copies) — which is what keeps the rules testable
+// with plain vitest and this file free of anything worth arguing about.
 //
 // `draftId` and `token` are REFS, never state: they change on every save, they
 // paint nothing, and a state update per save would re-render the whole test
 // tree and open a stale-closure window between the save and the recording.
 
 import { useEffect, useRef, useState, type MutableRefObject } from "react";
-import { FRESH_READ, exitTrpcClient, trpc } from "../lib/trpc";
-import { exitTransportFor } from "../lib/exit-save";
-import { wireExitFlush } from "../lib/exit-listeners";
-import { createSaveScheduler, type SaveScheduler } from "../lib/save-scheduler";
+import type { CreateTRPCReact } from "@trpc/react-query";
+import type { TRPCClient } from "@trpc/client";
+import type { AppRouter } from "@api/handler";
+import { exitTransportFor } from "../run/exit-save";
+import { wireExitFlush } from "../run/exit-listeners";
+import { createSaveScheduler, type SaveScheduler } from "../run/save-scheduler";
 import {
   adoptableDraftId,
   claimOutcomeFor,
@@ -38,7 +49,7 @@ import {
   type RunConflict,
   type RunDraftPayload,
   type RunSaveFailure,
-} from "../lib/run-persistence";
+} from "../run/run-persistence";
 import {
   claimlessVerdictFor,
   createRunNonce,
@@ -46,8 +57,8 @@ import {
   saveRun,
   stampRunNonce,
   type SaveRunIO,
-} from "../lib/run-claimless";
-import type { RunMode } from "@shared/domain/exam-draft";
+} from "../run/run-claimless";
+import type { RunMode } from "../domain/exam-draft";
 
 /** What an exit handler needs before it may record or navigate. */
 export interface FlushOutcome {
@@ -431,15 +442,39 @@ function usePersistenceRefs(
 }
 
 /**
+ * The FRONTEND this hook runs inside, handed over rather than imported.
+ *
+ * Every field is per-app: `trpc` carries the React context `useUtils()` reads,
+ * `exitClient` is that app's `keepalive` client, and `freshRead` its per-call
+ * cache override. Injected because the desktop and the mobile POC each build
+ * their own `createTRPCReact()` — one instance called from the other's tree has
+ * no provider above it.
+ */
+export interface RunPersistenceIO {
+  /** The app's own `createTRPCReact<AppRouter>()` instance. */
+  trpc: CreateTRPCReact<AppRouter, unknown>;
+  /** The app's `keepalive` client — the transport an unload survives. */
+  exitClient: TRPCClient<AppRouter>;
+  /** `{ staleTime: 0 }`: the identity reads must not resolve from the cache. */
+  freshRead: { readonly staleTime: number };
+}
+
+/**
  * @param mode Which `exam_drafts` row this run owns. Every call the hook makes
  *   is keyed by it — `get` (learning the id back), `discard` — so a screen can
  *   never read or drop another mode's run.
+ * @param snapshot Reads the CURRENT run off the screen at SEND time.
+ * @param io The calling app's tRPC clients (see `RunPersistenceIO`).
  */
-export function useRunPersistence(mode: RunMode, snapshot: RunSnapshot): RunPersistence {
-  const utils = trpc.useUtils();
-  const saveMutation = trpc.examDrafts.save.useMutation();
-  const touchMutation = trpc.examDrafts.touch.useMutation();
-  const discardMutation = trpc.examDrafts.discard.useMutation();
+export function useRunPersistence(
+  mode: RunMode,
+  snapshot: RunSnapshot,
+  io: RunPersistenceIO,
+): RunPersistence {
+  const utils = io.trpc.useUtils();
+  const saveMutation = io.trpc.examDrafts.save.useMutation();
+  const touchMutation = io.trpc.examDrafts.touch.useMutation();
+  const discardMutation = io.trpc.examDrafts.discard.useMutation();
   const [conflict, setConflict] = useState<RunConflict | null>(null);
   const [failure, setFailure] = useState<RunSaveFailure | null>(null);
 
@@ -447,11 +482,11 @@ export function useRunPersistence(mode: RunMode, snapshot: RunSnapshot): RunPers
   snapshotRef.current = snapshot;
   const refs = usePersistenceRefs(setConflict, setFailure);
 
-  // `FRESH_READ` is load-bearing in BOTH readers below, not hygiene: under the
+  // `io.freshRead` is load-bearing in BOTH readers below, not hygiene: under the
   // client's 5-minute default this `fetch` resolves from the CACHE, so it would
   // keep answering from BEFORE the row existed.
   const readRow = async (): Promise<PersistedDraft | null> =>
-    persistedDraftOf(await utils.examDrafts.get.fetch({ mode }, FRESH_READ));
+    persistedDraftOf(await utils.examDrafts.get.fetch({ mode }, io.freshRead));
   refs.learnDraftId.current = learnDraftIdVia(refs, readRow);
   refs.probeRow.current = probeRowVia(readRow);
 
@@ -462,7 +497,7 @@ export function useRunPersistence(mode: RunMode, snapshot: RunSnapshot): RunPers
 
   refs.exitSend.current = exitSendVia(refs, snapshotRef, (input) =>
     exitTransportFor(input) === "keepalive"
-      ? exitTrpcClient.examDrafts.save.mutate(input)
+      ? io.exitClient.examDrafts.save.mutate(input)
       : saveMutation.mutateAsync(input),
   );
 

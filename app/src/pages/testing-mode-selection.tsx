@@ -14,7 +14,7 @@
 import { useState, type ReactElement } from 'react';
 import { BookOpen } from 'lucide-react';
 import { trpc } from '../shared/lib/trpc';
-import { resumableFor, type ResumableDraft } from '../shared/lib/run-persistence';
+import { resumableFor, type ResumableDraft } from '@shared/run/run-persistence';
 
 export type Mode = 'standard' | 'adaptive' | 'spaced' | 'real';
 

@@ -8,7 +8,7 @@ import { useMemo, type ReactElement } from "react";
 import { useLocation } from "wouter";
 import { toQuestion, type Question } from "@shared/domain/question";
 import { trpc } from "../lib/trpc";
-import { QuestionRunner } from "../components/QuestionRunner";
+import { RunStartGate } from "../components/RunStartGate";
 import { Centered } from "../components/Centered";
 
 export function DrillPage(): ReactElement {
@@ -47,7 +47,11 @@ export function DrillPage(): ReactElement {
   // index access, so questions[0] types as Question here.
   const sessionDiscipline = drillQ.data.weakestDiscipline ?? questions[0].discipline;
 
+  // The Drill saves exactly like Praticar, into the SAME `standard` slot (#86
+  // EMENDA — the owner's rule: same database, same BR-05). Sharing the slot is
+  // the rule, not a defect: starting a Drill over a saved Praticar (or the
+  // reverse) asks to continue or discard, and never overwrites in silence.
   return (
-    <QuestionRunner questions={questions} sessionDiscipline={sessionDiscipline} mode="practice" />
+    <RunStartGate surface="drill" questions={questions} sessionDiscipline={sessionDiscipline} />
   );
 }

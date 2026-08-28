@@ -11,7 +11,7 @@
 // optimistic-concurrency token.
 //
 // SINGLE SOURCE: `RunMode`, `AnswerDraft` and `processableAnswers` live HERE
-// and are re-exported by `app/src/shared/lib/exit-rules.ts`, not the other way
+// and are re-exported by `shared/run/exit-rules.ts`, not the other way
 // round — `tsconfig.api.json` only compiles api/ + drizzle/ + shared/ +
 // scripts/, so a root-`shared/` module can never import from `app/src/`.
 
@@ -167,8 +167,14 @@ export const REAL_EXAM_DURATION_SECONDS = 5 * 60 * 60;
  * A blank answer is never recorded (BR-05.6, consistent with BR-03): an
  * unanswered question is not an error, never reaches `user_answers` and never
  * touches the SM-2 schedule.
+ *
+ * Generic over the answer type (#86 M2b) so a caller that keeps MORE than the
+ * draft on each entry keeps it through the filter — the mobile runner tracks the
+ * question text and options alongside each answer for its result recap, and a
+ * signature fixed to `AnswerDraft` would hand those back stripped. The rule is
+ * unchanged: a blank `userAnswer` never survives.
  */
-export function processableAnswers(drafts: readonly AnswerDraft[]): AnswerDraft[] {
+export function processableAnswers<A extends AnswerDraft>(drafts: readonly A[]): A[] {
   return drafts.filter((a) => a.userAnswer.length > 0);
 }
 

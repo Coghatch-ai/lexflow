@@ -16,7 +16,7 @@
 // `@shared/domain/exam-draft` — the API persists and settles runs with the same
 // rules, and `tsconfig.api.json` never compiles `app/src/`. Re-exported here so
 // every screen's import path is unchanged; there is ONE union, not two.
-import { processableAnswers, type AnswerDraft, type RunMode } from "@shared/domain/exam-draft";
+import { processableAnswers, type AnswerDraft, type RunMode } from "../domain/exam-draft";
 
 export { processableAnswers };
 export type { AnswerDraft, RunMode };
@@ -94,6 +94,31 @@ export function exitPrompt(
     saveLabel: SAVE_AND_EXIT_LABEL,
     optionCount: 3,
   };
+}
+
+/**
+ * Whether the exit dialog offers "Salvar e sair" at all — the DOUBLE lock, in
+ * one place instead of two (BR-05.3 / BR-05.5).
+ *
+ * Both halves are load-bearing and neither implies the other. The RULE is per
+ * MODE: `exitPrompt('real')` answers `saveLabel: null`, because a prova real is
+ * never saved to continue later — persisting it (slice S2d) is for the
+ * auto-submit, and that is not the same thing. The HANDLER is per SCREEN: a
+ * mode whose wiring has not landed keeps two buttons without forking a second
+ * rule set.
+ *
+ * The prova real is the case that must never regress: it registers NO save
+ * handler and its prompt has NO label, so the third button cannot come back by
+ * someone wiring a handler in — offering it would be an escape hatch out of an
+ * exam that is not allowed to be paused.
+ *
+ * Here rather than in the desktop's `run-guard.ts` since #86 M2b: the mobile
+ * dialog asks the same question, and `app/src/**` is unreachable from the
+ * mobile bundle — a second copy of the lock is exactly how one of the two
+ * clients ends up offering "Salvar e sair" where the rule forbids it.
+ */
+export function offersSaveAndExit(prompt: ExitPrompt, save: (() => unknown) | undefined): boolean {
+  return prompt.saveLabel !== null && save !== undefined;
 }
 
 /** Result-screen counters for a run that may have ended early. */

@@ -7,7 +7,7 @@
 // how the two doors would drift apart.
 
 import { shuffle } from '../shared/lib/shuffle';
-import type { AnswerDraft } from '../shared/lib/exit-rules';
+import type { AnswerDraft } from '@shared/run/exit-rules';
 import type { ReviewItem } from './spaced-screens';
 
 /** What either door gives us: a question plus (maybe) its SM-2 state. */

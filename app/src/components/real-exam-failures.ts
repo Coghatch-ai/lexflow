@@ -18,8 +18,8 @@
 // vitest, while the wiring that feeds them (the `catch` blocks, the card) is
 // only reachable by rendering.
 
-import type { RunConflictKind } from '../shared/lib/run-persistence';
-import { UNSETTLED, type Settled } from '../shared/lib/settle-within';
+import type { RunConflictKind } from '@shared/run/run-persistence';
+import { UNSETTLED, type Settled } from '@shared/run/settle-within';
 
 /**
  * Which operation failed.

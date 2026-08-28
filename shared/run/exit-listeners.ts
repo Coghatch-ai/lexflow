@@ -1,4 +1,4 @@
-// app/src/shared/lib/exit-listeners.ts
+// shared/run/exit-listeners.ts
 //
 // WHERE the run's exit write is triggered from (BR-05 / BR-05.5, epic #67 slice
 // S2d). The write itself is `SaveScheduler.flushOnExit` (`save-scheduler.ts`);

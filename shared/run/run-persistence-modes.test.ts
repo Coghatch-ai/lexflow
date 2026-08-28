@@ -1,4 +1,4 @@
-// app/src/shared/lib/run-persistence-modes.test.ts
+// shared/run/run-persistence-modes.test.ts
 //
 // The Revisão Espaçada and Simulado Adaptativo halves of `run-persistence.ts`
 // (BR-05, epic #67 slice S2c): what each mode's payload carries, what its
@@ -8,7 +8,7 @@
 // the 500-line ESLint cap; same module under test, same fixtures shape.
 
 import { describe, expect, it } from "vitest";
-import { moveToEnd } from "@shared/domain/exam-queue";
+import { moveToEnd } from "../domain/exam-queue";
 import {
   adaptiveDraftPayload,
   realDraftPayload,
@@ -23,8 +23,8 @@ import {
   type RealRunState,
   type SpacedRunState,
 } from "./run-persistence";
-import type { AdaptiveState } from "@shared/domain/adaptive";
-import type { AnswerDraft } from "@shared/domain/exam-draft";
+import type { AdaptiveState } from "../domain/adaptive";
+import type { AnswerDraft } from "../domain/exam-draft";
 
 // The RAW PostgreSQL text of `exam_drafts.last_saved_at` — microseconds, a
 // space instead of `T`, `+00` instead of `Z`. The column is matched with `=`

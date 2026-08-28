@@ -1,12 +1,12 @@
 // The CONFLICT dialog of a persisted run (BR-05.8, epic #67 slice S2b).
 //
 // Presentational only: both copies, both pairs of action labels and which copy
-// applies come from `conflictFor` in `shared/lib/run-persistence.ts`. Nothing
+// applies come from `conflictFor` in `shared/run/run-persistence.ts`. Nothing
 // is ever overwritten silently — the student chooses which copy survives.
 
 import type { ReactElement } from 'react';
 import { AlertCircle } from 'lucide-react';
-import type { RunConflict } from '../shared/lib/run-persistence';
+import type { RunConflict } from '@shared/run/run-persistence';
 
 interface RunConflictDialogProps {
   conflict: RunConflict;

@@ -9,6 +9,7 @@ import type { inferRouterInputs, inferRouterOutputs } from "@trpc/server";
 import { QueryClient } from "@tanstack/react-query";
 import superjson from "superjson";
 import type { AppRouter } from "@api/handler";
+import type { RunPersistenceIO } from "@shared/react/use-run-persistence";
 
 export type TrpcOutput = inferRouterOutputs<AppRouter>;
 export type TrpcInput = inferRouterInputs<AppRouter>;
@@ -98,3 +99,18 @@ export const exitTrpcClient = createTRPCClient<AppRouter>({
     }),
   ],
 });
+
+/**
+ * THIS app's three clients, as `useRunPersistence` takes them (#86 M2a).
+ *
+ * The hook moved to `shared/react/` so the mobile POC can call it too, and the
+ * clients became an argument: `createTRPCReact()` builds one React context per
+ * instance, so the instance above called from another tree would run
+ * `useUtils()` with no provider. Bound once here rather than spelled out at each
+ * of the four boards — the desktop has exactly one answer.
+ */
+export const runPersistenceIO: RunPersistenceIO = {
+  trpc,
+  exitClient: exitTrpcClient,
+  freshRead: FRESH_READ,
+};

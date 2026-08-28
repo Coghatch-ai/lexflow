@@ -6,12 +6,12 @@
 // natural reaction — clicking again — was the double-count of finding 1.
 //
 // Presentational only: every string comes from `saveFailureFor` /
-// `runSaveFailure` in `shared/lib/run-persistence.ts`. Closing IS the retry —
+// `runSaveFailure` in `shared/run/run-persistence.ts`. Closing IS the retry —
 // the run is still on screen, untouched.
 
 import type { ReactElement } from 'react';
 import { WifiOff } from 'lucide-react';
-import type { RunSaveFailure } from '../shared/lib/run-persistence';
+import type { RunSaveFailure } from '@shared/run/run-persistence';
 
 interface RunFailureDialogProps {
   failure: RunSaveFailure;

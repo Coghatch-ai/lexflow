@@ -5,7 +5,7 @@
 // ladder) or a resumed draft (the whole served list, its cursor, the FIFO and
 // the ladder verbatim). One shape, so the board has exactly one seeding path.
 
-import type { AnswerDraft } from '../shared/lib/exit-rules';
+import type { AnswerDraft } from '@shared/run/exit-rules';
 import type { AdaptiveQuestion, AdaptiveState } from './adaptive-screens';
 
 /** The filters a simulado was started with, as `exam_drafts.setup` stores them. */

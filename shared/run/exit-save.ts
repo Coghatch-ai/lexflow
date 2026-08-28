@@ -1,4 +1,4 @@
-// app/src/shared/lib/exit-save.ts
+// shared/run/exit-save.ts
 //
 // How the LAST write of a run leaves the tab (BR-05 / BR-05.5, epic #67 slice
 // S2d — Codex adversarial review of #79).

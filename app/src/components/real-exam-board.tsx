@@ -20,7 +20,7 @@
 // A missing token is NOT proof that there is nothing to claim (the save can
 // commit and lose its response), so in this mode `flush()` probes the server
 // before it ever answers "record with no claim" — `needsClaimlessProbe` /
-// `claimlessVerdictFor` in `shared/lib/run-claimless.ts`. A row that comes
+// `claimlessVerdictFor` in `shared/run/run-claimless.ts`. A row that comes
 // back is terminal here, like any other CONFLICT. The SAME lost response on the
 // save side is `saveRun` in that file: it adopts the row it can prove it wrote,
 // instead of retrying `token: null` into OVERWRITE_CONFLICT forever.
@@ -56,12 +56,12 @@
 
 import { useEffect, useMemo, useState, type ReactElement } from 'react';
 import { useLov } from '../shared/hooks/use-lov';
-import { trpc } from '../shared/lib/trpc';
+import { runPersistenceIO, trpc } from '../shared/lib/trpc';
 import { findNextUnanswered } from '@shared/domain/exam-queue';
 import { useNotesAndBookmarks } from '../shared/hooks/use-notes-bookmarks';
 import { useLeaveWarning } from '../shared/hooks/use-leave-warning';
 import { useRegisterRun } from '../shared/run-guard-context';
-import { useRunPersistence } from '../shared/hooks/use-run-persistence';
+import { useRunPersistence } from '@shared/react/use-run-persistence';
 import ExamPlaying from './real-exam-playing';
 import ExamReview from './real-exam-review';
 import QuitTestDialog from './QuitTestDialog';
@@ -79,14 +79,14 @@ import {
   processableAnswers,
   shouldPromptOnExit,
   type AnswerDraft,
-} from '../shared/lib/exit-rules';
+} from '@shared/run/exit-rules';
 import {
   appendAnswer,
   dedupeAnswers,
   realDraftPayload,
   type DraftClaim,
   type RunConflictKind,
-} from '../shared/lib/run-persistence';
+} from '@shared/run/run-persistence';
 import {
   REAL_EXAM_DIFFICULTY,
   REAL_EXAM_DISCIPLINE,
@@ -164,6 +164,7 @@ export default function RealExamBoard({
           deadlineAt: start.deadlineAt,
           token,
         }),
+    runPersistenceIO,
   );
   const { conflict, failure } = persistence;
 
