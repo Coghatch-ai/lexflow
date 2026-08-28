@@ -31,6 +31,6 @@ export function primaryDisabled({
   return !checked && selected.length === 0;
 }
 
-// `canPostponeGuard` moved to ../shared/lib/exam-queue in #70 (D2): the
+// `canPostponeGuard` moved to @shared/domain/exam-queue (#70, moved in #85) (D2): the
 // simulation components under components/ need it too and must not import
 // from pages/.

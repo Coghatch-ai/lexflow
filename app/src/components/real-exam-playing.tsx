@@ -30,7 +30,15 @@ type Lov = { labelOf: (code: string) => string };
 export interface ExamPlayingProps {
   questions: PlayingQuestion[];
   currentIndex: number;
-  answers: Map<number, string>;
+  /**
+   * Answers keyed by QUESTION ID, not by index (epic #67 slice S2d): the run is
+   * persisted now, and an index is only meaningful against one particular
+   * queue — a question leaving the catalog would shift every answer after it
+   * onto the wrong question.
+   */
+  answersByQuestionId: ReadonlyMap<string, string>;
+  /** The index-space view of the same thing, derived by the board. */
+  answeredIndexes: ReadonlySet<number>;
   flagged: Set<number>;
   postponed: Set<number>;
   timeLeft: number;
@@ -55,7 +63,8 @@ export interface ExamPlayingProps {
 }
 
 export default function ExamPlaying({
-  questions, currentIndex, answers, flagged, postponed, timeLeft, examDuration,
+  questions, currentIndex, answersByQuestionId, answeredIndexes, flagged, postponed,
+  timeLeft, examDuration,
   showConfirmSubmit, notesAndBookmarks, disciplineLov, examBoardLov, canPostpone,
   eliminatedOptions, formatTime,
   onSelectAnswer, onToggleEliminate, onSetIndex, onToggleFlag, onPostpone, onGoToUnanswered,
@@ -63,7 +72,7 @@ export default function ExamPlaying({
 }: ExamPlayingProps): ReactElement {
   const { localNotes, bookmarkedIds, handleNoteChange, handleToggleBookmark } = notesAndBookmarks;
   const currentQuestion = questions[currentIndex];
-  const answeredCount = answers.size;
+  const answeredCount = answeredIndexes.size;
   const flaggedCount = flagged.size;
   const timePercentage = (timeLeft / examDuration) * 100;
   const isUrgent = timeLeft < 1800;
@@ -141,7 +150,7 @@ export default function ExamPlaying({
           examBoardLabel={examBoardLov.labelOf(currentQuestion.examBoard)}
           questionText={currentQuestion.questionText}
           options={currentQuestion.options}
-          selectedAnswer={answers.get(currentIndex) ?? ''}
+          selectedAnswer={answersByQuestionId.get(currentQuestion.id) ?? ''}
           onSelect={onSelectAnswer}
           note={localNotes.get(currentQuestion.id) ?? ''}
           onNoteChange={(text) => { handleNoteChange(currentQuestion.id, text); }}
@@ -173,7 +182,7 @@ export default function ExamPlaying({
       <ExamQuestionNav
         total={questions.length}
         currentIndex={currentIndex}
-        answered={new Set(answers.keys())}
+        answered={answeredIndexes}
         flagged={flagged}
         postponed={postponed}
         onSelect={onSetIndex}

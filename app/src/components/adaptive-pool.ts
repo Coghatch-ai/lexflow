@@ -10,7 +10,7 @@
 // materialized queue, so a postponed question left in `questions` is treated as
 // already seen by `fetchQuestion` and never comes back. The FIFO is what makes
 // "goes to the end of the queue" true here; `shouldServeDeferred`
-// (shared/lib/exam-queue.ts) decides when to drain it.
+// (shared/domain/exam-queue.ts) decides when to drain it.
 
 import { useCallback, useRef, useState } from 'react';
 import { shuffle } from '../shared/lib/shuffle';
@@ -60,21 +60,41 @@ export interface AdaptivePool {
   fetchQuestion: (difficulty: Difficulty) => AdaptiveQuestion | null;
   /** Seconds already spent on `questionId` before it was postponed. */
   carriedFor: (questionId: string) => number;
-  start: (pool: AdaptiveQuestion[], first: AdaptiveQuestion) => void;
   /** Put `question` on screen as the next one. */
   advance: (question: AdaptiveQuestion) => void;
   /** Park `question` at the back of the FIFO, banking `seconds` already spent. */
   park: (question: AdaptiveQuestion, seconds: number) => void;
   /** Drop the head of the FIFO (it is being served now). */
   dropHead: () => void;
-  reset: () => void;
 }
 
-export function useAdaptivePool(): AdaptivePool {
-  const [questionPool, setQuestionPool] = useState<AdaptiveQuestion[]>([]);
-  const [questions, setQuestions] = useState<AdaptiveQuestion[]>([]);
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [deferred, setDeferred] = useState<AdaptiveQuestion[]>([]);
+/**
+ * Where a run STARTS — a fresh simulado (`questions: [first]`, empty FIFO) or a
+ * resumed one (the whole served list, its cursor and the parked FIFO).
+ *
+ * Seeded through `useState` initialisers rather than a `start()`/`resume()`
+ * call, because the board reads `questions[currentIndex]` on its FIRST render:
+ * seeding with a setter would have to run DURING that render (an effect paints
+ * an empty simulado first), and a render-phase update leaves the current pass
+ * to finish against an empty list. The board is mounted with a `key` per run,
+ * so "initial state" is exactly the right seam — a new run is a new mount.
+ */
+export interface AdaptivePoolInit {
+  /** The CANDIDATE pool, always freshly drawn — never persisted (D8). */
+  pool: AdaptiveQuestion[];
+  /** The questions SERVED; holds a duplicate when a parked one came back. */
+  questions: AdaptiveQuestion[];
+  /** A position in `questions` — never an id, which may appear twice. */
+  currentIndex: number;
+  /** The "Responder depois" FIFO, oldest first (BR-03.1). */
+  deferred: AdaptiveQuestion[];
+}
+
+export function useAdaptivePool(init: AdaptivePoolInit): AdaptivePool {
+  const [questionPool] = useState<AdaptiveQuestion[]>(init.pool);
+  const [questions, setQuestions] = useState<AdaptiveQuestion[]>(init.questions);
+  const [currentIndex, setCurrentIndex] = useState(init.currentIndex);
+  const [deferred, setDeferred] = useState<AdaptiveQuestion[]>(init.deferred);
   // Time already spent on postponed questions, keyed by question id and
   // re-added when the question is finally answered.
   const carriedTimeRef = useRef<Map<string, number>>(new Map());
@@ -106,13 +126,6 @@ export function useAdaptivePool(): AdaptivePool {
     hasUnseen,
     fetchQuestion,
     carriedFor,
-    start: (pool, first) => {
-      setQuestionPool(pool);
-      setQuestions([first]);
-      setCurrentIndex(0);
-      setDeferred([]);
-      carriedTimeRef.current = new Map();
-    },
     advance: (question) => {
       setQuestions((prev) => [...prev, question]);
       setCurrentIndex((prev) => prev + 1);
@@ -122,11 +135,5 @@ export function useAdaptivePool(): AdaptivePool {
       setDeferred((prev) => [...prev, question]);
     },
     dropHead: () => { setDeferred((prev) => prev.slice(1)); },
-    reset: () => {
-      setQuestions([]);
-      setCurrentIndex(0);
-      setDeferred([]);
-      carriedTimeRef.current = new Map();
-    },
   };
 }

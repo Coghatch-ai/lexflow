@@ -8,6 +8,7 @@ import { usersRouter } from "./routers/users.router";
 import { questionsRouter } from "./routers/questions.router";
 import { discursiveRouter } from "./routers/discursive.router";
 import { sessionsRouter } from "./routers/sessions.router";
+import { examDraftsRouter } from "./routers/exam-drafts.router";
 import { statsRouter } from "./routers/stats.router";
 import { goalsRouter } from "./routers/goals.router";
 import { studyPlansRouter } from "./routers/study-plans.router";
@@ -28,6 +29,7 @@ export const appRouter = router({
   questions: questionsRouter,
   discursive: discursiveRouter,
   sessions: sessionsRouter,
+  examDrafts: examDraftsRouter,
   stats: statsRouter,
   goals: goalsRouter,
   studyPlans: studyPlansRouter,

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { primaryLabel, primaryDisabled } from './testing-flow-guards';
-// `canPostponeGuard` moved to shared/lib/exam-queue in #70 — its cases live in
-// app/src/shared/lib/exam-queue.test.ts now.
+// `canPostponeGuard` moved to shared/domain/exam-queue in #70 (moved there in #85) — its cases live in
+// shared/domain/exam-queue.test.ts now.
 
 // Regression guard for #45: Simulado Padrão two-step Conferir → lock → Próxima.
 

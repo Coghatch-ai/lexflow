@@ -10,6 +10,7 @@ import {
   endSwipe,
   isEliminated,
   isEliminationSwipe,
+  optionRowKey,
   startSwipe,
   toggleElimination,
 } from "./eliminations";
@@ -211,5 +212,62 @@ describe("eliminationDropsAnswer", () => {
     // Guards the degenerate case: an empty option text must not "drop" a
     // non-answer just because two empty strings are equal.
     expect(eliminationDropsAnswer("", "")).toBe(false);
+  });
+});
+
+// Regression guard for the leaking row latch (#85 review): the mobile rows were
+// keyed by index+option text alone, so two questions offering the SAME option
+// text at the SAME position reused one React element — and with it the row's
+// swipe latch, which then swallowed the first tap on the NEXT question.
+describe("optionRowKey", () => {
+  const OPTIONS = ["Verdadeiro", "Falso"];
+
+  // Stand-in for React reconciliation: a row instance (its latch) survives a
+  // re-render exactly when its key is unchanged; a new key mounts a fresh row.
+  function render(
+    mounted: ReadonlyMap<string, SwipeLatch>,
+    questionId: string,
+    options: readonly string[],
+  ): Map<string, SwipeLatch> {
+    const next = new Map<string, SwipeLatch>();
+    options.forEach((option, index) => {
+      const key = optionRowKey(questionId, index, option);
+      next.set(key, mounted.get(key) ?? IDLE_SWIPE);
+    });
+    return next;
+  }
+
+  function latchAt(
+    rows: ReadonlyMap<string, SwipeLatch>,
+    questionId: string,
+    index: number,
+    option: string,
+  ): SwipeLatch {
+    return rows.get(optionRowKey(questionId, index, option)) ?? IDLE_SWIPE;
+  }
+
+  it("gives every question its own row identity for the same option text", () => {
+    expect(optionRowKey("q1", 0, "Verdadeiro")).not.toBe(optionRowKey("q2", 0, "Verdadeiro"));
+  });
+
+  it("is stable for the same question, index and option", () => {
+    expect(optionRowKey("q1", 0, "Verdadeiro")).toBe(optionRowKey("q1", 0, "Verdadeiro"));
+    expect(optionRowKey("q1", 0, "Verdadeiro")).not.toBe(optionRowKey("q1", 1, "Verdadeiro"));
+  });
+
+  it("does not carry a row's swipe latch into the next question", () => {
+    // q1: a real cross-out swipe on row 0 arms the click swallow.
+    let rows = render(new Map<string, SwipeLatch>(), "q1", OPTIONS);
+    const swiped = endSwipe(startSwipe(200, 100), 100, 105);
+    expect(swiped.crossOut).toBe(true);
+    rows = new Map(rows).set(optionRowKey("q1", 0, OPTIONS[0] ?? ""), swiped.latch);
+    expect(latchAt(rows, "q1", 0, OPTIONS[0] ?? "").swallowClick).toBe(true);
+
+    // q2 offers the SAME texts at the SAME positions: its row 0 must be fresh,
+    // or the student's first tap on it is silently swallowed.
+    const nextRows = render(rows, "q2", OPTIONS);
+    const row0 = latchAt(nextRows, "q2", 0, OPTIONS[0] ?? "");
+    expect(row0.swallowClick).toBe(false);
+    expect(consumeClick(row0).selects).toBe(true);
   });
 });

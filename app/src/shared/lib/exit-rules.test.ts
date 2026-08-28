@@ -10,6 +10,7 @@ import {
 } from "./exit-rules";
 
 const ALL_MODES: RunMode[] = ["standard", "adaptive", "spaced", "real"];
+const STUDY_MODES: RunMode[] = ["standard", "adaptive", "spaced"];
 
 function draft(id: string, userAnswer: string, correct: boolean): AnswerDraft {
   return { questionId: id, userAnswer, correct, timeSpent: 10 };
@@ -30,14 +31,36 @@ describe("exitPrompt", () => {
     expect(exitPrompt("standard", 5, 10).quitLabel).toBe("Sair e processar respostas");
   });
 
-  it("offers exactly two actions in every mode, none of them save (S1 criteria 6 and 7)", () => {
-    for (const mode of ALL_MODES) {
+  // Rewritten in S2b (#77): S1 locked the OPPOSITE — two options everywhere and
+  // no label containing "salvar" — because no run could be saved yet. Server-side
+  // persistence exists since S2a, so the three study modes now offer the third
+  // action and only the prova real still refuses it (BR-05.3 / BR-05.5).
+  it("offers 'Salvar e sair' as a third action on the study modes (BR-05.3)", () => {
+    for (const mode of STUDY_MODES) {
       const prompt = exitPrompt(mode, 3, 10);
-      expect(prompt.optionCount).toBe(2);
-      expect(prompt.continueLabel.toLowerCase()).not.toContain("salvar");
-      expect(prompt.quitLabel.toLowerCase()).not.toContain("salvar");
+      expect(prompt.optionCount).toBe(3);
+      expect(prompt.saveLabel).toBe("Salvar e sair");
       expect(prompt.title.length).toBeGreaterThan(0);
       expect(prompt.body).toContain("3");
+    }
+  });
+
+  it("never offers to save the prova real (BR-05.5)", () => {
+    const prompt = exitPrompt("real", 3, 80);
+    expect(prompt.optionCount).toBe(2);
+    expect(prompt.saveLabel).toBeNull();
+    expect(prompt.continueLabel.toLowerCase()).not.toContain("salvar");
+    expect(prompt.quitLabel.toLowerCase()).not.toContain("salvar");
+  });
+
+  it("keeps the two original actions in every mode, save or no save", () => {
+    for (const mode of ALL_MODES) {
+      const prompt = exitPrompt(mode, 3, 10);
+      expect(prompt.continueLabel.length).toBeGreaterThan(0);
+      expect(prompt.quitLabel.length).toBeGreaterThan(0);
+      // The count is the CONTRACT the dialog renders against: 2 buttons + the
+      // save one only where `saveLabel` exists.
+      expect(prompt.optionCount).toBe(prompt.saveLabel === null ? 2 : 3);
     }
   });
 });

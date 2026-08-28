@@ -90,3 +90,22 @@ export function sm2Update(
 
   return { interval, repetitions, easeFactor, nextReviewAt };
 }
+
+/**
+ * "Próxima revisão agendada em N dias" — what the review screen shows right
+ * after an answer, before `sessions.record` has actually moved the schedule.
+ *
+ * It is `sm2Update`'s own interval, never a second copy of the ladder: the
+ * screen used to inline `reps === 1 ? 6 : round(interval * 2.5)`, which pinned
+ * the display to the DEFAULT ease factor and would have drifted the moment an
+ * admin edited `spaced_repetition_config`. The student's real EF is not in the
+ * review queue payload, so the config default stands in for it — an estimate of
+ * the interval, computed by the one function that owns the rule.
+ */
+export function displayIntervalDays(
+  state: Pick<Sm2State, "interval" | "repetitions">,
+  correct: boolean,
+  config: Sm2Config = DEFAULT_SM2_CONFIG,
+): number {
+  return sm2Update({ ...state, easeFactor: config.defaultEaseFactor }, correct, config).interval;
+}

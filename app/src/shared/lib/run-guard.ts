@@ -45,6 +45,54 @@ export function pickActiveRun(runs: readonly RunRegistration[]): RunRegistration
 }
 
 /**
+ * Whether the exit dialog offers "Salvar e sair" at all — the DOUBLE lock, in
+ * one place instead of two (BR-05.3 / BR-05.5).
+ *
+ * Both halves are load-bearing and neither implies the other. The RULE is per
+ * MODE: `exitPrompt('real')` answers `saveLabel: null`, because a prova real is
+ * never saved to continue later — persisting it (slice S2d) is for the
+ * auto-submit, and that is not the same thing. The HANDLER is per SCREEN: a
+ * mode whose wiring has not landed keeps two buttons without forking a second
+ * rule set.
+ *
+ * The prova real is the case that must never regress: it registers NO save
+ * handler and its prompt has NO label, so the third button cannot come back by
+ * someone wiring a handler in — offering it would be an escape hatch out of an
+ * exam that is not allowed to be paused.
+ */
+export function offersSaveAndExit(prompt: ExitPrompt, save: (() => unknown) | undefined): boolean {
+  return prompt.saveLabel !== null && save !== undefined;
+}
+
+/** What the guard does with its own dialog once the screen's `save()` settled. */
+export interface GuardSaveOutcome {
+  /** The pending navigation only runs for a run that is safely on the server. */
+  navigate: boolean;
+  /**
+   * ALWAYS true — including on a failed save.
+   *
+   * The guard's dialog is `fixed inset-0 z-50` and is rendered AFTER the
+   * screen, so while it is up it sits over the failure and CONFLICT dialogs
+   * the screen raises to say why the save did not land. Keeping it open on
+   * `false` handed the student the same dialog again with no word about the
+   * error, and clicking it a second time did nothing visible — exactly the
+   * silent failure this slice exists to remove.
+   *
+   * Dropping the pending navigation with it is deliberate and matches "sair e
+   * processar": nothing was saved, so nothing may leave the run.
+   */
+  closeDialog: boolean;
+}
+
+/**
+ * The guard's half of "Salvar e sair" (BR-05.3): navigate only when the screen
+ * reported a saved run, and always get out of the screen's way.
+ */
+export function guardSaveOutcome(saved: boolean): GuardSaveOutcome {
+  return { navigate: saved, closeDialog: true };
+}
+
+/**
  * The decision taken AT CLICK TIME by the navigation guard.
  *
  * `targetPath === null` means logout, which never matches the current route

@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react';
 import { Brain, ChevronRight, CheckCircle, XCircle, Clock, Zap, ArrowRightToLine } from 'lucide-react';
-import { nextDifficulty } from '@shared/domain/adaptive';
+import { nextDifficulty, type AdaptiveState } from '@shared/domain/adaptive';
 import { accuracyPct } from '@shared/domain/scoring';
 import type { AiExplanation } from '@shared/domain/ai-eval';
 import { type NotesAndBookmarks } from '../shared/hooks/use-notes-bookmarks';
@@ -22,14 +22,9 @@ export type AdaptiveQuestion = {
   legislationTitle: string | null;
 };
 
-export interface AdaptiveState {
-  currentDifficulty: Difficulty;
-  consecutiveCorrect: number;
-  consecutiveWrong: number;
-  totalCorrect: number;
-  totalAnswered: number;
-  difficultyHistory: Difficulty[];
-}
+// Canonical in `@shared/domain/adaptive` — `exam_drafts.mode_state` persists it
+// verbatim and the API reads it back. Re-exported so importers are unchanged.
+export type { AdaptiveState };
 
 const DIFFICULTY_COLORS: Record<Difficulty, string> = {
   easy: 'bg-green-100 text-green-700',
@@ -130,6 +125,8 @@ interface AdaptivePlayingProps {
   timer: number;
   currentQuestion: AdaptiveQuestion;
   selectedAnswer: string;
+  /** pt-BR warning from a reconciled resume (questions left the catalog). */
+  notice?: string | null | undefined;
   notesAndBookmarks: NotesAndBookmarks;
   disciplineLov: Lov;
   examBoardLov: Lov;
@@ -144,7 +141,7 @@ interface AdaptivePlayingProps {
 }
 
 export function AdaptivePlaying({
-  adaptive, totalQuestions, timer, currentQuestion, selectedAnswer,
+  adaptive, totalQuestions, timer, currentQuestion, selectedAnswer, notice = null,
   notesAndBookmarks, disciplineLov, examBoardLov, difficultyLov,
   canPostpone, eliminatedOptions, onSelect, onToggleEliminate, onPostpone, onAnswer,
   onRequestExit,
@@ -152,6 +149,11 @@ export function AdaptivePlaying({
   const { localNotes, bookmarkedIds, handleNoteChange, handleToggleBookmark } = notesAndBookmarks;
   return (
     <div className="space-y-4">
+      {notice !== null && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-3 text-sm">
+          {notice}
+        </div>
+      )}
       <div className="flex items-center justify-between bg-white rounded-xl p-4 shadow">
         <div className="flex items-center gap-3">
           <Brain className="w-5 h-5 text-[#16161a]" />

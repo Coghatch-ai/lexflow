@@ -1,0 +1,502 @@
+import { describe, expect, it } from "vitest";
+import {
+  NO_CARRIED_TIME,
+  type CarriedTime,
+  canPostponeAdaptive,
+  canPostponeGuard,
+  carryTime,
+  findNextUnanswered,
+  moveToEnd,
+  nextAdaptiveStep,
+  postponeOnce,
+  shouldServeDeferred,
+  totalTimeFor,
+} from "./exam-queue";
+import { DEFAULT_ADAPTIVE_CONFIG, type AdaptiveState } from "./adaptive";
+
+describe("moveToEnd", () => {
+  it("moves the element at index to the end, preserving relative order", () => {
+    expect(moveToEnd(["a", "b", "c", "d"], 1)).toEqual(["a", "c", "d", "b"]);
+    expect(moveToEnd(["a", "b", "c", "d"], 0)).toEqual(["b", "c", "d", "a"]);
+  });
+
+  it("is a no-op permutation for the last index", () => {
+    expect(moveToEnd(["a", "b", "c"], 2)).toEqual(["a", "b", "c"]);
+  });
+
+  it("preserves length and membership", () => {
+    const input = ["q1", "q2", "q3", "q4", "q5"];
+    const result = moveToEnd(input, 2);
+    expect(result).toHaveLength(input.length);
+    expect([...result].sort()).toEqual([...input].sort());
+  });
+
+  it("does not mutate the input and returns a new reference", () => {
+    const input = ["a", "b", "c"];
+    const snapshot = [...input];
+    const result = moveToEnd(input, 0);
+    expect(input).toEqual(snapshot);
+    expect(result).not.toBe(input);
+  });
+
+  it("returns a copy for out-of-range indices", () => {
+    expect(moveToEnd(["a", "b"], -1)).toEqual(["a", "b"]);
+    expect(moveToEnd(["a", "b"], 2)).toEqual(["a", "b"]);
+    expect(moveToEnd([], 0)).toEqual([]);
+  });
+});
+
+// #85 (M1): o runner mobile é uma fila materializada com cursor parado, como o
+// Simulado Padrão. O cronômetro dele reinicia por MUDANÇA DE ÍNDICE, e adiar não
+// muda o índice — daí os dois helpers de tempo carregado.
+describe("fila do runner mobile", () => {
+  it("devolve a adiada na ÚLTIMA posição e a seguinte no slot do cursor", () => {
+    const queue = ["q1", "q2", "q3", "q4"];
+    const after = moveToEnd(queue, 1);
+    expect(after.at(1)).toBe("q3");
+    expect(after.at(-1)).toBe("q2");
+  });
+
+  it("não muda o denominador do progresso (n/total)", () => {
+    const queue = ["q1", "q2", "q3", "q4"];
+    expect(moveToEnd(queue, 0)).toHaveLength(queue.length);
+  });
+
+  it("proíbe adiar depois de escolher — no mobile `checked` é o reveal instantâneo", () => {
+    expect(canPostponeGuard({ checked: true, hasMoreQuestions: true })).toBe(false);
+  });
+
+  it("proíbe adiar a última pendente da fila", () => {
+    expect(canPostponeGuard({ checked: false, hasMoreQuestions: false })).toBe(false);
+  });
+});
+
+describe("carryTime", () => {
+  it("acumula dois adiamentos da mesma questão", () => {
+    const once = carryTime(NO_CARRIED_TIME, "q1", 10);
+    const twice = carryTime(once, "q1", 7);
+    expect(twice.get("q1")).toBe(17);
+  });
+
+  it("não toca outras chaves", () => {
+    const carried = carryTime(carryTime(NO_CARRIED_TIME, "q1", 10), "q2", 3);
+    expect(carryTime(carried, "q1", 5).get("q2")).toBe(3);
+  });
+
+  it("devolve um Map novo e não muta a entrada", () => {
+    const before = carryTime(NO_CARRIED_TIME, "q1", 10);
+    const after = carryTime(before, "q1", 7);
+    expect(after).not.toBe(before);
+    expect(before.get("q1")).toBe(10);
+  });
+});
+
+describe("totalTimeFor", () => {
+  it("soma o carregado ao tempo da visita atual", () => {
+    expect(totalTimeFor(carryTime(NO_CARRIED_TIME, "q1", 10), "q1", 7)).toBe(17);
+  });
+
+  it("devolve só o atual quando a questão nunca foi adiada", () => {
+    expect(totalTimeFor(NO_CARRIED_TIME, "q1", 12)).toBe(12);
+    expect(totalTimeFor(carryTime(NO_CARRIED_TIME, "q2", 30), "q1", 12)).toBe(12);
+  });
+});
+
+describe("findNextUnanswered", () => {
+  it("returns the next unanswered index after `from`", () => {
+    expect(findNextUnanswered(5, 1, new Set([0]))).toBe(2);
+  });
+
+  it("skips answered indices", () => {
+    expect(findNextUnanswered(5, 1, new Set([2, 3]))).toBe(4);
+  });
+
+  it("wraps around past the end", () => {
+    expect(findNextUnanswered(5, 3, new Set([4]))).toBe(0);
+  });
+
+  it("excludes `from` itself", () => {
+    // Only index 2 (=from) is unanswered → nothing else to go to.
+    expect(findNextUnanswered(4, 2, new Set([0, 1, 3]))).toBeNull();
+  });
+
+  it("returns null when everything is answered", () => {
+    expect(findNextUnanswered(3, 0, new Set([0, 1, 2]))).toBeNull();
+  });
+
+  it("accepts a Map keyed by index (real exam answers shape)", () => {
+    const answers = new Map<number, string>([
+      [0, "opt A"],
+      [2, "opt B"],
+    ]);
+    expect(findNextUnanswered(4, 0, answers)).toBe(1);
+    expect(findNextUnanswered(4, 1, answers)).toBe(3);
+  });
+
+  it("handles a single-question exam", () => {
+    expect(findNextUnanswered(1, 0, new Set())).toBeNull();
+  });
+});
+
+// Migrated from pages/testing-flow-guards.test.ts in #70 — the guard moved to
+// this module so components/ can use it without importing from pages/.
+describe("canPostponeGuard", () => {
+  it("true when unchecked and more questions remain", () => {
+    expect(canPostponeGuard({ checked: false, hasMoreQuestions: true })).toBe(true);
+  });
+
+  it("false when checked (lock step)", () => {
+    expect(canPostponeGuard({ checked: true, hasMoreQuestions: true })).toBe(false);
+  });
+
+  it("false when no more questions (last in queue)", () => {
+    expect(canPostponeGuard({ checked: false, hasMoreQuestions: false })).toBe(false);
+  });
+});
+
+describe("canPostponeAdaptive", () => {
+  it("false without a replacement question to draw", () => {
+    expect(
+      canPostponeAdaptive({
+        totalAnswered: 3,
+        totalQuestions: 10,
+        deferredCount: 0,
+        hasReplacement: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("false without slack (the deferred question would not fit back)", () => {
+    expect(
+      canPostponeAdaptive({
+        totalAnswered: 9,
+        totalQuestions: 10,
+        deferredCount: 0,
+        hasReplacement: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("true with slack for the deferred question plus one to answer now", () => {
+    expect(
+      canPostponeAdaptive({
+        totalAnswered: 3,
+        totalQuestions: 10,
+        deferredCount: 1,
+        hasReplacement: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("false once the already-deferred questions fill the remaining slots", () => {
+    expect(
+      canPostponeAdaptive({
+        totalAnswered: 6,
+        totalQuestions: 10,
+        deferredCount: 3,
+        hasReplacement: true,
+      }),
+    ).toBe(false);
+  });
+});
+
+// Regression guard for #70: without this rule a postponed adaptive question
+// stays in `questions`, so `fetchQuestion` treats it as already seen and it
+// NEVER comes back — postponing would silently discard it (BR-03.1).
+describe("shouldServeDeferred", () => {
+  it("serve a diferida quando os slots restantes acabaram", () => {
+    expect(
+      shouldServeDeferred({
+        totalAnswered: 9,
+        totalQuestions: 10,
+        deferredCount: 1,
+        poolExhausted: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("serve a diferida quando o pool acabou", () => {
+    expect(
+      shouldServeDeferred({
+        totalAnswered: 2,
+        totalQuestions: 10,
+        deferredCount: 1,
+        poolExhausted: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("sorteia do pool enquanto ainda ha folga", () => {
+    expect(
+      shouldServeDeferred({
+        totalAnswered: 2,
+        totalQuestions: 10,
+        deferredCount: 1,
+        poolExhausted: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("nada a servir sem diferidas", () => {
+    expect(
+      shouldServeDeferred({
+        totalAnswered: 9,
+        totalQuestions: 10,
+        deferredCount: 0,
+        poolExhausted: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldServeDeferred({
+        totalAnswered: 9,
+        totalQuestions: 10,
+        deferredCount: 0,
+        poolExhausted: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("drena varias diferidas na cauda do simulado", () => {
+    // 2 deferred, 2 slots left → the tail belongs to the deferred FIFO.
+    expect(
+      shouldServeDeferred({
+        totalAnswered: 8,
+        totalQuestions: 10,
+        deferredCount: 2,
+        poolExhausted: false,
+      }),
+    ).toBe(true);
+  });
+});
+
+// ── Slice S2c: the FIFO and the ladder after a RESUME ───────────────────────
+//
+// A resumed simulado feeds these rules two rehydrated things: `deferredCount`
+// from `modeState.deferredIds` (the FIFO's bodies come back from
+// `questions.byIds`) and the persisted `AdaptiveState`. Both are ids/plain
+// numbers by then, so the rules cannot tell a resumed run from a live one —
+// which is exactly the property under test.
+describe("deferidas rehidratadas (retomada)", () => {
+  /** What `resumeAdaptiveFrom` handed back, as the board holds it. */
+  const resumed = { deferredIds: ["a2", "a5"], totalAnswered: 8, totalQuestions: 10 };
+
+  it("drena as 2 adiadas rehidratadas quando sobram exatamente 2 vagas", () => {
+    expect(
+      shouldServeDeferred({
+        totalAnswered: resumed.totalAnswered,
+        totalQuestions: resumed.totalQuestions,
+        deferredCount: resumed.deferredIds.length,
+        poolExhausted: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("uma adiada que sumiu do catalogo deixa de ocupar vaga", () => {
+    // `resumeAdaptiveFrom` drops an id that left the catalog from the FIFO: the
+    // count that reaches this rule is the SURVIVORS', so the simulado still
+    // draws a fresh question instead of holding a slot for a ghost.
+    const survivors = resumed.deferredIds.filter((id) => id !== "a5");
+    expect(
+      shouldServeDeferred({
+        totalAnswered: resumed.totalAnswered,
+        totalQuestions: resumed.totalQuestions,
+        deferredCount: survivors.length,
+        poolExhausted: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("canPostponeAdaptive apos a retomada conta as adiadas que voltaram", () => {
+    // 10 - 5 - 2 = 3 ≥ 2: still room to postpone one more.
+    expect(
+      canPostponeAdaptive({
+        totalAnswered: 5,
+        totalQuestions: resumed.totalQuestions,
+        deferredCount: resumed.deferredIds.length,
+        hasReplacement: true,
+      }),
+    ).toBe(true);
+    // 10 - 7 - 2 = 1 < 2: postponing now could shrink the simulado.
+    expect(
+      canPostponeAdaptive({
+        totalAnswered: 7,
+        totalQuestions: resumed.totalQuestions,
+        deferredCount: resumed.deferredIds.length,
+        hasReplacement: true,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("nextAdaptiveStep", () => {
+  const ladder = (over: Partial<AdaptiveState> = {}): AdaptiveState => ({
+    currentDifficulty: "medium",
+    consecutiveCorrect: 0,
+    consecutiveWrong: 0,
+    totalCorrect: 3,
+    totalAnswered: 4,
+    difficultyHistory: [],
+    ...over,
+  });
+
+  it("termina quando o total contratado foi respondido", () => {
+    expect(
+      nextAdaptiveStep({
+        adaptive: ladder({ totalAnswered: 10 }),
+        totalQuestions: 10,
+        deferredCount: 1,
+        poolExhausted: false,
+      }),
+    ).toEqual({ kind: "finish" });
+  });
+
+  it("serve a FIFO na cauda antes de sortear", () => {
+    expect(
+      nextAdaptiveStep({
+        adaptive: ladder({ totalAnswered: 9 }),
+        totalQuestions: 10,
+        deferredCount: 1,
+        poolExhausted: false,
+      }),
+    ).toEqual({ kind: "deferred" });
+  });
+
+  it("sobe a escada a partir do estado PERSISTIDO, sem recomecar em medium", () => {
+    // The resumed run carries the streak, so the very next question is drawn at
+    // `hard` — a run that reset the ladder would draw `medium` here.
+    const persisted = JSON.parse(
+      JSON.stringify(ladder({ currentDifficulty: "medium", consecutiveCorrect: 2 })),
+    ) as AdaptiveState;
+    expect(
+      nextAdaptiveStep({
+        adaptive: persisted,
+        totalQuestions: 10,
+        deferredCount: 0,
+        poolExhausted: false,
+      }),
+    ).toEqual({ kind: "draw", difficulty: "hard" });
+  });
+
+  it("desce a escada apos a sequencia de erros persistida", () => {
+    expect(
+      nextAdaptiveStep({
+        adaptive: ladder({ currentDifficulty: "hard", consecutiveWrong: 2 }),
+        totalQuestions: 10,
+        deferredCount: 0,
+        poolExhausted: false,
+      }),
+    ).toEqual({ kind: "draw", difficulty: "medium" });
+  });
+
+  it("honra um config alternativo", () => {
+    expect(
+      nextAdaptiveStep({
+        adaptive: ladder({ currentDifficulty: "easy", consecutiveCorrect: 1 }),
+        totalQuestions: 10,
+        deferredCount: 0,
+        poolExhausted: false,
+        config: { ...DEFAULT_ADAPTIVE_CONFIG, stepUpAfter: 1 },
+      }),
+    ).toEqual({ kind: "draw", difficulty: "medium" });
+  });
+});
+
+// Regression guard for the double-tap on "Responder depois" (#85 review): the
+// runner's handler is re-entrant, so two events for the SAME rendered question
+// used to advance the queue twice — skipping an unseen question — and bank the
+// same reading seconds twice into `timeSpent`.
+describe("postponeOnce", () => {
+  const QUEUE = ["q1", "q2", "q3", "q4"];
+
+  // Replays what the runner does with a burst of taps on ONE rendered question:
+  // every event sees the same queue reference (React has not re-rendered yet),
+  // and only an applied outcome moves the queue / the carry.
+  function burst(taps: number): {
+    queue: readonly string[];
+    carried: CarriedTime;
+    applied: number;
+  } {
+    let queue: readonly string[] = QUEUE;
+    let carried: CarriedTime = NO_CARRIED_TIME;
+    let consumedQueue: readonly string[] | null = null;
+    let applied = 0;
+    const rendered = queue;
+    const renderedId = "q1";
+    for (let tap = 0; tap < taps; tap++) {
+      const outcome = postponeOnce({
+        queue: rendered,
+        index: 0,
+        questionId: renderedId,
+        elapsedSeconds: 12,
+        carried,
+        consumedQueue,
+      });
+      if (!outcome.applied) continue;
+      consumedQueue = rendered;
+      queue = outcome.queue;
+      carried = outcome.carried;
+      applied++;
+    }
+    return { queue, carried, applied };
+  }
+
+  it("applies exactly ONE queue transition for duplicate events at the same index", () => {
+    expect(burst(2).queue).toEqual(["q2", "q3", "q4", "q1"]);
+    expect(burst(2).applied).toBe(1);
+    expect(burst(5).queue).toEqual(["q2", "q3", "q4", "q1"]);
+  });
+
+  it("banks the carried time exactly ONCE for duplicate events", () => {
+    expect(burst(2).carried.get("q1")).toBe(12);
+    expect(burst(5).carried.get("q1")).toBe(12);
+  });
+
+  it("still postpones a single legitimate tap", () => {
+    const single = burst(1);
+    expect(single.applied).toBe(1);
+    expect(single.queue).toEqual(["q2", "q3", "q4", "q1"]);
+    expect(single.carried.get("q1")).toBe(12);
+  });
+
+  it("keeps a question postponable when it comes back later (BR-03.1)", () => {
+    // First visit: q1 goes to the tail and its token is consumed.
+    const first = postponeOnce({
+      queue: QUEUE,
+      index: 0,
+      questionId: "q1",
+      elapsedSeconds: 12,
+      carried: NO_CARRIED_TIME,
+      consumedQueue: null,
+    });
+    if (!first.applied) throw new Error("first postpone must apply");
+    // q1 is back at index 3 on a NEW queue reference: postponing it again is a
+    // legitimate second transition, and its earlier seconds keep accumulating.
+    const again = postponeOnce({
+      queue: first.queue,
+      index: 3,
+      questionId: "q1",
+      elapsedSeconds: 8,
+      carried: first.carried,
+      consumedQueue: QUEUE,
+    });
+    if (!again.applied) throw new Error("a later postpone of the same question must apply");
+    expect(again.queue).toEqual(["q2", "q3", "q4", "q1"]);
+    expect(again.carried.get("q1")).toBe(20);
+  });
+
+  it("never mutates the queue or the carry it was given", () => {
+    const input = [...QUEUE];
+    const carried = carryTime(NO_CARRIED_TIME, "q1", 5);
+    const outcome = postponeOnce({
+      queue: input,
+      index: 1,
+      questionId: "q2",
+      elapsedSeconds: 3,
+      carried,
+      consumedQueue: null,
+    });
+    expect(input).toEqual(QUEUE);
+    expect(carried.get("q2")).toBeUndefined();
+    expect(outcome.applied).toBe(true);
+  });
+});

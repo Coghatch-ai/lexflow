@@ -2,9 +2,15 @@
 // screens. Pure module: no React, no persistence, no tRPC — a cross-out never
 // reaches the sessions.record payload, the grade, the stats or SM-2.
 //
+// Lives under shared/ (not app/src/shared/lib) since #85: the mobile bundle
+// resolves only @shared/@api/@drizzle, so the desktop `QuestionCard` screens and
+// the mobile `QuestionRunner` share this one definition instead of two copies.
+//
 // The state is a Map keyed by question id holding the eliminated option texts.
-// A Map (not a Record) because the frontend tsconfig runs without
-// `noUncheckedIndexedAccess`, so a Record index would lie about its type.
+// A Map (not a Record) because a Record index is only as honest as the tsconfig
+// reading it: this file is now checked by tsconfig.api.json (max-strict) AND
+// consumed by the two frontend programs, which run without
+// `noUncheckedIndexedAccess` — there the index would lie about its type.
 
 /** Eliminated option texts per question id. Treat as immutable. */
 export type EliminationState = ReadonlyMap<string, readonly string[]>;
@@ -136,4 +142,15 @@ export function consumeClick(latch: SwipeLatch): Readonly<{ latch: SwipeLatch; s
  */
 export function eliminationDropsAnswer(selectedAnswer: string, option: string): boolean {
   return selectedAnswer.length > 0 && selectedAnswer === option;
+}
+
+/**
+ * React key of one alternative row. Carries the QUESTION identity, not just the
+ * position and the text: the row owns touch state (`SwipeLatch`), so two
+ * questions offering the same option text at the same position would otherwise
+ * reuse one element — and the armed click-swallow of a cross-out swipe on the
+ * first question would eat the first tap on the second one.
+ */
+export function optionRowKey(questionId: string, index: number, option: string): string {
+  return `${questionId}-${String(index)}-${option}`;
 }
