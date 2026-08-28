@@ -3,8 +3,8 @@
 //
 // Mounted with a `key` per run, so a fresh run gets a fresh scheduler and a
 // fresh draft identity without any reset path to get wrong. Everything it
-// DECIDES comes from pure modules (`shared/lib/run-persistence`,
-// `shared/lib/exit-rules`, `shared/domain/exam-draft`); this file only wires.
+// DECIDES comes from pure modules (`shared/run/run-persistence`,
+// `shared/run/exit-rules`, `shared/domain/exam-draft`); this file only wires.
 //
 // Where the flush lives is load-bearing: it is the FIRST awaited instruction of
 // `handleSaveAndExit` / `handleQuitAndProcess`, never inside `QuitTestDialog`
@@ -20,25 +20,25 @@
 import { useEffect, useRef, useState, type ReactElement } from 'react';
 import { useSession } from '../auth';
 import { useLov } from '../shared/hooks/use-lov';
-import { trpc } from '../shared/lib/trpc';
+import { runPersistenceIO, trpc } from '../shared/lib/trpc';
 import { canPostponeGuard, moveToEnd } from '@shared/domain/exam-queue';
 import { useNotesAndBookmarks } from '../shared/hooks/use-notes-bookmarks';
 import { useLeaveWarning } from '../shared/hooks/use-leave-warning';
 import { useRegisterRun } from '../shared/run-guard-context';
-import { useRunPersistence } from '../shared/hooks/use-run-persistence';
+import { useRunPersistence } from '@shared/react/use-run-persistence';
 import QuitTestDialog from '../components/QuitTestDialog';
 import {
   exitPrompt,
   processableAnswers,
   shouldPromptOnExit,
   type AnswerDraft,
-} from '../shared/lib/exit-rules';
+} from '@shared/run/exit-rules';
 import {
   appendAnswer,
   dedupeAnswers,
   standardDraftPayload,
   type DraftClaim,
-} from '../shared/lib/run-persistence';
+} from '@shared/run/run-persistence';
 import TestCompleted from './testing-completed';
 import StandardQuestion from './testing-standard-question';
 import RunOverlays from './testing-run-overlays';
@@ -115,6 +115,7 @@ export default function StandardBoard({
           elapsedSeconds: timer,
           token,
         }),
+    runPersistenceIO,
   );
 
   // A resumed run already owns its row: adopting during render (a ref write,

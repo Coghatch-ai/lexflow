@@ -3,7 +3,7 @@ import { CheckCircle, XCircle } from 'lucide-react';
 import { accuracyPct } from '@shared/domain/scoring';
 import type { AiExplanation } from '@shared/domain/ai-eval';
 import AiExplanationButton from '@/shared/components/AiExplanationButton';
-import { type AnswerDraft, answeredStats } from '@/shared/lib/exit-rules';
+import { type AnswerDraft, answeredStats } from '@shared/run/exit-rules';
 import { shouldShowExplanationToggle } from './real-exam-review-guards';
 
 type ReviewQuestion = {

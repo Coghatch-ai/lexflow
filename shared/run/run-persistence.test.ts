@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { moveToEnd } from "@shared/domain/exam-queue";
+import { moveToEnd } from "../domain/exam-queue";
 import {
   adoptableDraftId,
   appendAnswer,
@@ -16,7 +16,7 @@ import {
   type PersistedDraft,
   type StandardRunState,
 } from "./run-persistence";
-import type { AnswerDraft } from "@shared/domain/exam-draft";
+import type { AnswerDraft } from "../domain/exam-draft";
 
 // The RAW PostgreSQL text of `exam_drafts.last_saved_at`: microseconds, a
 // space instead of `T`, `+00` instead of `Z`. Every normalisation this project

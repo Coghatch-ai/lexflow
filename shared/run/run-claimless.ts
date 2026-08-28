@@ -1,4 +1,4 @@
-// app/src/shared/lib/run-claimless.ts
+// shared/run/run-claimless.ts
 //
 // ONE concept, one file: what to do about a run this tab persisted but cannot
 // CLAIM (epic #67 / #79). It has a single cause at both ends of the run — a
@@ -34,7 +34,7 @@ import {
   type PersistedDraft,
   type RunDraftPayload,
 } from "./run-persistence";
-import { timestampMs, type ExamDraftModeState, type RunMode } from "@shared/domain/exam-draft";
+import { timestampMs, type ExamDraftModeState, type RunMode } from "../domain/exam-draft";
 
 /**
  * Whether a claimless recording must be checked against the server FIRST.

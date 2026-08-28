@@ -12,7 +12,7 @@
 import { useEffect, useRef, useState, type ReactElement } from 'react';
 import { useSession } from '../auth';
 import { FRESH_READ, trpc } from '../shared/lib/trpc';
-import { persistedDraftOf, resumeSpacedFrom } from '../shared/lib/run-persistence';
+import { persistedDraftOf, resumeSpacedFrom } from '@shared/run/run-persistence';
 import SpacedBoard from './spaced-board';
 import { SpacedEmptyState } from './spaced-screens';
 import { toReviewItem, type SpacedRunStart } from './spaced-types';

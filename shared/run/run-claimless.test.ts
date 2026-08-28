@@ -17,7 +17,7 @@ import {
   type RunDraftPayload,
   type StandardRunState,
 } from "./run-persistence";
-import type { AnswerDraft } from "@shared/domain/exam-draft";
+import type { AnswerDraft } from "../domain/exam-draft";
 
 // The RAW PostgreSQL text of `exam_drafts.last_saved_at`: microseconds, a space
 // instead of `T`, `+00` instead of `Z`. It is matched with `=` in SQL, so it is

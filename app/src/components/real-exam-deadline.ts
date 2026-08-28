@@ -25,7 +25,7 @@ import {
   deadlineCompletionFor,
   deadlineSettlementFor,
 } from './real-exam-failures';
-import { settleWithin, type Settled } from '../shared/lib/settle-within';
+import { settleWithin, type Settled } from '@shared/run/settle-within';
 
 /**
  * `processReal` as one of THREE answers: the settlement itself, `UNSETTLED`

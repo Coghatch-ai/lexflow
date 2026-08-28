@@ -63,17 +63,37 @@ Both moved out of `app/src/shared/lib/` in #85 (M1): the mobile bundle resolves 
 trigger on `app/**`, so a rule shared by desktop AND mobile cannot live under `app/`. Desktop
 imports are `@shared/domain/…`; nothing else about them changed.
 
+**A M2a (#86) repetiu a mudança de casa para a maquinaria de corrida**, pelo mesmo motivo e sem
+alterar comportamento nenhum — quem move é o `git mv`, os desktop importam pelos caminhos novos:
+
+- **`shared/run/`** (puro, testado por `vitest.config.ts`) — `exit-rules.ts`, `exit-listeners.ts`,
+  `exit-save.ts`, `run-persistence.ts`, `run-claimless.ts`, `save-scheduler.ts`,
+  `settle-within.ts` + o `mobile-run.ts` novo. Ou seja: TODAS as regras da BR-05 que os dois
+  clientes precisam ler.
+- **`shared/react/`** — `use-run-persistence.ts`, o único módulo React de `shared/`. É a exceção
+  registrada em `tsconfig.api.json` (`exclude: ["shared/react/**"]`): aquele programa roda
+  `lib: ["esnext"]`, sem DOM. As regras que ele embrulha ficam em `shared/run/**`, que **é**
+  compilado ali.
+
+O que **não** mudou de casa: `app/src/shared/lib/run-guard.ts` continua em `app/`, porque o guard
+global de navegação é desktop-only (o mobile roda imersivo — ver "## Mobile app"). Ele apenas
+**re-exporta** `offersSaveAndExit` de `shared/run/exit-rules.ts`, para os dois clientes lerem UMA
+regra.
+
 - `app/src/pages/testing-flow-guards.ts` — `primaryLabel`, `primaryDisabled`.
 - `app/src/shared/hooks/use-notes-bookmarks.ts` — notes (debounced upsert) + bookmark toggle.
 - `app/src/shared/lib/shuffle.ts`, `shared/domain/scoring.ts` (`accuracyPct`).
-- `app/src/shared/lib/exit-rules.ts` — BR-05 leaving-a-running-test rules: `shouldPromptOnExit`,
+- `shared/run/exit-rules.ts` — BR-05 leaving-a-running-test rules: `shouldPromptOnExit`,
   the pt-BR `exitPrompt` (`optionCount` 3 + `saveLabel: 'Salvar e sair'` nos modos de estudo desde
   a S2b; `real` fica em 2 + `saveLabel: null` e é o único que avisa), `processableAnswers` (blanks never
   recorded), `answeredStats`, `rowsForAnswers` (joins by question id, survives a partial or
-  reordered run). Single source of truth for BOTH the in-screen exit and the navigation guard.
+  reordered run) e, desde a #86, `offersSaveAndExit`. Single source of truth for the in-screen
+  exit, the navigation guard **and o runner mobile** — os três leem daqui.
 - `app/src/shared/lib/run-guard.ts` — the navigation-guard decision, pure: `isRunGuarded`,
   `pickActiveRun` (several screens may be registered at once), `decideNavigation` (same-path click
-  and `targetPath === null` = logout). Owns no labels of its own — delegates to `exit-rules.ts`.
+  and `targetPath === null` = logout). Owns no labels of its own — delegates to `exit-rules.ts`,
+  de quem também re-exporta `offersSaveAndExit`. **Continua em `app/` de propósito: é desktop-only**
+  (não há guard global no mobile — ver "## Mobile app").
 
 Non-pure companions of the guard (React, but no run state of their own):
 
@@ -86,11 +106,15 @@ Non-pure companions of the guard (React, but no run state of their own):
   **"Salvar e sair"** quando a tela registrou um `save?: () => Promise<boolean>`: o provider
   **aguarda** — `true` roda a navegação pendente, `false` (conflito) mantém o diálogo, porque
   navegar antes do flush desmontaria a tela que mostraria o CONFLICT.
-- `app/src/shared/hooks/use-run-persistence.ts` — o hook fino que liga scheduler + `examDrafts`
-  (`save`/`get`/`discard`) e guarda `draftId`/`token` em refs. É o que #78 e #79 reusam; toda
-  regra vem de `save-scheduler.ts` + `run-persistence.ts`.
+- `shared/react/use-run-persistence.ts` — o hook fino que liga scheduler + `examDrafts`
+  (`save`/`get`/`discard`) e guarda `draftId`/`token` em refs. É o que #78 e #79 reusam e, desde a
+  #86, o runner MOBILE também (por isso ele mora em `shared/react/`, não mais em `app/`); toda
+  regra vem de `save-scheduler.ts` + `run-persistence.ts`. Cada cliente lhe passa o seu
+  `runPersistenceIO` (`app/src/shared/lib/trpc.ts` / `apps/mobile/src/lib/trpc.ts`).
 - `app/src/components/QuitTestDialog.tsx` — the presentational confirmation, shared verbatim by the
-  four screens and by the guard. No sidebar-only variant.
+  four screens and by the guard. No sidebar-only variant. O mobile tem o SEU próprio
+  (`apps/mobile/src/components/QuitTestDialog.tsx`, bottom sheet) — apresentação diferente, mesmas
+  strings: ambos leem `exitPrompt()` e `offersSaveAndExit()` de `@shared/run/exit-rules`.
 
 Other option-rendering screens (read-only, NOT answering): `app/src/pages/SavedQuestionsPage.tsx`,
 admin forms (`admin-question-form.tsx`). Discursive 2ª fase has its own non-MC UI:
@@ -99,9 +123,11 @@ admin forms (`admin-question-form.tsx`). Discursive 2ª fase has its own non-MC 
 ## Mobile app (`apps/mobile/`, deployed by `deploy-mobile.yml`)
 
 Single immersive runner: **`apps/mobile/src/components/QuestionRunner.tsx`** — used by
-`PracticePage.tsx` (Praticar), `DrillPage.tsx` (Drill) and `ReviewPage.tsx` (Revisão) via
-`RunnerQuestion`. Select → instant reveal (single step, no Conferir) → Próxima; records the whole
-session on finish. Has the bookmark button. One row = `RunnerOption.tsx` (#85).
+`PracticePage.tsx` (Praticar), `DrillPage.tsx` (Treino focado / Drill) and `ReviewPage.tsx`
+(Revisão) via `RunnerQuestion`. Desde a #86 as três páginas montam o `RunStartGate`, e é ELE que
+monta o runner (BR-05.8 antes de qualquer corrida — ver abaixo). Select → instant reveal (single
+step, no Conferir) → Próxima; records the whole session on finish. Has the bookmark button. One
+row = `RunnerOption.tsx` (#85).
 State container: `apps/mobile/src/state/practice-context.ts`. Result: `ResultPage.tsx`.
 `FlashcardsPage.tsx` and `SavedPage.tsx` render options with their own local UI.
 
@@ -125,6 +151,47 @@ corrida no meio. O tempo já gasto numa questão adiada fica guardado em `carryT
 `totalTimeFor` da resposta final; `postpone()` reinicia `startRef` à mão porque o effect do
 cronômetro depende de `index`, e adiar não move o índice.
 
+**Desde a M2 (#86) o runner mobile também obedece a BR-05.** `RunStartGate.tsx` é a porta de
+entrada das três páginas: lê `examDrafts.get({ mode })` com `FRESH_READ` e, havendo linha, oferece
+"Continuar (n/N)" ou "Descartar e começar novo" (BR-05.8) ANTES de montar o runner. Retomar
+replica o `questionIds` congelado por `questions.byIds` e reimpõe a ordem persistida — nunca
+reconsulta `questions.list`/`reviewQueue`. `use-run-exit.ts` liga `@shared/react/use-run-persistence`
+(autosave a cada resposta confirmada, flush ANTES de `sessions.record`, nada gravado em CONFLICT)
+e o `QuitTestDialog` mobile só pinta o que `exitPrompt()` devolve.
+
+**O mapeamento superfície → modo salvo é `mobileRunMode` (`shared/run/mobile-run.ts`): Praticar e
+Treino focado gravam `standard`, Revisão grava `spaced`.** Não existe modo `mobile-*` — é isso que
+torna real a retomada entre aparelhos (BR-05.2), e é a razão de Praticar e Treino focado dividirem
+um único rascunho (BR-05.8 decide o encontro, nunca uma sobrescrita).
+
+**Onde o mobile difere do desktop, de propósito:**
+
+- **A corrida salva não é anunciada na Home.** No desktop o card do modo mostra "Continuar (n/N)";
+  no mobile a oferta aparece só ao entrar no modo (`RunStartGate`). A regra é cumprida, o aviso
+  antecipado não existe.
+- **O relógio do mobile é uma SOMA, não um cronômetro.** `mobileElapsedSeconds` soma os `timeSpent`
+  medidos, porque o runner mobile não tem cronômetro de corrida. `sessions.record` não recebe
+  duração de sessão, então esse número não toca estatística nem SM-2: ele só semeia o relógio de
+  tela do board desktop. Efeito colateral aceito: uma corrida do desktop retomada no mobile volta
+  com `elapsedSeconds` REDUZIDO a essa soma no próximo save do mobile. BR-05.10 continua valendo
+  (tempo fora do app nunca é contado); o número pode encolher, nunca inflar.
+
+Módulos móveis da M2 (`apps/mobile/src/components/`), para não re-explorar:
+
+- `RunStartGate.tsx` — a porta BR-05.8 acima; montada por `PracticePage`/`DrillPage`/`ReviewPage`.
+- `use-run-exit.ts` — o hook das DUAS portas do diálogo ("Salvar e sair" / "Sair e processar") +
+  o contrato flush-antes-de-`record` com `flushed.claim`. Não é puro: a regra mora em
+  `@shared/run/exit-rules` e `@shared/run/mobile-run`.
+- `RunnerChrome.tsx` — as duas barras da corrida imersiva; o `ArrowLeft` (`:34`) é a ÚNICA porta
+  in-app e chama `onExit`.
+- `QuitTestDialog.tsx` / `RunOverlays.tsx` — bottom sheets: a confirmação de saída e as cópias de
+  CONFLICT/falha (`conflictFor()` / `saveFailureFor()`, as MESMAS do desktop).
+- `apps/mobile/src/lib/trpc.ts` — `FRESH_READ`, `exitTrpcClient` e o singleton `runPersistenceIO`
+  que o hook compartilhado recebe (gêmeo do `app/src/shared/lib/trpc.ts`).
+
+As três portas de escrita de saída (`pagehide`/`visibilitychange`/unmount, `wireExitFlush`) vêm de
+graça no mobile: elas moram dentro do próprio `@shared/react/use-run-persistence`.
+
 ## Backend touched by answering
 
 - `sessions.record` — one transaction: session + every answer; moves the SM-2 schedule.
@@ -132,23 +199,27 @@ cronômetro depende de `index`, e adiar não move o índice.
 - `bookmarks.toggle` / `bookmarks.list` (`user_bookmarks`), `notes.upsert` / `notes.list`
   (`user_question_notes`), SM-2 state in `user_question_states` (`drizzle/schema.ts`).
 
-## Life of a test run (as of 2026-08-21 — after #68 + #69 + #77; BR-05 S1 + S1b + S2b)
+## Life of a test run (as of 2026-08-28 — after #68 + #69 + #75 + #77 + #78 + #79 + #86; BR-05 completo, desktop + mobile)
 
 1. **Start** — the student picks a mode on the mode-selection screen; `TestingPage.tsx` holds
    `mode` in React state, the runner component fetches its questions and owns the queue, the
-   answers-so-far, the timer and the cursor. Nothing about the run exists outside browser memory.
+   answers-so-far, the timer and the cursor. Nothing about the run exists outside browser memory
+   até o primeiro autosave. No mobile o começo passa antes pelo `RunStartGate` (#86): se já houver
+   rascunho daquele modo, a corrida nem monta sem o aluno escolher continuar ou descartar.
 2. **Answer / postpone** — all in that component state (BR-03; blanks never recorded).
 3. **Leave** — a leave attempt is now INTERCEPTED at its source e oferece "sair e processar"
-   (BR-05, epic #67 S1 + S1b) e, no Simulado Padrão, também "Salvar e sair" (S2b, #77).
+   (BR-05, epic #67 S1 + S1b) e, em todo modo de ESTUDO — as três telas desktop (S2b/S2c) e as três
+   superfícies mobile (#86) —, também "Salvar e sair". Só a prova real fica de fora (BR-05.5).
    Desde a S2a (#75) existe a tabela `exam_drafts` (uma linha por `(user, mode)`,
    `UNIQUE(user_id, mode)`). **Quem grava e retoma hoje:**
    - **Simulado Padrão (S2b, #77) — grava e retoma.** `testing-standard-run.tsx` (setup +
      reidratação) + `testing-standard-board.tsx` (a corrida) usam
-     `app/src/shared/hooks/use-run-persistence.ts`: salva a cada resposta confirmada com
+     `shared/react/use-run-persistence.ts`: salva a cada resposta confirmada com
      debounce trailing de 1500 ms, dá flush no "Salvar e sair"/"Sair e processar"/última questão,
      e o card do modo mostra "Continuar (n/N)" a partir de `examDrafts.list`.
    - **Revisão Espaçada e Simulado Adaptativo (S2c, #78) — gravam e retomam.** Mesmo hook,
-     agora parametrizado por modo (`useRunPersistence(mode, snapshot)`): `spaced-board.tsx` e
+     agora parametrizado por modo (`useRunPersistence(mode, snapshot, io)` — o 3º argumento
+     entrou na #86: cada cliente injeta o seu `runPersistenceIO`): `spaced-board.tsx` e
      `adaptive-board.tsx` salvam a cada resposta confirmada, dão flush nas mesmas três portas e
      ganharam "Salvar e sair" + card "Continuar (n/N)". A espaçada reidrata por
      `questions.byIds` sobre o `questionIds` persistido e **nunca** reconsulta
@@ -159,6 +230,12 @@ cronômetro depende de `index`, e adiar não move o índice.
      persiste é para ser AUTO-SUBMETIDA, não para ser oferecida de volta. O diálogo dela continua
      com 2 botões e o board **não registra handler de `save`** (BR-05.5). Detalhe abaixo, em
      "Como a prova real persiste".
+   - **Runner mobile (M2, #86) — grava e retoma, nas MESMAS linhas.** `RunStartGate` +
+     `use-run-exit` sobre o mesmo `useRunPersistence`: Praticar e Treino focado escrevem o rascunho
+     `standard`, Revisão o `spaced` (`mobileRunMode`, `shared/run/mobile-run.ts`). Não há linha nem
+     modo exclusivo do mobile — é isso que faz a BR-05.2 valer nos dois sentidos: o que o Padrão
+     desktop salvou volta no celular e vice-versa. O que falta ali é só o AVISO antecipado (a Home
+     mobile não tem card "Continuar (n/N)"); a oferta existe, ao entrar no modo.
 
    Não há `localStorage`/`sessionStorage` em lugar nenhum do repo: na prova real, "processar"
    continua significando "gravar o que foi respondido AGORA via `sessions.record`" (ou
@@ -179,20 +256,27 @@ cronômetro depende de `index`, e adiar não move o índice.
      mode's result screen (the receipt that the answers counted).
    - **Tab close / reload** — `use-leave-warning.ts` still fires the native `beforeunload` prompt.
      It is browser-owned, cannot process anything, and does NOT cover SPA navigation.
+   - **Saída do runner mobile** (#86): sem guard global e sem precisar de um — a corrida roda
+     imersiva, então a única porta in-app é o `ArrowLeft` do `RunnerChrome.tsx`, que abre o
+     `QuitTestDialog` mobile com as duas saídas da BR-05.
 
-   **Residual gaps — all out of scope for S1/S1b. The first two are owned by epic #67 S2
-   (server-side in-flight run persistence); the third has its own issue:**
+   **Residual gaps — o que sobrou depois que a persistência (epic #67 S2) e a #86 fecharam o
+   resto. O primeiro é mitigado, não fechado; o segundo FECHOU; o terceiro tem issue própria:**
    - **Browser Back** is NOT guarded. `popstate` is not cancelable, so a Back press cannot be
      intercepted the way a click can; wouter 3.10 also has no `useBlocker` and a new dependency is
-     out (CLAUDE.md). Persistence, not a guard, is the real net for this — e desde a S2b ela
-     existe **no Simulado Padrão**: o Back perde a tela, não a corrida (o último autosave está no
-     servidor e o card oferece "Continuar"). Desde a revisão adversarial Codex do #79 o **unmount
-     da tela também dispara a escrita de saída** (`wireExitFlush`, `shared/lib/exit-listeners.ts`):
+     out (CLAUDE.md). Persistence, not a guard, is the real net for this — e ela existe hoje nos
+     **três modos de estudo do desktop** (S2b/S2c) e nas **três superfícies do mobile** (#86): o
+     Back perde a tela, não a corrida (o último autosave está no servidor, e o card do modo — no
+     mobile, o `RunStartGate` — oferece "Continuar"). Desde a revisão adversarial Codex do #79 o
+     **unmount da tela também dispara a escrita de saída** (`wireExitFlush`,
+     `shared/run/exit-listeners.ts`):
      o Back continua sem ser bloqueável, mas a escrita devida sai pelo mesmo `keepalive` que o
      fechamento de aba já tinha — mesmo best-effort, uma porta a mais, nunca uma garantia maior.
-   - **Mobile `QuestionRunner`** (`apps/mobile/`) has no exit dialog and no guard at all — the
-     whole of BR-05 above is desktop-only. (BR-02/BR-03 no longer are: a M1/#85 fechou aquela
-     metade; esta continua aberta e é fatia própria.)
+   - ~~**Mobile `QuestionRunner`**~~ — **fechado pela M2/#86.** As três superfícies móveis
+     (Praticar, Treino focado, Revisão) montam `RunStartGate` e ganharam diálogo de saída, autosave
+     e retomada; detalhe em "## Mobile app" acima. Não existe guard global no mobile e não é uma
+     lacuna: a corrida roda IMERSIVA (`MobileLayout.tsx:33-39` esconde header e tab bar), então a
+     única porta in-app é o `ArrowLeft` do `RunnerChrome.tsx:34`, e ela abre o diálogo.
    - Known rough edge of the guarded **sign-out**: the run is processed correctly, but the student
      is not actually signed out and must click "Sair" again — the provider drops the pending `next`
      (which holds the `signOut()`) by design. Tracked in #73.
@@ -281,11 +365,11 @@ cronômetro depende de `index`, e adiar não move o índice.
 
 ### Como o Padrão persiste (S2b, #77 — o desenho que #78/#79 reusam)
 
-- `app/src/shared/lib/save-scheduler.ts` (puro) — debounce **trailing** de 1500 ms; `flush()`
+- `shared/run/save-scheduler.ts` (puro) — debounce **trailing** de 1500 ms; `flush()`
   aguarda o envio EM VOO e, se o payload mudou durante ele, dispara **mais um** e resolve com o
   token FINAL. Sem isso o `save` em voo move `last_saved_at`, a reivindicação casa 0 linhas e o
   aluno recebe `CONFLICT` causado pelo próprio salvamento.
-- `app/src/shared/lib/run-persistence.ts` (puro) — payload do save (o Padrão **não** manda
+- `shared/run/run-persistence.ts` (puro) — payload do save (o Padrão **não** manda
   `deadlineAt`), reidratação (`questions.byIds` volta em ordem do banco e é **reordenado** pelo
   array persistido; `questions.list` nunca é refeito porque ordena por `random()`), o par do claim
   e as **duas** cópias pt-BR de CONFLICT: token velho ⇒ "continuado em outro aparelho"
@@ -295,7 +379,7 @@ cronômetro depende de `index`, e adiar não move o índice.
   `QuitTestDialog` nem no `RunGuardProvider` — os dois são apresentação e não podem esperar
   promessa. Enquanto ele roda, `busy` desabilita os 3 botões.
 - `pagehide`/`visibilitychange` **e o unmount da tela** mandam a escrita devida por `keepalive`
-  (revisão adversarial Codex do #79; as três portas moram em `shared/lib/exit-listeners.ts` —
+  (revisão adversarial Codex do #79; as três portas moram em `shared/run/exit-listeners.ts` —
   o unmount é a saída in-SPA, que não dispara evento nenhum do DOM):
   `scheduler.flushOnExit()` despacha `exitSend` — um `fetch` com `keepalive: true`
   (`exitTrpcClient` em `shared/lib/trpc.ts`), o único transporte que leva `Authorization` E é
@@ -305,7 +389,7 @@ cronômetro depende de `index`, e adiar não move o índice.
   garantia**, e está escrito onde é assumido (`use-run-persistence.ts`): save já em voo (a escrita
   de saída entra na fila atrás dele para não brigar pelo token — janela de perda = respostas dos
   últimos ~1,5 s), `getToken()` precisando renovar na hora, kill do processo, e payload acima do
-  teto de 64 KiB do `keepalive` (`shared/lib/exit-save.ts` cai para o cliente normal). Em todos
+  teto de 64 KiB do `keepalive` (`shared/run/exit-save.ts` cai para o cliente normal). Em todos
   eles a corrida continua no servidor no último save que pousou, e o `settleRealRun` a liquida.
 - **Não salvam nada** (por contrato, BR-02.3 / D8): adiar, descartar alternativa, `Conferir`,
   bookmark e nota. Logo `checked` conta como respondida no diálogo mas **não** é persistida — o
@@ -442,8 +526,10 @@ cronômetro depende de `index`, e adiar não move o índice.
    `RunFailureDialog` direto, e não o `RunOverlays` inteiro.
 7. **"Salvar e sair" não existe, e não pode voltar.** Trava tripla: `exitPrompt('real')` devolve
    `saveLabel: null` + `optionCount: 2`; o board **não registra handler de `save`** em
-   `useRegisterRun`; e a regra virou função pura `offersSaveAndExit` (`run-guard.ts`), usada TANTO
-   pelo `QuitTestDialog` quanto pelo `RunGuardProvider` — travada em `run-guard.test.ts`.
+   `useRegisterRun`; e a regra virou função pura `offersSaveAndExit` — desde a #86 em
+   `shared/run/exit-rules.ts` (o `run-guard.ts` a RE-EXPORTA, para o mobile ler a mesma regra),
+   usada TANTO pelo `QuitTestDialog` (desktop e mobile) quanto pelo `RunGuardProvider` — travada
+   em `run-guard.test.ts`.
 8. **Mudança de contrato registrada:** `examDrafts.save` agora normaliza `deadlineAt`
    (`.transform((v) => new Date(v).toISOString())` **depois** do `refine`). Isso troca 500 por
    BAD_REQUEST nos valores que o `Date.parse` aceita e o PG recusa, ao custo de **truncar µs → ms**

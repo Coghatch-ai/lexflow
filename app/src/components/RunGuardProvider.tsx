@@ -3,7 +3,7 @@ import { useLocation } from 'wouter';
 import QuitTestDialog from './QuitTestDialog';
 import { RunGuardContext, type RegisteredRun, type RunGuardValue } from '../shared/run-guard-context';
 import { decideNavigation, guardSaveOutcome, offersSaveAndExit, pickActiveRun } from '../shared/lib/run-guard';
-import type { ExitPrompt } from '../shared/lib/exit-rules';
+import type { ExitPrompt } from '@shared/run/exit-rules';
 
 // Navigation guard for a test still running (BR-05.1, epic #67 slice S1b).
 //

@@ -4,7 +4,7 @@
 // (`eslint.config.js` max-lines 500 / max-lines-per-function 250).
 
 import { shuffle } from '../shared/lib/shuffle';
-import type { AnswerDraft } from '../shared/lib/exit-rules';
+import type { AnswerDraft } from '@shared/run/exit-rules';
 
 export type TestQuestion = {
   id: string;

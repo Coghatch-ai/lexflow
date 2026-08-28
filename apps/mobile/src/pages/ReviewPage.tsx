@@ -1,7 +1,8 @@
 import { useMemo, type ReactElement } from "react";
 import { useLocation } from "wouter";
 import { trpc } from "../lib/trpc";
-import { QuestionRunner, type RunnerQuestion } from "../components/QuestionRunner";
+import type { RunnerQuestion } from "../components/QuestionRunner";
+import { RunStartGate } from "../components/RunStartGate";
 import { Centered } from "../components/Centered";
 
 // Spaced-repetition review: questions.reviewQueue returns the cards whose
@@ -37,5 +38,7 @@ export function ReviewPage(): ReactElement {
     );
   }
 
-  return <QuestionRunner questions={questions} sessionDiscipline="Revisão" mode="review" />;
+  // A review saves into the `spaced` slot — the same row the desktop's Revisão
+  // Espaçada uses, so a run started here continues there (BR-05.2).
+  return <RunStartGate surface="review" questions={questions} sessionDiscipline="Revisão" />;
 }

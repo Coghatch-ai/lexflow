@@ -52,8 +52,16 @@ abandoned silently.
 11. Cross-outs are not part of saved progress ([BR-02](br-02-cross-out.md).3) — a resumed test comes
     back without them.
 12. Saved progress is unrelated to Salvos / bookmarks ([BR-04](br-04-bookmarks.md)).
+13. **O mapeamento superfície → modo salvo é do produto, não do cliente.** Dono do produto,
+    verbatim (#86): "mobile and desktop should have the same rule, we are saving the same
+    database." Praticar e Treino focado (Drill) gravam o modo `standard`; Revisão grava `spaced`.
+    Não existe modo exclusivo de um cliente — é isso que faz a regra 2 (continuar noutro aparelho)
+    valer de verdade. Consequência querida: Praticar e Treino focado dividem UM rascunho por
+    aluno, então começar um com o outro salvo cai na regra 8 — continuar ou descartar, nunca
+    sobrescrever em silêncio.
 
 ## Scope
 
-All four desktop answering screens AND the mobile runner surfaces (Praticar, Drill, Revisão) — the
-rule is about the product, not one client. Discursive (2ª fase) runs are out of scope for now.
+Todas as quatro telas de resposta do desktop E as três superfícies do runner mobile (Praticar,
+Treino focado, Revisão) — a regra é do produto, não de um cliente. Fechado no desktop pelas fatias
+#68/#69/#75/#77/#78/#79 e no mobile pela #86. Corridas discursivas (2ª fase) seguem fora de escopo.

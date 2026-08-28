@@ -19,5 +19,9 @@
     "drizzle.config.ts",
     "vitest.config.ts"
   ],
-  "exclude": ["node_modules", "dist", "build", ".aws-sam"]
+  // `shared/react/**` is the ONE part of shared/ this program does not compile:
+  // it is React + tRPC-client plumbing for the two browser apps (#86 M2a), and
+  // this program runs on `lib: ["esnext"]` with no DOM. The rules it wraps are
+  // pure and stay in `shared/run/**`, which IS compiled here.
+  "exclude": ["node_modules", "dist", "build", ".aws-sam", "shared/react/**"]
 }

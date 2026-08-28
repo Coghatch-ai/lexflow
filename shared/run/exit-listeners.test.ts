@@ -20,8 +20,12 @@ function fakeTargets(): Fakes {
     window: new Map(),
     document: new Map(),
   };
+  // The fallback is TYPED because this file now lives in `shared/run/`, which the
+  // backend program compiles with `noUncheckedIndexedAccess`: the index read is
+  // `… | undefined` there, so a bare `new Map()` infers `Map<any, any>` and the
+  // `??` union carries it out. Same map, same behaviour — only the annotation.
   const targetFor = (name: "window" | "document"): Map<string, Set<() => void>> =>
-    listeners[name] ?? new Map();
+    listeners[name] ?? new Map<string, Set<() => void>>();
   const make = (name: "window" | "document"): ExitTargets["window"] => ({
     addEventListener: (type, listener): void => {
       const map = targetFor(name);

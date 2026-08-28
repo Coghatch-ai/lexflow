@@ -7,7 +7,7 @@ import {
   type SaveScheduler,
 } from "./save-scheduler";
 import { realDraftPayload, type PersistedDraft, type RunDraftPayload } from "./run-persistence";
-import type { AnswerDraft } from "@shared/domain/exam-draft";
+import type { AnswerDraft } from "../domain/exam-draft";
 
 // THE causal chain of the third Codex round, as one file — because it is one
 // bug wearing three file names:

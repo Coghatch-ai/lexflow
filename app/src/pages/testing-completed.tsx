@@ -2,7 +2,7 @@ import type { ReactElement } from 'react';
 import { CheckCircle, XCircle } from 'lucide-react';
 import { accuracyPct } from '@shared/domain/scoring';
 import AiExplanationButton from '@/shared/components/AiExplanationButton';
-import { type AnswerDraft, answeredStats, rowsForAnswers } from '@/shared/lib/exit-rules';
+import { type AnswerDraft, answeredStats, rowsForAnswers } from '@shared/run/exit-rules';
 
 type CompletedQuestion = {
   id: string;

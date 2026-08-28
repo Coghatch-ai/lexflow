@@ -11,7 +11,7 @@
 import { useEffect, useRef, useState, type ReactElement } from 'react';
 import { useLov } from '../shared/hooks/use-lov';
 import { FRESH_READ, trpc } from '../shared/lib/trpc';
-import { persistedDraftOf, resumeStateFrom } from '../shared/lib/run-persistence';
+import { persistedDraftOf, resumeStateFrom } from '@shared/run/run-persistence';
 import StandardSetup from './testing-standard-setup';
 import StandardBoard from './testing-standard-board';
 import {
