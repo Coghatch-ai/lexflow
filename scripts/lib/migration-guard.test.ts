@@ -406,7 +406,7 @@ describe("classifyPushFeed", () => {
   });
 });
 
-describe("planMeasurement — feed lost on a real push", () => {
+describe("planMeasurement — a real push whose feed is LOST or EMPTY", () => {
   it("(al) MEASURES instead of concluding when a real push's feed is EMPTY", () => {
     for (const raw of ["", "\n", "   \n\n  "]) {
       const plan = planMeasurement({
@@ -480,7 +480,13 @@ describe("planMeasurement — feed lost on a real push", () => {
     expect(plan.kind === "block" ? plan.reason : "").toContain(FAILURE);
     expect(plan).toEqual({ kind: "block", reason: emptyFeedBlockReason(FAILURE) });
   });
+});
 
+// The other half of the same function: the two paths the feed-loss work must NOT
+// disturb — a HAND RUN (no argv at all, `pnpm db:migrate:check` from a terminal)
+// and a real push whose feed arrived intact. Both behaved correctly before the
+// gate learned about lost feeds and must keep behaving correctly after.
+describe("planMeasurement — a hand run and a CORRECT feed stay untouched", () => {
   it("(ap) a HAND RUN (no argv) is untouched: no stdin + working diff ⇒ measure HEAD", () => {
     expect(
       planMeasurement({ rawStdin: null, tips: [HEAD_TIP], failure: null, remoteArg: null }),
