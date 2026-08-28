@@ -17,6 +17,7 @@
     "prepare": "husky || true",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx scripts/migrate.ts",
+    "db:migrate:check": "tsx scripts/check-migrations.ts",
     "db:seed": "tsx scripts/seed.ts",
     "db:seed-lov": "tsx scripts/seed-lov.ts",
     "db:seed-csv": "tsx scripts/seed-from-csv.ts",

@@ -9,7 +9,7 @@ authoritative product intent, above any hypothesis of its own.
 | [kb-business/](kb-business/README.md)                        | Functional definitions / product intent — ONE FILE PER FUNCTIONALITY. Read BEFORE designing or fixing.                                            |
 | [business-rules.md](business-rules.md)                       | Redirect only — the old single-file location, kept so existing links resolve.                                                                     |
 | [answering-surfaces.md](answering-surfaces.md)               | Map of every place a question is answered (desktop QuestionCard screens, mobile QuestionRunner), the life of a test run + the backend it touches. |
-| [migration-deploy-contract.md](migration-deploy-contract.md) | CI does NOT migrate — the migration↔deploy contract + push guard.                                                                                 |
+| [migration-deploy-contract.md](migration-deploy-contract.md) | CI does NOT migrate — the migration↔deploy contract + the `pre-push` gate (`pnpm db:migrate:check`).                                              |
 | [rds-ip-allowlist.md](rds-ip-allowlist.md)                   | DB `ETIMEDOUT` after your public IP changes — rotate the `nomad-auto` `/32` in SG `sg-01be3c83d801344d9`.                                         |
 | [project.md](project.md)                                     | Extended project/infra details too long for a CLAUDE.md line.                                                                                     |
 

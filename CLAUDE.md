@@ -9,7 +9,14 @@ rules, and the step-by-step refactor playbook.
 **Pushing anything under `drizzle/`? Read
 [.claude/library/migration-deploy-contract.md](.claude/library/migration-deploy-contract.md) first** —
 CI does NOT run migrations (manual `pnpm db:migrate` from a laptop; DB in a no-NAT VPC by design), so
-merge/deploy ≠ migrated. A push-guard hook blocks agent pushes of unapplied migrations.
+merge/deploy ≠ migrated. A `.husky/pre-push` gate (`pnpm db:migrate:check`) blocks any push —
+human or agent — that publishes an unapplied migration, and any push it cannot
+measure at all (ref feed absent/garbled/suppressed, base ref unresolvable, `drizzle/` unreadable).
+One case is measured instead of blocked: an EMPTY ref feed arriving on a PIPE — the shape git's own
+feed always has, and what an already-up-to-date push produces — is judged by diffing `HEAD` against
+`<remote>/main`, passing only when that shows no unapplied migration. Empty bytes on a NON-pipe
+channel (character device, regular file, or an fd 0 that cannot be `fstat`ed) mean git did not
+deliver the feed ⇒ block. The channel is a discriminator, not proof of provenance.
 
 ## Project Overview
 
@@ -138,8 +145,28 @@ smtp-*) — resolved at deploy by`template.yaml`, or fetched at runtime by the r
 - **Migrations:** `db:generate` → review SQL → `db:migrate`. NEVER apply SQL manually to RDS.
   CI does NOT run migrations (deploy ships code only; DB in a no-NAT VPC). Before pushing anything
   under `drizzle/`, verify every migration is applied (`pnpm db:migrate` succeeded) — merge/deploy
-  ≠ migrated. A push-guard hook (`.claude/hooks/guard-migrate-push.mjs`) blocks agent pushes of
-  unapplied migrations via `drizzle/meta/_applied.json`. See
+  ≠ migrated. A **`pre-push` gate** (`pnpm db:migrate:check` → `scripts/check-migrations.ts`, run
+  from `.husky/pre-push` before `pnpm validate`) blocks **any** push — human or agent, of **any
+  ref** — that publishes a NEW `drizzle/*.sql` absent from `drizzle/meta/_applied.json`. The gate
+  reads the ref list git feeds `pre-push` on stdin, not `HEAD`, so `git push origin br:br` from
+  another checkout and `git push --all` are covered too; it diffs against `<remote>/main` (the
+  remote NAME git passes the hook, forwarded by `.husky/pre-push` as `"$@"`), and when it cannot
+  diff a pushed tip it **blocks** instead of falling back to the worktree — that fallback was the
+  fourth bypass (a fork clone whose remote is `upstream` passed everything, silently). Same for the
+  feed itself: on a real push (git always passes the hook `<remote> <url>`) an absent/garbled stdin
+  **blocks**, instead of silently measuring `HEAD` — that was the fifth residue. An EMPTY stdin is
+  the one exception, because git runs `pre-push` before filtering up-to-date refs, so the most
+  ordinary push arrives as zero bytes: there the gate concludes nothing from the feed and MEASURES
+  `HEAD` against `<remote>/main`, passing only when that diff carries no unapplied migration and
+  blocking otherwise (announced, never silent). That exception is scoped by the CHANNEL of fd 0:
+  git hands `pre-push` a pipe even with zero refs, so an empty feed on a **pipe** takes the `HEAD`
+  measurement, while empty bytes on a character device / regular file — or an fd 0 that cannot be
+  `fstat`ed — mean the feed was suppressed or substituted and **block** (round 7). The check is a
+  **discriminator, not a proof of provenance**: it excludes non-pipe suppression only, so the residue
+  that survives is **any pipe-shaped fd 0 carrying zero bytes** — process substitution, `mkfifo`, or a
+  drained genuine feed all read as a FIFO (measured; documented in the contract). Comparison is by FILENAME: editing an
+  already-applied `.sql` passes — see the contract's `### Limits (honest)`. CI is NOT covered (the
+  marker is gitignored and runners can't reach RDS). See
   [.claude/library/migration-deploy-contract.md](.claude/library/migration-deploy-contract.md).
 
 ## GitHub — issue auto-close
@@ -184,8 +211,12 @@ the contract) lives in the project library — this file is only the index:
 - Commit `.env` or secrets (SSM for backend, GitHub Environment secrets for frontend).
 - Deploy manually or run `db:push`.
 - Push a new/edited `drizzle/*.sql` before it is applied (`pnpm db:migrate` succeeded) — merge/deploy
-  does NOT migrate (CI ships code only; DB in a no-NAT VPC). The push-guard hook enforces this for
-  agent pushes; the `needs-migration` label is only a soft reminder.
+  does NOT migrate (CI ships code only; DB in a no-NAT VPC). The `.husky/pre-push` gate
+  (`pnpm db:migrate:check`) enforces the **new-file** half for human and agent pushes alike, on any
+  ref. The **edited** half is a HUMAN rule the gate cannot see: it compares filenames against
+  `drizzle/meta/_applied.json`, never contents, so editing an already-applied `.sql` passes silently
+  (and drizzle would never re-run it anyway — add a NEW migration instead). The `needs-migration`
+  label is only a soft reminder.
 - Use `console.log` (only `warn`/`error`), `any`, or non-null `!`.
 - Create a git branch without user approval.
 - Add or remove a dependency (`pnpm add`/`remove`/`install <pkg>`) without explicit approval —
