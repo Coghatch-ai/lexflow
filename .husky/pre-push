@@ -1,1 +1,1 @@
-pnpm validate
+pnpm db:migrate:check "$@" && pnpm validate
