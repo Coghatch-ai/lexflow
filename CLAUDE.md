@@ -11,10 +11,12 @@ rules, and the step-by-step refactor playbook.
 CI does NOT run migrations (manual `pnpm db:migrate` from a laptop; DB in a no-NAT VPC by design), so
 merge/deploy ≠ migrated. A `.husky/pre-push` gate (`pnpm db:migrate:check`) blocks any push —
 human or agent — that publishes an unapplied migration, and any push it cannot
-measure at all (ref feed absent/garbled, base ref unresolvable, `drizzle/` unreadable). One case is
-measured instead of blocked: an EMPTY ref feed — what an already-up-to-date push produces — is
-judged by diffing `HEAD` against `<remote>/main`, passing only when that shows no unapplied
-migration.
+measure at all (ref feed absent/garbled/suppressed, base ref unresolvable, `drizzle/` unreadable).
+One case is measured instead of blocked: an EMPTY ref feed arriving on a PIPE — the shape git's own
+feed always has, and what an already-up-to-date push produces — is judged by diffing `HEAD` against
+`<remote>/main`, passing only when that shows no unapplied migration. Empty bytes on a NON-pipe
+channel (character device, regular file, or an fd 0 that cannot be `fstat`ed) mean git did not
+deliver the feed ⇒ block. The channel is a discriminator, not proof of provenance.
 
 ## Project Overview
 
@@ -156,7 +158,13 @@ smtp-*) — resolved at deploy by`template.yaml`, or fetched at runtime by the r
   the one exception, because git runs `pre-push` before filtering up-to-date refs, so the most
   ordinary push arrives as zero bytes: there the gate concludes nothing from the feed and MEASURES
   `HEAD` against `<remote>/main`, passing only when that diff carries no unapplied migration and
-  blocking otherwise (announced, never silent). Comparison is by FILENAME: editing an
+  blocking otherwise (announced, never silent). That exception is scoped by the CHANNEL of fd 0:
+  git hands `pre-push` a pipe even with zero refs, so an empty feed on a **pipe** takes the `HEAD`
+  measurement, while empty bytes on a character device / regular file — or an fd 0 that cannot be
+  `fstat`ed — mean the feed was suppressed or substituted and **block** (round 7). The check is a
+  **discriminator, not a proof of provenance**: it excludes non-pipe suppression only, so the residue
+  that survives is **any pipe-shaped fd 0 carrying zero bytes** — process substitution, `mkfifo`, or a
+  drained genuine feed all read as a FIFO (measured; documented in the contract). Comparison is by FILENAME: editing an
   already-applied `.sql` passes — see the contract's `### Limits (honest)`. CI is NOT covered (the
   marker is gitignored and runners can't reach RDS). See
   [.claude/library/migration-deploy-contract.md](.claude/library/migration-deploy-contract.md).

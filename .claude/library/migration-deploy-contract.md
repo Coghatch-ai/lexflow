@@ -65,8 +65,13 @@ produces) is measured against `HEAD` and judged on the result instead of blocked
 - `pnpm db:migrate:check` → `scripts/check-migrations.ts` — the impure shell (git + fs + stdin +
   exit code). All decision logic is pure in `scripts/lib/migration-guard.ts`
   (`parseAppliedMarker`, `findUnappliedMigrations`, `resolveDiffTips`, `classifyPublishedSql`,
-  `classifyPushFeed`, `planMeasurement`, `emptyFeedBlockReason`, `resolveBaseRef`), unit-tested
-  hermetically in `scripts/lib/migration-guard.test.ts` (60 cases).
+  `classifyPushFeed`, `classifyFeedChannel`, `planMeasurement`, `emptyFeedBlockReason`,
+  `resolveBaseRef`), unit-tested hermetically in `scripts/lib/migration-guard.test.ts` (universe
+  decisions) plus its two subject siblings `migration-guard.marker.test.ts` (marker/diff parsers)
+  and `migration-guard.refs.test.ts` (`resolveDiffTips`/`resolveBaseRef`) — 72 cases in total. The
+  split happened when the single file reached the project's 500-code-line `max-lines` ceiling; the
+  rule was never relaxed. The only fd-0 inspection (`fstatSync(0).isFIFO()`) lives in the shell and
+  is INJECTED into `classifyFeedChannel`, so the tests never depend on the real fd 0.
   The shell resolves every path from `git rev-parse --show-toplevel`, not the cwd, so
   `pnpm db:migrate:check` from a subdirectory checks the same thing it does from the root.
 - `scripts/migrate.ts` — on a SUCCESSFUL migrate, atomically writes `drizzle/meta/_applied.json`
@@ -80,13 +85,13 @@ produces) is measured against `HEAD` and judged on the result instead of blocked
 line per ref: `<localref> <localsha> <remoteref> <remotesha>`. `resolveDiffTips()` turns that into
 the list of tips to diff:
 
-| stdin                                      | tips                | why                                                                                                                                                                                                   |
-| ------------------------------------------ | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| absent / blank (manual `db:migrate:check`) | `["HEAD"]`          | a hand run has no stdin and must still check something. On a REAL push those two split: `absent` ⇒ block, `blank/empty` ⇒ `HEAD` is MEASURED and the verdict follows the measurement (round 6, below) |
-| one or more ref lines                      | each `<localsha>`   | covers `push origin br:br`, `push --all`, `push.default=matching`                                                                                                                                     |
-| `<localsha>` all zeros                     | that ref is skipped | the ref is being DELETED — it publishes no SQL                                                                                                                                                        |
-| every line a deletion                      | `[]`                | the push publishes nothing ⇒ pass                                                                                                                                                                     |
-| any unparseable line                       | `["HEAD"]`          | never conclude "nothing is pushed" from a garbled feed — and `["HEAD"]` is then only a HAND-RUN universe: on a real push `planMeasurement` BLOCKS instead of measuring it (see below)                 |
+| stdin                                      | tips                | why                                                                                                                                                                                                                                                                          |
+| ------------------------------------------ | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| absent / blank (manual `db:migrate:check`) | `["HEAD"]`          | a hand run has no stdin and must still check something. On a REAL push those two split: `absent` ⇒ block; `blank/empty` on a PIPE (git's feed always is one) ⇒ `HEAD` is MEASURED and the verdict follows the measurement (round 6), on a non-pipe channel ⇒ block (round 7) |
+| one or more ref lines                      | each `<localsha>`   | covers `push origin br:br`, `push --all`, `push.default=matching`                                                                                                                                                                                                            |
+| `<localsha>` all zeros                     | that ref is skipped | the ref is being DELETED — it publishes no SQL                                                                                                                                                                                                                               |
+| every line a deletion                      | `[]`                | the push publishes nothing ⇒ pass                                                                                                                                                                                                                                            |
+| any unparseable line                       | `["HEAD"]`          | never conclude "nothing is pushed" from a garbled feed — and `["HEAD"]` is then only a HAND-RUN universe: on a real push `planMeasurement` BLOCKS instead of measuring it (see below)                                                                                        |
 
 This replaced a fixed `origin/main...HEAD`, which was the **third bypass** found on #74: with `main`
 checked out, `git push origin mig:mig` (and `git push --all`) diffed a commit the push wasn't
@@ -134,15 +139,16 @@ fallback — diffing a push to `upstream` against `origin/main` would measure an
 When the diff is impossible (base ref unresolvable, `git diff` fails, no repo root), the choice of
 what to measure is pure (`planMeasurement`) and it is **not** "measure the worktree":
 
-| situation                                                          | universe                                                                                                      | why                                                                                                                                      |
-| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| real push (argv present) **and** the ref feed is ABSENT or GARBLED | **none ⇒ block**, whatever the diff did                                                                       | the chain is broken; the only remaining universe would be `HEAD`, which does not answer for the pushed ref                               |
-| real push **and** the ref feed is EMPTY, diff worked               | `HEAD` vs `<remote>/main`, **measured**, then decided: clean ⇒ pass (announced), unapplied `.sql` ⇒ **block** | an empty feed is what an already-up-to-date push produces; the gate concludes nothing from it and judges by what it can actually measure |
-| real push **and** the ref feed is EMPTY, diff impossible           | **none ⇒ block**                                                                                              | the fallback measurement itself failed — nothing was measured                                                                            |
-| diff worked **and** git fed us a ref list                          | the pushed tips                                                                                               | what the push publishes                                                                                                                  |
-| diff impossible **and** git fed us a ref list                      | **none ⇒ block**                                                                                              | "don't know what this push publishes" ≠ "it publishes nothing"                                                                           |
-| diff impossible **and** no stdin (hand run)                        | every `.sql` on disk, announced                                                                               | there is no push to measure; the disk is the only universe                                                                               |
-| hand run (no argv) **and** diff worked                             | `HEAD`                                                                                                        | no push exists; `HEAD` is the meaningful universe of a hand run                                                                          |
+| situation                                                                               | universe                                                                                                      | why                                                                                                                                                                                                                                             |
+| --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| real push (argv present) **and** the ref feed is ABSENT or GARBLED                      | **none ⇒ block**, whatever the diff did                                                                       | the chain is broken; the only remaining universe would be `HEAD`, which does not answer for the pushed ref                                                                                                                                      |
+| real push **and** the ref feed is EMPTY on a PIPE, diff worked                          | `HEAD` vs `<remote>/main`, **measured**, then decided: clean ⇒ pass (announced), unapplied `.sql` ⇒ **block** | an empty feed on a pipe is what an already-up-to-date push produces; the pipe is consistent with git's feed, never proof of it (see the residue bullet), so the gate concludes nothing from the feed and judges by what it can actually measure |
+| real push **and** the ref feed is EMPTY on a PIPE, diff impossible                      | **none ⇒ block**                                                                                              | the fallback measurement itself failed — nothing was measured                                                                                                                                                                                   |
+| real push **and** the ref feed is EMPTY but fd 0 is NOT a FIFO (or cannot be `fstat`ed) | **none ⇒ block**, whatever the diff did                                                                       | git hands `pre-push` a PIPE even with zero refs; a character device / regular file means something else answered for fd 0 (round 7)                                                                                                             |
+| diff worked **and** git fed us a ref list                                               | the pushed tips                                                                                               | what the push publishes                                                                                                                                                                                                                         |
+| diff impossible **and** git fed us a ref list                                           | **none ⇒ block**                                                                                              | "don't know what this push publishes" ≠ "it publishes nothing"                                                                                                                                                                                  |
+| diff impossible **and** no stdin (hand run)                                             | every `.sql` on disk, announced                                                                               | there is no push to measure; the disk is the only universe                                                                                                                                                                                      |
+| hand run (no argv) **and** diff worked                                                  | `HEAD`                                                                                                        | no push exists; `HEAD` is the meaningful universe of a hand run                                                                                                                                                                                 |
 
 The first row is the **fifth residue** (#74 review round 5), same class as the third and fourth
 bypasses — the gate measured the wrong commits. `planMeasurement` used to return `{kind:"push"}` on
@@ -160,9 +166,9 @@ filtering refs that are already up to date, so an ordinary `git push` with nothi
 arrives as zero bytes on fd 0 and was being blocked. A gate that fails the most routine push in the
 world gets `MIGRATE_GUARD_SKIP=1` parked in a `.zshrc`, and then it protects nothing — the same
 failure mode that made the candidate set push-scoped in the first place. Neither obvious
-alternative is right on its own: passing on `empty` restores the fail-open hole, and an `fstat`
-pipe-vs-`/dev/null` check still cannot tell a legitimately empty pipe from a wrapper that hands us
-an empty one. So the gate **concludes nothing from an empty feed and measures instead**
+alternative is right on its own: passing on `empty` restores the fail-open hole, and blocking on
+`empty` fails every no-op push. So the gate **concludes nothing from an empty feed and measures
+instead**
 (`planMeasurement` ⇒ `{kind:"head-fallback"}`): it diffs `HEAD` against the same
 `resolveBaseRef(remoteArg)` base the fed path uses, and passes ONLY when that diff publishes no
 unapplied `.sql`; an unapplied migration blocks (the message names that the feed was unreadable and
@@ -172,6 +178,26 @@ conservative path, and no previously-blocking path was weakened. The pass is ann
 (`⚠ Gate de migração: feed de refs vazio — medi HEAD em vez do ref empurrado`), never silent.
 Guarded by cases `(al)`, `(ao2)`, `(ao3)`, `(at)`–`(ay)`. The residue this leaves is in
 `### Limits (honest)` below: it measures `HEAD`, not the pushed tip.
+
+**Round 7 asked HOW the emptiness arrived, not just what was on it.** Round 6 accepted `empty` on
+the bytes alone, so anything that handed the gate `/dev/null` looked exactly like the routine
+already-up-to-date push and got the `HEAD` fallback — which passes whenever the local `HEAD` happens
+to be clean, while a DIFFERENT ref published unapplied SQL. Round 6's own text called an `fstat`
+check useless here; **that claim was wrong and is corrected above**. Measured, not assumed: git opens
+a **pipe** on fd 0 for `pre-push` even when it has zero refs to write (`fifo`, 0 bytes), and that
+FIFO survives the whole `git` → `.husky/_/h` → `pre-push` → `pnpm` → `tsx` chain; a feed suppressed
+**without a pipe** (`</dev/null`, `0<&-`, an empty regular file) arrives as a **character device or a
+regular file**. That is all the channel establishes — it is a **discriminator, not a proof of
+provenance** (see `### Limits (honest)`): a pipe-shaped substitute reads `fifo` too, measured in this
+same round (`node -e 'fstatSync(0).isFIFO()' < <(printf "")` ⇒ `true`; `mkfifo` likewise). So an
+empty feed on a pipe keeps the round-6 head-fallback (the no-op push still
+passes — blocking `empty` outright was rejected precisely because a gate that fails the most routine
+push in the world gets switched off), while an empty feed on any other channel **blocks**, naming in
+pt-BR that the ref feed was not delivered by git and the push cannot be inspected. An `fstat` that
+itself throws counts as NOT a FIFO ⇒ block: fail closed. Pure and injectable
+(`classifyFeedChannel(inspect)`, the only fd-0 touch is `fstatSync(0).isFIFO()` in the shell),
+guarded by cases `(az)`–`(bk)`. Nothing previously blocking was weakened, and the hand run (no argv,
+no feed by definition) is untouched — `(bi)`.
 
 This was the **fourth bypass** on #74 (same class as the third — the gate looked at the wrong
 commits). The shell used to degrade to `allSqlOnDisk(root)` on ANY failure, silently swapping the
@@ -225,25 +251,39 @@ and only when there is a candidate — and failing closed is exactly the epic #5
 - **A BROKEN ref feed (absent/garbled) BLOCKS a real push** — the fifth residue, closed by failing
   closed: the fallback universe (`HEAD`) does not answer for the pushed ref, and a feed that arrived
   unreadable means some wrapper in the chain (`git` → `.husky/_/h` → `pre-push` → `pnpm` → `tsx`)
-  mangled it.
-- **An EMPTY ref feed is MEASURED against `HEAD`, and that measurement is not the pushed tip.**
-  (Round 6; the honest residue of the fix described above.) An empty feed is ambiguous by
-  construction — an already-up-to-date push and a swallowed feed both arrive as zero bytes on fd 0,
-  and no `fstat` pipe-vs-`/dev/null` check separates them either. Rather than assume, the gate
-  diffs `HEAD` against `<remote>/main` and decides on the result. **The residue: it judges `HEAD`,
-  not the pushed ref.** A push of some OTHER ref (`git push origin mig:mig` from a checked-out
-  `main`) that arrived with an EMPTY feed would be judged by `HEAD`'s contents — so an unapplied
-  `.sql` living only on `mig` would not be seen, while `HEAD`'s own unapplied `.sql` would block a
-  push that does not publish it. Both halves are strictly better than the fail-open this replaced
-  and than round 5's false positive on every routine push, but neither is exact. In practice the
-  combination is not reachable through plain `git`: a push that really publishes a ref feeds that
-  ref on stdin (`fed`), and this path only runs when the feed is empty — i.e. when git believes
-  there is nothing to publish. It becomes reachable only if a wrapper swallows a NON-empty feed and
-  hands the gate zero bytes, which is exactly the case that cannot be told apart from the routine
-  one. Closing it for real needs the pushed refs from a source other than stdin (there is none —
-  `pre-push` has no argv for them), so it is documented, not fixed.
+  mangled it. Since round 7 a **NON-PIPE SUPPRESSED** feed blocks too (empty bytes on a channel that
+  is not a pipe, which git's feed never is), with its own pt-BR reason pointing at the substituted
+  stdin. A suppression that keeps the pipe shape is NOT caught — see the residue bullet below.
+- **An EMPTY ref feed ON A PIPE is MEASURED against `HEAD`, and that measurement is not the
+  pushed tip.** (Round 6, narrowed by round 7 — the honest residue of both fixes.) The gate diffs
+  `HEAD` against `<remote>/main` and decides on the result rather than assuming. **The residue: it
+  judges `HEAD`, not the pushed ref.** A push of some OTHER ref (`git push origin mig:mig` from a
+  checked-out `main`) that arrived with an empty feed would be judged by `HEAD`'s contents — so an
+  unapplied `.sql` living only on `mig` would not be seen, while `HEAD`'s own unapplied `.sql`
+  would block a push that does not publish it. Not reachable through plain `git`: a push that
+  really publishes a ref feeds that ref on stdin (`fed`), and this path runs only when the feed is
+  empty — i.e. when git believes there is nothing to publish.
+- **Round 7 shrank that residue; it did NOT remove it.** What the CHANNEL check blocks is **NON-PIPE
+  suppression** — `</dev/null`, `0<&-` and an empty regular file arrive as a character device or a
+  regular file, which git's feed never is — plus an `fstat` that throws (counts as not-a-FIFO).
+  **What remains is broader than "a drained genuine FIFO": ANY pipe-shaped fd 0 carrying zero
+  bytes.** Process substitution and `mkfifo` are pipes too, measured — `node -e
+'console.log(require("fs").fstatSync(0).isFIFO())' < <(printf "")` prints `true`, and
+  `pnpm -s db:migrate:check origin < <(printf "")` exits 0 on the head-fallback. So a wrapper
+  substituting its own PIPE, or a drained genuine feed, reads `fifo` + zero bytes — indistinguishable
+  from a routine already-up-to-date push — and takes the `HEAD` fallback with the residue above. So
+  does anything that consumes the ref lines before the gate reads fd 0 (nothing in the current chain
+  does; the shell `fstat`s and reads fd 0 as its first act). Closing THAT needs the pushed refs from a
+  source other than stdin, and there is none — `pre-push` gets no argv for them. Widening the fallback
+  universe from `HEAD` to every local ref was **considered and rejected**: it would shrink the residue
+  only by false-blocking routine pushes, which is the failure mode this whole round refused.
+  Documented, not fixed.
+  The channel check is a discriminator, not a proof of provenance: it says "this is a pipe", never
+  "git is on the other end".
 - **Stdin is read only when fd 0 is not a TTY.** A hand-run `pnpm db:migrate:check` in a terminal
-  reports "no stdin" and falls back to `HEAD` (correct). A non-interactive caller that inherits an
+  reports "no stdin" and falls back to `HEAD` (correct). Its fd 0 is a character device, i.e.
+  `not-fifo`, which changes nothing: the channel is consulted only for an EMPTY feed on a REAL push
+  (argv present), and a hand run has no argv — case `(bi)`. A non-interactive caller that inherits an
   stdin which never reaches EOF would block on the read — no such caller exists today
   (`pnpm validate` does not invoke this gate), but that is the shape of the failure if one appears.
 - **The degraded-worktree bypass is CLOSED, not a limit any more** (fourth bypass, #74 review round

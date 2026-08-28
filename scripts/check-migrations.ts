@@ -40,6 +40,20 @@
 // on what it finds (clean ⇒ pass, unapplied `.sql` ⇒ block, diff impossible ⇒
 // block). Verified, not assumed — and `absent`/`garbled` still block.
 //
+// ROUND 7 asked HOW that emptiness arrived, not just what was on it. git opens a
+// PIPE on fd 0 for `pre-push` even with zero refs to write, and the FIFO survives
+// the whole husky → pnpm → tsx chain (measured); a feed swallowed WITHOUT a pipe
+// — `</dev/null`, `0<&-`, an empty regular file — arrives as a character device
+// or a regular file. So an empty feed on a pipe keeps the head-fallback (the
+// routine no-op push still passes), while an empty feed on any non-pipe channel
+// BLOCKS. `fstat` itself throwing counts as NOT a FIFO: fail closed.
+// This is a DISCRIMINATOR, not a proof of provenance: it excludes non-pipe
+// suppression only. Any pipe-shaped fd 0 carrying zero bytes — process
+// substitution (`< <(printf "")`), `mkfifo`, a drained genuine feed — reads
+// `fifo` exactly like git's own feed and still takes the fallback. That is the
+// documented residue (contract `### Limits (honest)`), narrowed by round 7, not
+// removed.
+//
 // The base ref comes from the remote name git passes `pre-push` as `$1`
 // (`<remote-name> <remote-url>`), forwarded by `.husky/pre-push` as
 // `pnpm db:migrate:check "$@"` — see `resolveBaseRef`. No argv ⇒ `origin/main`.
@@ -55,9 +69,12 @@
 //     tell what the push publishes and the worktree does not answer for it;
 //   • REAL PUSH (argv present) with an ABSENT/GARBLED ref feed ⇒ FAIL CLOSED:
 //     the only thing left to measure would be `HEAD`, another universe;
-//   • REAL PUSH with an EMPTY ref feed ⇒ measure `HEAD` against the base and
-//     decide on the result: clean ⇒ pass (announced), unapplied `.sql` ⇒ block,
-//     diff impossible ⇒ block;
+//   • REAL PUSH with an EMPTY ref feed ON A PIPE (the shape git's own feed always
+//     has, and the most any check here can establish) ⇒ measure `HEAD`
+//     against the base and decide on the result: clean ⇒ pass (announced),
+//     unapplied `.sql` ⇒ block, diff impossible ⇒ block;
+//   • REAL PUSH with an EMPTY ref feed on a channel that is NOT a pipe (or whose
+//     `fstat` fails) ⇒ FAIL CLOSED: git cannot have handed us that emptiness;
 //   • same, but on a hand run with NO stdin        ⇒ conservative pass over every
 //     `drizzle/**/*.sql` on disk, ANNOUNCED (never silent);
 //   • `drizzle/` itself unreadable                ⇒ FAIL CLOSED, loudly (we
@@ -72,16 +89,19 @@
 // --no-verify, HUSKY=0.
 
 import { execFileSync } from "node:child_process";
-import { readdirSync, readFileSync } from "node:fs";
+import { fstatSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   FEED_LOST_REASON,
+  FEED_NOT_FIFO_REASON,
+  classifyFeedChannel,
   classifyPublishedSql,
   findUnappliedMigrations,
   parseAppliedMarker,
   planMeasurement,
   resolveBaseRef,
   resolveDiffTips,
+  type FeedChannel,
   type MeasurementPlan,
 } from "./lib/migration-guard";
 
@@ -125,6 +145,19 @@ function readPushRefs(): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * HOW fd 0 arrived, asked of the OS rather than of the bytes: git opens a pipe
+ * for `pre-push` even when it has no refs to write, and that FIFO survives the
+ * `git` → `.husky/_/h` → `pre-push` → `pnpm` → `tsx` chain. `</dev/null`,
+ * `0<&-`, or a wrapper substituting a NON-PIPE stream shows up as a character
+ * device or a regular file. A pipe-shaped substitute (process substitution,
+ * `mkfifo`) does not: `isFIFO()` says "pipe", never "git". `fstat` throwing ⇒
+ * `not-fifo` (handled inside `classifyFeedChannel`) ⇒ fail closed.
+ */
+function readFeedChannel(): FeedChannel {
+  return classifyFeedChannel(() => fstatSync(0).isFIFO());
 }
 
 /**
@@ -245,21 +278,36 @@ function reportUnknowable(reason: string): void {
   console.error("  responde pelo que o push publica (um `.sql` pode estar só no ref empurrado).");
   console.error("  Sem conseguir diffar, o gate falha FECHADO.");
   console.error("");
+  printUnknowableHint(reason);
+  console.error("  (Bypass intencional: MIGRATE_GUARD_SKIP=1 git push)");
+  console.error("");
+}
+
+/** The actionable half of `reportUnknowable`, one hint per block reason. */
+function printUnknowableHint(reason: string): void {
   if (reason === FEED_LOST_REASON) {
     console.error("  O `pre-push` recebe do git a lista de refs no stdin. Ela chegou ausente ou");
     console.error("  ilegível, então algum wrapper na cadeia (`git` → `.husky/_/h` → `pre-push` →");
     console.error("  `pnpm` → `tsx`) mexeu no stdin. Rode o push direto pelo `git`.");
     console.error(
-      "  (Um feed VAZIO é outro caso — é o push já atualizado — e ali o gate mede `HEAD`",
+      "  (Um feed VAZIO chegando NUM PIPE é outro caso — é o que o push já atualizado produz —",
     );
-    console.error("  contra a base em vez de bloquear.)");
-  } else {
-    console.error(
-      "  Rode `git fetch <remoto>` (o gate compara contra `<remoto>/main`) e tente de novo.",
-    );
+    console.error("  e ali o gate mede `HEAD` contra a base em vez de bloquear.)");
+    return;
   }
-  console.error("  (Bypass intencional: MIGRATE_GUARD_SKIP=1 git push)");
-  console.error("");
+  if (reason === FEED_NOT_FIFO_REASON) {
+    console.error("  O git entrega a lista de refs num PIPE no fd 0 — inclusive quando ela está");
+    console.error("  vazia (push já atualizado), e esse pipe sobrevive à cadeia `git` →");
+    console.error("  `.husky/_/h` → `pre-push` → `pnpm` → `tsx`. Aqui o fd 0 veio vazio e NÃO era");
+    console.error("  um pipe, então quem respondeu não foi o git: `</dev/null`, `0<&-` ou algum");
+    console.error("  wrapper trocou o stdin por algo que não é pipe. Rode o push direto pelo");
+    console.error("  `git`, sem redirecionar o stdin do hook. (O teste é a FORMA do fd 0, não a");
+    console.error("  origem: um pipe vazio qualquer ainda passa pelo caminho do `HEAD`.)");
+    return;
+  }
+  console.error(
+    "  Rode `git fetch <remoto>` (o gate compara contra `<remoto>/main`) e tente de novo.",
+  );
 }
 
 /**
@@ -359,6 +407,9 @@ function main(): void {
     return;
   }
 
+  // Channel FIRST, before anything reads fd 0 — what we ask the OS about must be
+  // the descriptor as git handed it over.
+  const feedChannel = readFeedChannel();
   const rawStdin = readPushRefs();
   const tips = resolveDiffTips(rawStdin);
   if (tips.length === 0) return; // push só apaga refs — não publica SQL nenhum
@@ -379,6 +430,7 @@ function main(): void {
     tips,
     failure: outcome.kind === "failed" ? outcome.reason : null,
     remoteArg,
+    feedChannel,
   });
   if (plan.kind === "block") {
     reportUnknowable(plan.reason);

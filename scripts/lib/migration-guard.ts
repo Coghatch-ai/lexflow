@@ -93,7 +93,9 @@ export function resolveDiffTips(rawStdin: string | null): string[] {
  * diff the pushed tips at all.
  *
  *   • `push`          ⇒ diff worked; the candidate set is what those tips publish;
- *   • `head-fallback` ⇒ a real push whose ref feed arrived EMPTY: we conclude
+ *   • `head-fallback` ⇒ a real push whose ref feed arrived EMPTY **on a
+ *     pipe-shaped fd 0**, the shape git's own feed always has (a NON-PIPE
+ *     swallowed feed blocks instead — `FeedChannel`): we conclude
  *     nothing from the feed and judge by what `HEAD` publishes against the base.
  *     Passing requires that measurement to come back clean (see below);
  *   • `worktree`      ⇒ conservative approximation over every `.sql` on disk.
@@ -129,6 +131,42 @@ export function classifyPushFeed(rawStdin: string | null): FeedSource {
 }
 
 /**
+ * HOW fd 0 arrived, independent of WHAT was on it — a DISCRIMINATOR, not a proof
+ * of provenance. It answers "is fd 0 pipe-shaped?", never "is git on the other
+ * end?".
+ *
+ * Measured, not assumed (#74, review round 7): git hands `pre-push` a PIPE on
+ * fd 0 even when it has zero refs to write (`fifo`, 0 bytes), and that FIFO
+ * survives the whole `git` → `.husky/_/h` → `pre-push` → `pnpm` → `tsx` chain.
+ * What the check EXCLUDES is NON-PIPE suppression — `</dev/null`, `0<&-`, an
+ * empty regular file — which arrives as a character device or a regular file.
+ * It does NOT exclude a pipe-shaped substitute: process substitution
+ * (`< <(printf "")`), `mkfifo`, or a drained genuine feed all read `fifo` too
+ * (measured in the same round).
+ *
+ *   • `fifo`     ⇒ fd 0 is pipe-shaped, as git's own feed always is — necessary
+ *     evidence, not sufficient;
+ *   • `not-fifo` ⇒ it is not, so git did not open it and a zero-byte read says
+ *     nothing about the push.
+ */
+export type FeedChannel = "fifo" | "not-fifo";
+
+/**
+ * Classify fd 0 from an INJECTED inspector (`() => fstatSync(0).isFIFO()` in the
+ * shell), so this file stays pure and the tests never depend on the real fd 0.
+ *
+ * An inspector that THROWS (fd 0 closed, unstattable) ⇒ `not-fifo`. Fail closed:
+ * "we could not even look at the channel" must never read as "git fed us".
+ */
+export function classifyFeedChannel(inspectIsFifo: () => boolean): FeedChannel {
+  try {
+    return inspectIsFifo() ? "fifo" : "not-fifo";
+  } catch {
+    return "not-fifo";
+  }
+}
+
+/**
  * Why a real push whose ref feed is BROKEN (`absent` / `garbled`) is blocked
  * (printed as `Motivo:`). An EMPTY feed is NOT this case — see
  * `FEED_EMPTY_FALLBACK_REASON`.
@@ -138,17 +176,38 @@ export const FEED_LOST_REASON =
   "sem ela o gate só poderia medir `HEAD`, que NÃO responde pelo que o push publica";
 
 /**
- * Why a real push with an EMPTY ref feed is MEASURED against `HEAD` instead of
- * blocked outright. git starts `pre-push` BEFORE filtering refs that are already
- * up to date, so an ordinary `git push` with nothing new to publish arrives as
- * zero bytes on fd 0 — indistinguishable from a wrapper that swallowed the feed.
- * Blocking it would fail the most routine push there is, and a gate that annoys
- * gets disabled; passing it blindly would restore the fail-open hole. So the gate
- * concludes NOTHING from the feed and measures instead.
+ * Why a real push with an EMPTY ref feed **that arrived on a PIPE** — the shape
+ * git's own feed always has — is
+ * MEASURED against `HEAD` instead of blocked outright. git starts `pre-push`
+ * BEFORE filtering refs that are already up to date, so an ordinary `git push`
+ * with nothing new to publish arrives as zero bytes on fd 0. Blocking it would
+ * fail the most routine push there is, and a gate that annoys gets disabled;
+ * passing it blindly would restore the fail-open hole. So the gate concludes
+ * NOTHING from the feed and measures instead.
+ *
+ * "Indistinguishable from a swallowed feed" was true until round 7 for the
+ * NON-PIPE swallows: those are now told apart by the CHANNEL (`FeedChannel`) and
+ * blocked. Only a pipe-shaped fd 0 reaches this fallback — which git's own feed
+ * always is, but so is any pipe-shaped substitute (process substitution,
+ * `mkfifo`, a drained feed). The residue is documented in the contract.
  */
 export const FEED_EMPTY_FALLBACK_REASON =
   "git não forneceu no stdin a lista de refs deste push (feed vazio — é o que um push " +
   "já atualizado produz); o gate não concluiu nada do feed e mediu `HEAD` contra a base";
+
+/**
+ * Why a real push whose feed read as ZERO BYTES on a channel that is NOT
+ * pipe-shaped is blocked instead of taking the empty-feed fallback. git's feed
+ * is always a pipe, so a character device / regular file on fd 0 cannot be it:
+ * something between git and the gate replaced or suppressed the stream, "zero
+ * bytes" is that wrapper's answer rather than git's, and it says nothing about
+ * which refs the push publishes. (The converse does NOT hold — a pipe is not
+ * proof git opened it; see `FeedChannel`.)
+ */
+export const FEED_NOT_FIFO_REASON =
+  "o feed de refs deste push NÃO foi entregue pelo git: o fd 0 chegou vazio e não é o pipe que o " +
+  "git abre para o `pre-push` (algo na cadeia substituiu ou suprimiu o stdin), então o push não " +
+  "pode ser inspecionado";
 
 /**
  * The empty-feed fallback could not measure either — block, naming both halves:
@@ -191,12 +250,32 @@ export function emptyFeedBlockReason(failure: string): string {
  * and blocking if it cannot run at all. Verified, never assumed — and no
  * currently-blocking path was weakened.
  *
+ * The **seventh round** closed the residue round 6 left behind: `empty` was
+ * accepted on WHAT was read (zero bytes) without asking HOW it arrived, so a
+ * wrapper that fed the gate `/dev/null` looked exactly like a routine
+ * already-up-to-date push and got the head-fallback — which passes whenever the
+ * local `HEAD` is clean, even though a DIFFERENT ref was publishing unapplied
+ * SQL. `feedChannel` is the discriminator (`FeedChannel`, measured with
+ * `fstat` on fd 0): git's own empty feed is always pipe-shaped, so a NON-PIPE
+ * fd 0 (`</dev/null`, `0<&-`, an empty regular file) cannot be git and blocks.
+ * It is a discriminator, not a proof of provenance — a pipe-shaped substitute
+ * (process substitution, `mkfifo`, a drained feed) still reads `fifo` and still
+ * takes the fallback; that residue is documented, not closed.
+ * Blocking `empty` outright was rejected — it would fail every no-op push, and
+ * a gate that fails the most routine push in the world gets switched off.
+ * Widening the fallback universe from `HEAD` to every local ref was rejected
+ * too: it shrinks the residue by false-blocking routine pushes.
+ *
  * Rules (feed check FIRST — it is the one that decides which universe is even
  * legitimate):
  *   • real push (argv present) + feed `absent`/`garbled` ⇒ **block**: we never
  *     learned what this push publishes, and `HEAD` does not answer for it;
- *   • real push + feed `empty` + diff worked   ⇒ `head-fallback` (measure `HEAD`);
- *   • real push + feed `empty` + diff failed   ⇒ **block**: nothing was measured;
+ *   • real push + feed `empty` + channel NOT pipe-shaped ⇒ **block**: git did
+ *     not hand us that emptiness, so it is not evidence of an up-to-date push;
+ *   • real push + feed `empty` on a pipe + diff worked ⇒ `head-fallback` (the
+ *     pipe is consistent with git's feed, not proof of it);
+ *   • real push + feed `empty` on a pipe + diff failed ⇒ **block**: nothing was
+ *     measured;
  *   • diff succeeded (`failure === null`)      ⇒ measure the pushed tips;
  *   • failure + git actually fed us a ref list ⇒ **block**: we cannot say what
  *     this push publishes, and "don't know" is not "nothing";
@@ -212,8 +291,10 @@ export function planMeasurement(input: {
   readonly tips: readonly string[];
   readonly failure: string | null;
   readonly remoteArg: string | null;
+  /** How fd 0 arrived — only consulted for an `empty` feed on a real push. */
+  readonly feedChannel: FeedChannel;
 }): MeasurementPlan {
-  const { rawStdin, tips, failure, remoteArg } = input;
+  const { rawStdin, tips, failure, remoteArg, feedChannel } = input;
 
   const isRealPush = remoteArg !== null && remoteArg.trim() !== "";
   if (isRealPush) {
@@ -222,6 +303,7 @@ export function planMeasurement(input: {
       return { kind: "block", reason: FEED_LOST_REASON };
     }
     if (feed === "empty") {
+      if (feedChannel !== "fifo") return { kind: "block", reason: FEED_NOT_FIFO_REASON };
       return failure === null
         ? { kind: "head-fallback", reason: FEED_EMPTY_FALLBACK_REASON }
         : { kind: "block", reason: emptyFeedBlockReason(failure) };

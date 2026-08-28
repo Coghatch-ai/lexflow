@@ -11,230 +11,46 @@
 // the #74 review round precisely so the two decisions that had zero coverage —
 // "what does this push publish" (the third bypass) and "which diff statuses
 // count" (the `--diff-filter=d` delta) — are guarded by literal-string cases.
+//
+// This file hit the project's 500-code-line `max-lines` ceiling in review round 7
+// and was split BY SUBJECT, never by weakening the rule. What stays here is the
+// universe decision (`planMeasurement`, `classifyPushFeed`, `classifyFeedChannel`);
+// the siblings hold the parsers it consumes:
+//   • ./migration-guard.marker.test.ts — `parseAppliedMarker`,
+//     `findUnappliedMigrations`, `classifyPublishedSql`;
+//   • ./migration-guard.refs.test.ts   — `resolveDiffTips`, `resolveBaseRef`.
 
 import { describe, expect, it } from "vitest";
 import {
   FEED_EMPTY_FALLBACK_REASON,
   FEED_LOST_REASON,
+  FEED_NOT_FIFO_REASON,
   HEAD_TIP,
+  classifyFeedChannel,
   classifyPublishedSql,
   classifyPushFeed,
   emptyFeedBlockReason,
   findUnappliedMigrations,
-  parseAppliedMarker,
   planMeasurement,
-  resolveBaseRef,
   resolveDiffTips,
+  type MeasurementPlan,
 } from "./migration-guard";
 
 const SHA_A = "f5ced713bfff54b5ae159f5c4dde268a11b102f9";
 const SHA_B = "99299d7e88e1f0b0d4c7a2b3e5f6a7b8c9d0e1f2";
 const ZERO = "0000000000000000000000000000000000000000";
 
-// ---------------------------------------------------------------------------
-// parseAppliedMarker — the marker is gitignored per-machine state, so every
-// "we can't read it" path must degrade to [] (which makes the gate fail closed
-// once there are candidates).
-// ---------------------------------------------------------------------------
-
-describe("parseAppliedMarker", () => {
-  it("parses a valid marker written by scripts/migrate.ts", () => {
-    expect(parseAppliedMarker('["0001_a.sql", "0002_b.sql"]')).toEqual([
-      "0001_a.sql",
-      "0002_b.sql",
-    ]);
-  });
-
-  it("returns [] when the marker is absent (raw = null)", () => {
-    expect(parseAppliedMarker(null)).toEqual([]);
-  });
-
-  it("returns [] on invalid JSON", () => {
-    expect(parseAppliedMarker("{not json")).toEqual([]);
-  });
-
-  it("returns [] when the shape is an object, not an array", () => {
-    expect(parseAppliedMarker('{"a":1}')).toEqual([]);
-  });
-
-  it("returns [] when the array holds a non-string", () => {
-    expect(parseAppliedMarker('["x", 2]')).toEqual([]);
-  });
-
-  it("normalizes marker entries to basenames", () => {
-    expect(parseAppliedMarker('["drizzle/0003_c.sql"]')).toEqual(["0003_c.sql"]);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// findUnappliedMigrations — `published` is what THIS push publishes
-// (git diff origin/main...HEAD -- drizzle), never every .sql on disk.
-// ---------------------------------------------------------------------------
-
-describe("findUnappliedMigrations", () => {
-  it("(a) flags a published migration missing from the marker — the epic #50 regression", () => {
-    expect(findUnappliedMigrations(["drizzle/0026_drop_table.sql"], ["0025_x.sql"])).toEqual([
-      "0026_drop_table.sql",
-    ]);
-  });
-
-  it("(b) returns [] when every published migration is in the marker", () => {
-    expect(
-      findUnappliedMigrations(
-        ["drizzle/0025_x.sql", "drizzle/0026_y.sql"],
-        ["0025_x.sql", "0026_y.sql"],
-      ),
-    ).toEqual([]);
-  });
-
-  it("(c) returns [] when the push publishes no SQL, even with no marker — a fresh clone passes", () => {
-    expect(findUnappliedMigrations([], parseAppliedMarker(null))).toEqual([]);
-  });
-
-  it("(d) fails closed: published SQL + unusable marker ⇒ every candidate comes back", () => {
-    const published = ["drizzle/0028_a.sql", "drizzle/0029_b.sql"];
-    const expected = ["0028_a.sql", "0029_b.sql"];
-
-    for (const raw of [null, "{not json", '{"a":1}', '["x", 2]']) {
-      expect(findUnappliedMigrations(published, parseAppliedMarker(raw))).toEqual(expected);
-    }
-  });
-
-  it("(e) ignores stale/extra marker entries for files that no longer exist", () => {
-    expect(
-      findUnappliedMigrations(
-        ["drizzle/0028_a.sql"],
-        ["0001_gone.sql", "0028_a.sql", "0099_z.sql"],
-      ),
-    ).toEqual([]);
-  });
-
-  it("(f) matches a git path candidate against a basename marker entry", () => {
-    expect(findUnappliedMigrations(["drizzle/0028_x.sql"], ["0028_x.sql"])).toEqual([]);
-  });
-
-  it("(g) returns a sorted, de-duplicated list", () => {
-    expect(
-      findUnappliedMigrations(
-        ["drizzle/0030_c.sql", "0028_a.sql", "drizzle/0028_a.sql", "drizzle/0029_b.sql"],
-        [],
-      ),
-    ).toEqual(["0028_a.sql", "0029_b.sql", "0030_c.sql"]);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// resolveDiffTips — the THIRD BYPASS (review round on #74). The gate used to
-// diff `origin/main...HEAD`; git tells `pre-push` on stdin what is really being
-// published, one line per ref: `<localref> <localsha> <remoteref> <remotesha>`.
-// ---------------------------------------------------------------------------
-
-describe("resolveDiffTips", () => {
-  it("(h) uses the pushed ref's sha, not HEAD — the `git push origin mig:mig` bypass", () => {
-    expect(resolveDiffTips(`refs/heads/mig ${SHA_A} refs/heads/mig ${ZERO}\n`)).toEqual([SHA_A]);
-  });
-
-  it("(i) covers every ref of a `git push --all`", () => {
-    const stdin = `refs/heads/main ${SHA_B} refs/heads/main ${ZERO}\nrefs/heads/mig ${SHA_A} refs/heads/mig ${ZERO}\n`;
-    expect(resolveDiffTips(stdin)).toEqual([SHA_B, SHA_A].sort((a, b) => a.localeCompare(b)));
-  });
-
-  it("(j) falls back to HEAD when there is no stdin — a direct `pnpm db:migrate:check`", () => {
-    expect(resolveDiffTips(null)).toEqual([HEAD_TIP]);
-  });
-
-  it("(k) falls back to HEAD on blank/whitespace-only stdin", () => {
-    for (const raw of ["", "\n", "   \n\n  "]) {
-      expect(resolveDiffTips(raw)).toEqual([HEAD_TIP]);
-    }
-  });
-
-  it("(l) skips refs being DELETED (all-zero local sha) ⇒ a delete-only push publishes nothing", () => {
-    expect(resolveDiffTips(`refs/heads/gone ${ZERO} refs/heads/gone ${SHA_A}\n`)).toEqual([]);
-    expect(resolveDiffTips(`(delete) ${ZERO} refs/heads/gone ${SHA_A}\n`)).toEqual([]);
-  });
-
-  it("(m) still measures the live refs when a push mixes a delete with a real ref", () => {
-    const stdin = `refs/heads/gone ${ZERO} refs/heads/gone ${SHA_B}\nrefs/heads/mig ${SHA_A} refs/heads/mig ${ZERO}\n`;
-    expect(resolveDiffTips(stdin)).toEqual([SHA_A]);
-  });
-
-  it("(n) fails conservative to HEAD on an unparseable feed — never silently 'nothing to push'", () => {
-    for (const raw of [
-      "garbage",
-      "a b c",
-      `refs/heads/x zzznotasha refs/heads/x ${ZERO}`,
-      "a b c d e",
-    ]) {
-      expect(resolveDiffTips(raw)).toEqual([HEAD_TIP]);
-    }
-  });
-
-  it("(o) de-duplicates when the same sha is pushed under two refs", () => {
-    const stdin = `refs/heads/a ${SHA_A} refs/heads/a ${ZERO}\nrefs/heads/b ${SHA_A} refs/heads/b ${ZERO}\n`;
-    expect(resolveDiffTips(stdin)).toEqual([SHA_A]);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// classifyPublishedSql — the `--diff-filter=d` decision, moved out of the shell
-// so it is actually guarded. Input is raw `git diff --name-status` lines.
-// ---------------------------------------------------------------------------
-
-describe("classifyPublishedSql", () => {
-  it("(p) keeps added and modified SQL", () => {
-    expect(classifyPublishedSql(["A\tdrizzle/0028_a.sql", "M\tdrizzle/0029_b.sql"])).toEqual([
-      "drizzle/0028_a.sql",
-      "drizzle/0029_b.sql",
-    ]);
-  });
-
-  it("(q) DROPS deletions — a branch that only removes a migration publishes no SQL", () => {
-    expect(classifyPublishedSql(["D\tdrizzle/0028_a.sql"])).toEqual([]);
-  });
-
-  it("(r) keeps the DESTINATION of a rename — republished under a new name, never applied as such", () => {
-    expect(classifyPublishedSql(["R100\tdrizzle/0028_old.sql\tdrizzle/0028_new.sql"])).toEqual([
-      "drizzle/0028_new.sql",
-    ]);
-  });
-
-  it("(s) keeps the destination of a copy too", () => {
-    expect(classifyPublishedSql(["C75\tdrizzle/0028_a.sql\tdrizzle/0030_c.sql"])).toEqual([
-      "drizzle/0030_c.sql",
-    ]);
-  });
-
-  it("(t) drops non-.sql paths, including the gitignored marker", () => {
-    expect(
-      classifyPublishedSql(["M\tdrizzle/meta/_applied.json", "M\tdrizzle/meta/_journal.json"]),
-    ).toEqual([]);
-  });
-
-  it("(u) ignores blank and malformed lines", () => {
-    expect(classifyPublishedSql(["", "   ", "A", "A\tdrizzle/0028_a.sql"])).toEqual([
-      "drizzle/0028_a.sql",
-    ]);
-  });
-
-  it("(v) mixed diff: only the survivors reach the marker comparison", () => {
-    const published = classifyPublishedSql([
-      "D\tdrizzle/0026_gone.sql",
-      "A\tdrizzle/0028_a.sql",
-      "R100\tdrizzle/0027_old.sql\tdrizzle/0027_new.sql",
-      "M\tdrizzle/meta/_journal.json",
-    ]);
-    expect(published).toEqual(["drizzle/0027_new.sql", "drizzle/0028_a.sql"]);
-    expect(findUnappliedMigrations(published, ["0028_a.sql"])).toEqual(["0027_new.sql"]);
-  });
-
-  it("(w) keeps other statuses (T/U) rather than guessing them safe", () => {
-    expect(classifyPublishedSql(["T\tdrizzle/0028_a.sql", "U\tdrizzle/0029_b.sql"])).toEqual([
-      "drizzle/0028_a.sql",
-      "drizzle/0029_b.sql",
-    ]);
-  });
-});
+/**
+ * `planMeasurement` on a pipe-shaped fd 0 (git's own feed is one) — the channel every case written before
+ * review round 7 implicitly assumed. Keeping it a default here means each case
+ * still names only the axis it exercises; the channel axis gets its own suites
+ * below, which call `planMeasurement` directly.
+ */
+function planFifo(
+  input: Omit<Parameters<typeof planMeasurement>[0], "feedChannel">,
+): MeasurementPlan {
+  return planMeasurement({ ...input, feedChannel: "fifo" });
+}
 
 // ---------------------------------------------------------------------------
 // planMeasurement — the FOURTH BYPASS (review round on #74). The shell used to
@@ -251,7 +67,7 @@ const FAILURE = "não foi possível resolver `origin/main` (rode `git fetch orig
 describe("planMeasurement", () => {
   it("(x) measures the pushed tips when the diff worked", () => {
     expect(
-      planMeasurement({ rawStdin: REF_LINE, tips: [SHA_A], failure: null, remoteArg: "origin" }),
+      planFifo({ rawStdin: REF_LINE, tips: [SHA_A], failure: null, remoteArg: "origin" }),
     ).toEqual({
       kind: "push",
       tips: [SHA_A],
@@ -260,7 +76,7 @@ describe("planMeasurement", () => {
 
   it("(y) BLOCKS a real push whose diff is impossible — the fork-remote bypass", () => {
     expect(
-      planMeasurement({
+      planFifo({
         rawStdin: REF_LINE,
         tips: [SHA_A],
         failure: FAILURE,
@@ -275,7 +91,7 @@ describe("planMeasurement", () => {
   it("(z) BLOCKS a multi-ref push (`push --all`) whose diff is impossible", () => {
     const stdin = `refs/heads/main ${SHA_B} refs/heads/main ${ZERO}\n${REF_LINE}`;
     expect(
-      planMeasurement({
+      planFifo({
         rawStdin: stdin,
         tips: [SHA_A, SHA_B],
         failure: FAILURE,
@@ -289,7 +105,7 @@ describe("planMeasurement", () => {
 
   it("(aa) BLOCKS a garbled feed whose diff is impossible — stdin exists, so a push exists", () => {
     expect(
-      planMeasurement({ rawStdin: "garbage", tips: [HEAD_TIP], failure: FAILURE, remoteArg: null }),
+      planFifo({ rawStdin: "garbage", tips: [HEAD_TIP], failure: FAILURE, remoteArg: null }),
     ).toEqual({
       kind: "block",
       reason: FAILURE,
@@ -298,7 +114,7 @@ describe("planMeasurement", () => {
 
   it("(ab) falls back to the worktree ONLY on a hand run (no stdin at all)", () => {
     expect(
-      planMeasurement({ rawStdin: null, tips: [HEAD_TIP], failure: FAILURE, remoteArg: null }),
+      planFifo({ rawStdin: null, tips: [HEAD_TIP], failure: FAILURE, remoteArg: null }),
     ).toEqual({
       kind: "worktree",
       reason: FAILURE,
@@ -308,7 +124,7 @@ describe("planMeasurement", () => {
   it("(ac) treats blank stdin on a HAND RUN as no stdin (on a real push it blocks — (al))", () => {
     for (const raw of ["", "\n", "   \n\n  "]) {
       expect(
-        planMeasurement({ rawStdin: raw, tips: [HEAD_TIP], failure: FAILURE, remoteArg: null }),
+        planFifo({ rawStdin: raw, tips: [HEAD_TIP], failure: FAILURE, remoteArg: null }),
       ).toEqual({
         kind: "worktree",
         reason: FAILURE,
@@ -317,14 +133,12 @@ describe("planMeasurement", () => {
   });
 
   it("(ad) BLOCKS when there is no stdin but the tips are not the hand-run HEAD", () => {
-    expect(
-      planMeasurement({ rawStdin: null, tips: [SHA_A], failure: FAILURE, remoteArg: null }),
-    ).toEqual({
+    expect(planFifo({ rawStdin: null, tips: [SHA_A], failure: FAILURE, remoteArg: null })).toEqual({
       kind: "block",
       reason: FAILURE,
     });
     expect(
-      planMeasurement({
+      planFifo({
         rawStdin: null,
         tips: [HEAD_TIP, SHA_A],
         failure: FAILURE,
@@ -341,13 +155,13 @@ describe("planMeasurement — reason plumbing", () => {
   it("(ae) carries the reason verbatim, so the shell can print WHY it degraded", () => {
     const reason = "`git diff upstream/main...deadbeef` falhou";
     expect(
-      planMeasurement({ rawStdin: null, tips: [HEAD_TIP], failure: reason, remoteArg: null }),
+      planFifo({ rawStdin: null, tips: [HEAD_TIP], failure: reason, remoteArg: null }),
     ).toEqual({
       kind: "worktree",
       reason,
     });
     expect(
-      planMeasurement({
+      planFifo({
         rawStdin: REF_LINE,
         tips: [SHA_A],
         failure: reason,
@@ -362,7 +176,7 @@ describe("planMeasurement — reason plumbing", () => {
   it("(af) end-to-end with resolveDiffTips: a pushed ref + failed diff ⇒ block", () => {
     const stdin = REF_LINE;
     expect(
-      planMeasurement({
+      planFifo({
         rawStdin: stdin,
         tips: resolveDiffTips(stdin),
         failure: FAILURE,
@@ -370,7 +184,7 @@ describe("planMeasurement — reason plumbing", () => {
       }).kind,
     ).toBe("block");
     expect(
-      planMeasurement({
+      planFifo({
         rawStdin: null,
         tips: resolveDiffTips(null),
         failure: FAILURE,
@@ -409,7 +223,7 @@ describe("classifyPushFeed", () => {
 describe("planMeasurement — a real push whose feed is LOST or EMPTY", () => {
   it("(al) MEASURES instead of concluding when a real push's feed is EMPTY", () => {
     for (const raw of ["", "\n", "   \n\n  "]) {
-      const plan = planMeasurement({
+      const plan = planFifo({
         rawStdin: raw,
         tips: [HEAD_TIP],
         failure: null,
@@ -422,14 +236,14 @@ describe("planMeasurement — a real push whose feed is LOST or EMPTY", () => {
 
   it("(am) BLOCKS a real push whose feed is ABSENT (stdin unreadable ⇒ null)", () => {
     expect(
-      planMeasurement({ rawStdin: null, tips: [HEAD_TIP], failure: null, remoteArg: "origin" }),
+      planFifo({ rawStdin: null, tips: [HEAD_TIP], failure: null, remoteArg: "origin" }),
     ).toEqual({ kind: "block", reason: FEED_LOST_REASON });
   });
 
   it("(an) BLOCKS a real push whose feed is MALFORMED (5 fields, garbage, bad sha)", () => {
     for (const raw of ["a b c d e", "garbage", `refs/heads/x zzz refs/heads/x ${ZERO}`]) {
       expect(
-        planMeasurement({
+        planFifo({
           rawStdin: raw,
           tips: resolveDiffTips(raw),
           failure: null,
@@ -445,14 +259,14 @@ describe("planMeasurement — a real push whose feed is LOST or EMPTY", () => {
       "https://github.com/Coghatch-ai/lexflow.git",
       "  origin  ",
     ]) {
+      expect(planFifo({ rawStdin: null, tips: [HEAD_TIP], failure: null, remoteArg: arg })).toEqual(
+        {
+          kind: "block",
+          reason: FEED_LOST_REASON,
+        },
+      );
       expect(
-        planMeasurement({ rawStdin: null, tips: [HEAD_TIP], failure: null, remoteArg: arg }),
-      ).toEqual({
-        kind: "block",
-        reason: FEED_LOST_REASON,
-      });
-      expect(
-        planMeasurement({ rawStdin: "garbage", tips: [HEAD_TIP], failure: null, remoteArg: arg }),
+        planFifo({ rawStdin: "garbage", tips: [HEAD_TIP], failure: null, remoteArg: arg }),
       ).toEqual({ kind: "block", reason: FEED_LOST_REASON });
     }
   });
@@ -463,14 +277,14 @@ describe("planMeasurement — a real push whose feed is LOST or EMPTY", () => {
       "https://github.com/Coghatch-ai/lexflow.git",
       "  origin  ",
     ]) {
-      expect(
-        planMeasurement({ rawStdin: "", tips: [HEAD_TIP], failure: null, remoteArg: arg }).kind,
-      ).toBe("head-fallback");
+      expect(planFifo({ rawStdin: "", tips: [HEAD_TIP], failure: null, remoteArg: arg }).kind).toBe(
+        "head-fallback",
+      );
     }
   });
 
   it("(ao3) an EMPTY feed whose HEAD diff FAILED blocks — we could not measure anything", () => {
-    const plan = planMeasurement({
+    const plan = planFifo({
       rawStdin: "",
       tips: [HEAD_TIP],
       failure: FAILURE,
@@ -488,24 +302,25 @@ describe("planMeasurement — a real push whose feed is LOST or EMPTY", () => {
 // gate learned about lost feeds and must keep behaving correctly after.
 describe("planMeasurement — a hand run and a CORRECT feed stay untouched", () => {
   it("(ap) a HAND RUN (no argv) is untouched: no stdin + working diff ⇒ measure HEAD", () => {
-    expect(
-      planMeasurement({ rawStdin: null, tips: [HEAD_TIP], failure: null, remoteArg: null }),
-    ).toEqual({ kind: "push", tips: [HEAD_TIP] });
+    expect(planFifo({ rawStdin: null, tips: [HEAD_TIP], failure: null, remoteArg: null })).toEqual({
+      kind: "push",
+      tips: [HEAD_TIP],
+    });
   });
 
   it("(aq) a HAND RUN whose diff is impossible still takes the ANNOUNCED conservative path", () => {
     expect(
-      planMeasurement({ rawStdin: null, tips: [HEAD_TIP], failure: FAILURE, remoteArg: null }),
+      planFifo({ rawStdin: null, tips: [HEAD_TIP], failure: FAILURE, remoteArg: null }),
     ).toEqual({ kind: "worktree", reason: FAILURE });
     for (const arg of ["", "   "]) {
       expect(
-        planMeasurement({ rawStdin: "", tips: [HEAD_TIP], failure: FAILURE, remoteArg: arg }),
+        planFifo({ rawStdin: "", tips: [HEAD_TIP], failure: FAILURE, remoteArg: arg }),
       ).toEqual({ kind: "worktree", reason: FAILURE });
     }
   });
 
   it("(ar) a CORRECT feed on a real push still measures the pushed tips — and still blocks unapplied SQL", () => {
-    const plan = planMeasurement({
+    const plan = planFifo({
       rawStdin: REF_LINE,
       tips: resolveDiffTips(REF_LINE),
       failure: null,
@@ -520,7 +335,7 @@ describe("planMeasurement — a hand run and a CORRECT feed stay untouched", () 
 
   it("(as) a CORRECT feed whose diff FAILED still blocks with the diff's own reason", () => {
     expect(
-      planMeasurement({ rawStdin: REF_LINE, tips: [SHA_A], failure: FAILURE, remoteArg: "origin" }),
+      planFifo({ rawStdin: REF_LINE, tips: [SHA_A], failure: FAILURE, remoteArg: "origin" }),
     ).toEqual({ kind: "block", reason: FAILURE });
   });
 });
@@ -544,7 +359,7 @@ describe("planMeasurement — a hand run and a CORRECT feed stay untouched", () 
 
 describe("planMeasurement — empty feed on a real push is MEASURED, not assumed", () => {
   it("(at) empty feed + HEAD clean against the base ⇒ PASS (the up-to-date push)", () => {
-    const plan = planMeasurement({
+    const plan = planFifo({
       rawStdin: "",
       tips: resolveDiffTips(""),
       failure: null,
@@ -559,7 +374,7 @@ describe("planMeasurement — empty feed on a real push is MEASURED, not assumed
   });
 
   it("(au) empty feed + HEAD carrying an UNAPPLIED migration ⇒ BLOCK", () => {
-    const plan = planMeasurement({
+    const plan = planFifo({
       rawStdin: "\n",
       tips: resolveDiffTips("\n"),
       failure: null,
@@ -578,7 +393,7 @@ describe("planMeasurement — empty feed on a real push is MEASURED, not assumed
 
   it("(aw) empty feed + base UNRESOLVABLE ⇒ BLOCK, naming the diff's own reason", () => {
     for (const raw of ["", "\n", "   \n\n  "]) {
-      const plan = planMeasurement({
+      const plan = planFifo({
         rawStdin: raw,
         tips: [HEAD_TIP],
         failure: FAILURE,
@@ -606,45 +421,181 @@ describe("planMeasurement — empty feed on a real push is MEASURED, not assumed
       { rawStdin: "", tips: [HEAD_TIP], failure: FAILURE, remoteArg: "origin" },
     ] as const;
     for (const input of stillBlocking) {
-      expect(planMeasurement(input).kind).toBe("block");
+      expect(planFifo(input).kind).toBe("block");
     }
   });
 });
 
 // ---------------------------------------------------------------------------
-// resolveBaseRef — git hands `pre-push` `<remote-name> <remote-url>` in argv;
-// the gate hardcoded `origin/main` and never read it, which is what made a fork
-// clone (remote named `upstream`) degrade on every single push.
+// The CHANNEL of an empty feed (#74, review round 7) — the residue round 6 left.
+//
+// Round 6 accepted an `empty` feed on WHAT was read (zero bytes) without asking
+// HOW it arrived, so anything that handed the gate `/dev/null` looked exactly
+// like the routine already-up-to-date push and got the head-fallback — which
+// passes whenever the local `HEAD` happens to be clean, while a DIFFERENT ref
+// published unapplied SQL.
+//
+// The discriminator was measured, not assumed: git opens a PIPE on fd 0 for
+// `pre-push` even with zero refs to write (fifo, 0 bytes) and that FIFO survives
+// `git` → `.husky/_/h` → `pre-push` → `pnpm` → `tsx`; `</dev/null`, `0<&-` or an
+// empty regular file arrives as a character device or a regular file. It is a
+// discriminator, not a proof of provenance — a pipe-shaped substitute (process
+// substitution, `mkfifo`) reads `fifo` too, and is the documented residue.
+//
+// Hermetic: `classifyFeedChannel` takes the fd-0 inspector as a parameter, so
+// nothing here touches the real fd 0.
 // ---------------------------------------------------------------------------
 
-describe("resolveBaseRef", () => {
-  it("(ag) uses the remote git is actually pushing to", () => {
-    expect(resolveBaseRef("upstream")).toBe("upstream/main");
-    expect(resolveBaseRef("fork")).toBe("fork/main");
-    expect(resolveBaseRef("origin")).toBe("origin/main");
+const EMPTY_FEEDS = ["", "\n", "   \n\n  "] as const;
+
+describe("classifyFeedChannel", () => {
+  it("(az) a FIFO on fd 0 is the shape git's feed has — necessary, not sufficient", () => {
+    expect(classifyFeedChannel(() => true)).toBe("fifo");
   });
 
-  it("(ah) falls back to origin/main on a hand run (no argv)", () => {
-    expect(resolveBaseRef(null)).toBe("origin/main");
+  it("(ba) a non-pipe (char device, regular file) CANNOT be git's feed", () => {
+    expect(classifyFeedChannel(() => false)).toBe("not-fifo");
   });
 
-  it("(ai) falls back to origin/main on an empty/whitespace argument", () => {
-    for (const arg of ["", "   "]) expect(resolveBaseRef(arg)).toBe("origin/main");
+  it("(bb) an fd 0 that cannot even be fstat'ed counts as NOT a FIFO — fail closed", () => {
+    expect(
+      classifyFeedChannel(() => {
+        throw new Error("EBADF: bad file descriptor, fstat");
+      }),
+    ).toBe("not-fifo");
   });
+});
 
-  it("(aj) falls back to origin/main when git passed a URL/path instead of a remote name", () => {
-    for (const arg of [
-      "https://github.com/Coghatch-ai/lexflow.git",
-      "git@github.com:Coghatch-ai/lexflow.git",
-      "ssh://git@host/repo.git",
-      "../remote.git",
-      "/tmp/remote.git",
-    ]) {
-      expect(resolveBaseRef(arg)).toBe("origin/main");
+describe("planMeasurement — an EMPTY feed is judged by its CHANNEL", () => {
+  it("(bc) empty feed on a pipe ⇒ head-fallback, exactly as before", () => {
+    for (const raw of EMPTY_FEEDS) {
+      expect(
+        planMeasurement({
+          rawStdin: raw,
+          tips: [HEAD_TIP],
+          failure: null,
+          remoteArg: "origin",
+          feedChannel: "fifo",
+        }),
+      ).toEqual({ kind: "head-fallback", reason: FEED_EMPTY_FALLBACK_REASON });
     }
   });
 
-  it("(ak) trims surrounding whitespace from a real remote name", () => {
-    expect(resolveBaseRef("  upstream  ")).toBe("upstream/main");
+  it("(bd) empty feed on a channel that is NOT a FIFO ⇒ BLOCK: git did not hand us that silence", () => {
+    for (const raw of EMPTY_FEEDS) {
+      expect(
+        planMeasurement({
+          rawStdin: raw,
+          tips: [HEAD_TIP],
+          failure: null,
+          remoteArg: "origin",
+          feedChannel: "not-fifo",
+        }),
+      ).toEqual({ kind: "block", reason: FEED_NOT_FIFO_REASON });
+    }
+  });
+
+  it("(be) empty feed whose fd 0 could not be fstat'ed ⇒ BLOCK (throw ⇒ not-fifo ⇒ closed)", () => {
+    const feedChannel = classifyFeedChannel(() => {
+      throw new Error("EBADF: bad file descriptor, fstat");
+    });
+    expect(
+      planMeasurement({
+        rawStdin: "",
+        tips: [HEAD_TIP],
+        failure: null,
+        remoteArg: "origin",
+        feedChannel,
+      }),
+    ).toEqual({ kind: "block", reason: FEED_NOT_FIFO_REASON });
+  });
+
+  it("(bf) a swallowed feed blocks whatever the diff did, and whatever shape the remote arg has", () => {
+    for (const remoteArg of ["origin", "upstream", "../remote.git", "  origin  "]) {
+      for (const failure of [null, FAILURE]) {
+        expect(
+          planMeasurement({
+            rawStdin: "",
+            tips: [HEAD_TIP],
+            failure,
+            remoteArg,
+            feedChannel: "not-fifo",
+          }).kind,
+        ).toBe("block");
+      }
+    }
+  });
+});
+
+describe("planMeasurement — the channel changes NOTHING else", () => {
+  it("(bg) a CORRECT feed still measures the pushed tips, FIFO or not", () => {
+    for (const feedChannel of ["fifo", "not-fifo"] as const) {
+      expect(
+        planMeasurement({
+          rawStdin: REF_LINE,
+          tips: [SHA_A],
+          failure: null,
+          remoteArg: "origin",
+          feedChannel,
+        }),
+      ).toEqual({ kind: "push", tips: [SHA_A] });
+    }
+  });
+
+  it("(bh) absent/garbled still block with the LOST-feed reason, not the channel one", () => {
+    for (const feedChannel of ["fifo", "not-fifo"] as const) {
+      for (const rawStdin of [null, "garbage", "a b c d e"]) {
+        expect(
+          planMeasurement({
+            rawStdin,
+            tips: [HEAD_TIP],
+            failure: null,
+            remoteArg: "origin",
+            feedChannel,
+          }),
+        ).toEqual({ kind: "block", reason: FEED_LOST_REASON });
+      }
+    }
+  });
+
+  it("(bi) a HAND RUN (no argv) is untouched — it has no feed by definition", () => {
+    for (const feedChannel of ["fifo", "not-fifo"] as const) {
+      expect(
+        planMeasurement({
+          rawStdin: null,
+          tips: [HEAD_TIP],
+          failure: null,
+          remoteArg: null,
+          feedChannel,
+        }),
+      ).toEqual({ kind: "push", tips: [HEAD_TIP] });
+      expect(
+        planMeasurement({
+          rawStdin: null,
+          tips: [HEAD_TIP],
+          failure: FAILURE,
+          remoteArg: null,
+          feedChannel,
+        }),
+      ).toEqual({ kind: "worktree", reason: FAILURE });
+    }
+  });
+
+  it("(bj) the empty-feed FIFO fallback still blocks when its own diff failed", () => {
+    expect(
+      planMeasurement({
+        rawStdin: "",
+        tips: [HEAD_TIP],
+        failure: FAILURE,
+        remoteArg: "origin",
+        feedChannel: "fifo",
+      }),
+    ).toEqual({ kind: "block", reason: emptyFeedBlockReason(FAILURE) });
+  });
+
+  it("(bk) the two block reasons stay distinguishable — each names its own cause", () => {
+    expect(FEED_NOT_FIFO_REASON).not.toBe(FEED_LOST_REASON);
+    expect(FEED_NOT_FIFO_REASON).not.toBe(FEED_EMPTY_FALLBACK_REASON);
+    expect(FEED_NOT_FIFO_REASON).toContain("NÃO foi entregue pelo git");
   });
 });
