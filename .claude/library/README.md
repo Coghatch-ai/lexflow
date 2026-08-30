@@ -4,14 +4,17 @@ Durable, authoritative records for LexFlow. `CLAUDE.md` is the INDEX (one-line p
 the content lives here. Every agent (analyst, builder, tester, reviewer) treats these docs as
 authoritative product intent, above any hypothesis of its own.
 
-| Doc                                                          | What it holds                                                                                                                                     |
-| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [kb-business/](kb-business/README.md)                        | Functional definitions / product intent — ONE FILE PER FUNCTIONALITY. Read BEFORE designing or fixing.                                            |
-| [business-rules.md](business-rules.md)                       | Redirect only — the old single-file location, kept so existing links resolve.                                                                     |
-| [answering-surfaces.md](answering-surfaces.md)               | Map of every place a question is answered (desktop QuestionCard screens, mobile QuestionRunner), the life of a test run + the backend it touches. |
-| [migration-deploy-contract.md](migration-deploy-contract.md) | CI does NOT migrate — the migration↔deploy contract + the `pre-push` gate (`pnpm db:migrate:check`).                                              |
-| [rds-ip-allowlist.md](rds-ip-allowlist.md)                   | DB `ETIMEDOUT` after your public IP changes — rotate the `nomad-auto` `/32` in SG `sg-01be3c83d801344d9`.                                         |
-| [project.md](project.md)                                     | Extended project/infra details too long for a CLAUDE.md line.                                                                                     |
+| Doc                                                                                          | What it holds                                                                                                                                     |
+| -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [kb-business/](kb-business/README.md)                                                        | Functional definitions / product intent — ONE FILE PER FUNCTIONALITY. Read BEFORE designing or fixing.                                            |
+| [business-rules.md](business-rules.md)                                                       | Redirect only — the old single-file location, kept so existing links resolve.                                                                     |
+| [answering-surfaces.md](answering-surfaces.md)                                               | Map of every place a question is answered (desktop QuestionCard screens, mobile QuestionRunner), the life of a test run + the backend it touches. |
+| [migration-deploy-contract.md](migration-deploy-contract.md)                                 | CI does NOT migrate — the migration↔deploy contract + the `pre-push` gate (`pnpm db:migrate:check`).                                              |
+| [rds-ip-allowlist.md](rds-ip-allowlist.md)                                                   | DB `ETIMEDOUT` after your public IP changes — rotate the `nomad-auto` `/32` in SG `sg-01be3c83d801344d9`.                                         |
+| [ai-pricing.md](ai-pricing.md)                                                               | How an AI charge is computed — true-cost price table by model, margin only in `mult.<source>`, provenance rule, no-usage-no-charge.               |
+| [../../docs/monetization.md](../../docs/monetization.md)                                     | The money engine end to end — ledger/balances/charges/config tables, admission, single writer. Authoritative for the credit system.               |
+| [verdicts/ai-price-verification-2026-08-29.md](verdicts/ai-price-verification-2026-08-29.md) | Independent first-party check of the AI price sheet — every rate in USD/1M AND cents/1M, plus what is UNVERIFIABLE.                               |
+| [project.md](project.md)                                                                     | Extended project/infra details too long for a CLAUDE.md line.                                                                                     |
 
 ## Functionalities → where they are defined
 

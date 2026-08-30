@@ -200,6 +200,8 @@ the contract) lives in the project library — this file is only the index:
 - **[.claude/library/kb-business/](.claude/library/kb-business/README.md)** — functional definitions,
   ONE FILE PER FUNCTIONALITY: BR-01 LOV codes · BR-02 descartar alternativas · BR-03 responder depois ·
   BR-04 bookmarks · BR-05 salvar progresso / sair e processar a test in progress.
+- **[.claude/library/ai-pricing.md](.claude/library/ai-pricing.md)** — how an AI charge is computed:
+  true-cost price table by model, margin ONLY in `mult.<source>`, rate-provenance rule, no-usage-no-charge.
 - **[.claude/library/answering-surfaces.md](.claude/library/answering-surfaces.md)** — map of every screen
   where a question is answered (desktop `QuestionCard` screens, mobile `QuestionRunner`), the life of a
   test run (start → answer → leave → `sessions.record`) + the backend it touches.
