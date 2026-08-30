@@ -82,6 +82,25 @@ export async function getRelayJob(
   return { status: "error", error: parsed.error ?? "Erro no serviço externo" };
 }
 
+/**
+ * The CLIENT-facing projection of a job result (#98 review round 1, finding 5).
+ *
+ * The senders now write `{ text, model, usage }` so the door can price the call
+ * server-side. The browser only ever needed `text` — passing the record through
+ * raw widened the public contract with metering facts nobody asked for. This
+ * narrows the poll endpoint back to `{ text }`; the DOORS keep calling
+ * getRelayJob() directly, so server-side settlement still sees model + usage.
+ *
+ * Pure and total: pending/error pass through untouched; a done payload with no
+ * string `text` becomes `null` (the same shape a pre-#98 empty result had).
+ */
+export function clientRelayJobView(job: RelayJobStatus): RelayJobStatus {
+  if (job.status !== "done") return job;
+  const record = typeof job.data === "object" && job.data !== null ? job.data : {};
+  const text = (record as Record<string, unknown>)["text"];
+  return { status: "done", data: typeof text === "string" ? { text } : null };
+}
+
 function isNotFound(err: unknown): boolean {
   if (typeof err !== "object" || err === null) return false;
   const e = err as { name?: string; $metadata?: { httpStatusCode?: number } };

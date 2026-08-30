@@ -30,7 +30,7 @@ import {
 import { enqueueRelayJob, getRelayJob } from "../../lib/relay";
 import { resolveAiPrompt } from "../../lib/ai-prompts";
 import { admit } from "../../lib/admission";
-import { resolveMeteringModel, consumeAndCharge } from "../../lib/ai-metering";
+import { parseAiResult, meteringOf, consumeAndCharge } from "../../lib/ai-metering";
 import { getAllConfigRows, upsertConfigRow } from "../../lib/pricing-config";
 import { grantSubscription } from "../../lib/subscription";
 import { grantAllowance } from "../../lib/allowance";
@@ -559,8 +559,9 @@ export const adminRouter = router({
         if (job.status === "error") {
           throw new TRPCError({ code: "BAD_GATEWAY", message: job.error });
         }
-        const raw = job.data as { text: string };
-        const derived = parseExplainResponse(raw.text, letter);
+        // Parse OUTSIDE the transaction: text + the REAL metering facts (#98).
+        const ai = parseAiResult(job.data);
+        const derived = parseExplainResponse(ai.text, letter);
         if (derived === null) {
           throw new TRPCError({
             code: "BAD_GATEWAY",
@@ -583,10 +584,8 @@ export const adminRouter = router({
             targetId: input.id,
             source: "explanation",
             refId: `explain:admin:${jobId}`,
-            // Metering model MUST be server-derived: no client-supplied model may
-            // reach costFor() (an unknown string → rawCents=0 dodge).
-            model: resolveMeteringModel(),
-            usage: { kind: "tokens", amount: 2048 },
+            // Metering facts are SERVER-READ from the relay result, never the input.
+            metering: meteringOf(ai),
           });
           if (outcome === "replay") return; // already consumed onto this question.
           await tx

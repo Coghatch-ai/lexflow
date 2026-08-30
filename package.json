@@ -21,6 +21,7 @@
     "db:seed": "tsx scripts/seed.ts",
     "db:seed-lov": "tsx scripts/seed-lov.ts",
     "db:seed-csv": "tsx scripts/seed-from-csv.ts",
+    "db:seed-credit-config": "tsx scripts/seed-credit-config.ts",
     "import:2fase:extract": "tsx scripts/import-2fase-extract.ts",
     "import:2fase:save": "tsx scripts/import-2fase-save.ts",
     "db:create-user": "tsx scripts/create-user.ts",

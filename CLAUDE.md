@@ -84,6 +84,9 @@ pnpm db:migrate   # Apply pending migrations
 pnpm db:seed      # Seed the global oab_questions catalog (heavy; idempotent)
 pnpm db:seed-lov  # Sync ONLY list_of_values picklists from shared/data/lov.ts (FK-free, idempotent).
                   # Use this for ANY LOV/disciplines/label change — NOT db:seed (see docs/conventions.md).
+pnpm db:seed-credit-config  # Upsert the billing multipliers (`mult.<source>` in credit_config).
+                  # Margin lives ONLY here — the cost-of-goods table is TRUE provider cost.
+                  # Run AFTER the code deploy, never before (seeding first = overcharge window).
 pnpm db:create-user <clerk-user-id> [email] [name...]   # Manually create a local users row
 pnpm smoke        # End-to-end check of the data API against the DB (throwaway user, self-cleans)
 # NOTE: no e2e/uat script yet — framework UAT (/uat) is unavailable until one is added.

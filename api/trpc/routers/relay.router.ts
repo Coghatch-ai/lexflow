@@ -12,12 +12,16 @@
 
 import { z } from "zod";
 import { protectedProcedure, router } from "../procedures";
-import { getRelayJob } from "../../lib/relay";
+import { clientRelayJobView, getRelayJob } from "../../lib/relay";
 
 export const relayRouter = router({
   job: protectedProcedure
     .input(z.object({ jobId: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
-      return getRelayJob(ctx.userId, input.jobId);
+      // Narrowed to `{ text }` (#98 review, finding 5): the senders write
+      // `{ text, model, usage }` for SERVER-side pricing; the browser gets only
+      // the delivered text. The doors read getRelayJob() directly, so
+      // settlement is unaffected.
+      return clientRelayJobView(await getRelayJob(ctx.userId, input.jobId));
     }),
 });

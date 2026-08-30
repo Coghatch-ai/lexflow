@@ -24,7 +24,7 @@ import {
 import { protectedProcedure, router } from "../procedures";
 import { QUESTION_TYPES } from "../../../shared/domain/discursive-question";
 import { getRelayJob } from "../../lib/relay";
-import { resolveMeteringModel, consumeAndCharge } from "../../lib/ai-metering";
+import { parseAiResult, meteringOf, consumeAndCharge } from "../../lib/ai-metering";
 import type { CreditTx } from "../../lib/credit-charge";
 import { parseGradeResponse } from "../../../shared/domain/ai-eval";
 
@@ -278,12 +278,15 @@ export const discursiveRouter = router({
     if (q === undefined) {
       throw new TRPCError({ code: "NOT_FOUND", message: "Questão não encontrada" });
     }
-    const raw = job.data as { text: string };
-    const graded = parseGradeResponse(raw.text, q.maxPoints);
+    // Parse OUTSIDE the transaction: text + the REAL metering facts (model the
+    // provider ran, tokens it reported). An unpriceable result is NOT an error
+    // here — it still persists and charges 0 (#98).
+    const ai = parseAiResult(job.data);
+    const graded = parseGradeResponse(ai.text, q.maxPoints);
     if (graded === null) {
       throw new TRPCError({ code: "BAD_GATEWAY", message: "A IA retornou um formato inesperado" });
     }
-    const ai: AiGrade = { aiScore: graded.score, aiFeedback: graded.feedback };
+    const grade: AiGrade = { aiScore: graded.score, aiFeedback: graded.feedback };
 
     // ATOMIC persist + single-use consume + charge (Codex #61 round 3). The consume
     // marker + charge + AI-field persist all run in ONE transaction: they commit
@@ -302,12 +305,9 @@ export const discursiveRouter = router({
         targetId: input.questionId,
         source: "grade",
         refId,
-        // Metering model MUST be server-derived: a client-supplied model would let
-        // an unknown string force rawCents=0 (costFor→0) and dodge the charge.
-        model: resolveMeteringModel(),
-        // Grade output is the graded feedback (JSON) — meter on the prompt's output
-        // budget as a stable per-action usage proxy until real token counts flow.
-        usage: { kind: "tokens", amount: 2048 },
+        // Metering facts are SERVER-READ from the relay result — never the tRPC
+        // input (a client-chosen model would be a free-call lever).
+        metering: meteringOf(ai),
       });
       if (outcome === "replay") {
         // Same job already consumed onto this question — return the already-persisted
@@ -334,10 +334,10 @@ export const discursiveRouter = router({
         selfScore: input.selfScore,
         timeSpent: input.timeSpent,
         sessionId: input.sessionId,
-        ai,
+        ai: grade,
       });
     });
-    return { answerId, aiScore: ai.aiScore, aiFeedback: ai.aiFeedback };
+    return { answerId, aiScore: grade.aiScore, aiFeedback: grade.aiFeedback };
   }),
 
   // Close a prova session (endedAt + total self-score, computed client-side from

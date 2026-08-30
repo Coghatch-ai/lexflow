@@ -24,6 +24,7 @@ import {
 } from "@aws-sdk/client-s3";
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import type { AiPayload } from "../relay/providers";
+import type { Usage } from "../../shared/domain/cost-of-goods";
 import { streamGemini, streamOpenai } from "./stream-providers";
 
 const REGION = process.env.AWS_REGION ?? "sa-east-1";
@@ -31,8 +32,14 @@ const SSM_PREFIX = process.env.SSM_PREFIX ?? "/lexflow/relay/prod";
 const OUTBOX_BUCKET = process.env.OUTBOX_BUCKET ?? "";
 
 const DEFAULT_AI_PROVIDER = "gemini";
-const DEFAULT_GEMINI_MODEL = "gemini-2.0-flash";
-const DEFAULT_OPENAI_MODEL = "gpt-4o-mini";
+// Mirrors api/relay/relay-handler.ts — gemini-2.0-flash was shut down
+// 2026-06-01; gemini-3.6-flash is its official replacement and the id with a
+// cost-of-goods rate row (#98). Change both handlers or the paths diverge.
+const DEFAULT_GEMINI_MODEL = "gemini-3.6-flash";
+// Mirrors api/relay/relay-handler.ts (#98, human decision 2026-08-30): the
+// OpenAI default is gpt-5.6-luna, which has a verified rate row. SSM
+// /openai-model still overrides it at runtime.
+const DEFAULT_OPENAI_MODEL = "gpt-5.6-luna";
 
 const ssm = new SSMClient({ region: REGION });
 const s3 = new S3Client({ region: REGION });
@@ -93,10 +100,14 @@ async function readTicket(jobId: string): Promise<StreamTicket | null> {
   }
 }
 
+// The success payload is byte-identical in shape to the relay's (#98): the
+// door's parseAiResult reads ONE format regardless of which sender produced it.
 async function writeResult(
   userId: string,
   jobId: string,
-  result: { success: true; data: { text: string } } | { success: false; error: string },
+  result:
+    | { success: true; data: { text: string; model: string; usage: Usage | null } }
+    | { success: false; error: string },
 ): Promise<void> {
   await s3.send(
     new PutObjectCommand({
@@ -166,7 +177,10 @@ async function handle(event: APIGatewayProxyEventV2, stream: ResponseStream): Pr
       provider === "openai"
         ? await streamOpenai(apiKey, model, ticket.payload, onDelta)
         : await streamGemini(apiKey, model, ticket.payload, onDelta);
-    await writeResult(ticket.userId, jobId, { success: true, data: { text: full } });
+    await writeResult(ticket.userId, jobId, {
+      success: true,
+      data: { text: full.text, model: full.model, usage: full.usage },
+    });
   } catch (err) {
     console.error("[stream] upstream failed", { jobId, err });
     // Error marker keeps the finalize/refund rails working (relay.job → refund).

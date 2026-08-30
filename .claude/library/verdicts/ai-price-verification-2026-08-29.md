@@ -1,7 +1,7 @@
 ---
 type: verdict
 title: "AI provider price sheet — independent first-party verification (2026-08-29/30)"
-description: "Hermes sheet holds — 15/15 price rows CONFIRMED against first-party pages; 3 UNVERIFIABLE items (gemini-1.5 retirement date, an OpenAI page last-updated date, long-context threshold absent from the pricing page itself). Do NOT treat as adopted into COST_OF_GOODS."
+description: "Hermes sheet holds — 15/15 price rows CONFIRMED against first-party pages; 3 UNVERIFIABLE items (gemini-1.5 retirement date, an OpenAI page last-updated date, long-context threshold absent from the pricing page itself). ADOPTED (partially) into COST_OF_GOODS on 2026-08-30: gpt-4o-mini, gpt-4o, gemini-3.6-flash, gemini-3.1-flash-lite and — by human decision in #98 review round 1 — gpt-5.6-luna (line 27). Rows NOT adopted stay verification-only."
 timestamp: 2026-08-30
 resource: https://developers.openai.com/api/docs/pricing
 ---
@@ -9,8 +9,8 @@ resource: https://developers.openai.com/api/docs/pricing
 # AI price verification — 2026-08-29/30
 
 **Why** — a Hermes research price sheet was relayed as "verified, first-party cited" with zero
-independent checking. This record is the independent check. Nothing here was written into
-`shared/domain/cost-of-goods.ts`.
+independent checking. This record is the independent check. Adoption into
+`shared/domain/cost-of-goods.ts`: see `## Adoption status` (end). Code cites rows BY LINE — never re-flow the tables above it.
 
 **Unit rule** — the table stores CENTS per 1M tokens; provider pages quote USD per 1M tokens.
 Every row below prints both.
@@ -88,3 +88,27 @@ is COMPLETENESS, not accuracy — it presented single-tier rates for a multi-tie
 (long-context, >200K, audio, video, 2027) and it cited pages that do not carry the number it
 attributed to them (the 272K threshold lives on the model page, not the pricing page). One claim,
 the 1.5-series retirement date, is unverifiable first-party.
+
+## Adoption status (added 2026-08-30, #98 review round 1)
+
+This record began as verification only — "do NOT treat as adopted". That line is now SUPERSEDED
+for five rows. **Adopted into `shared/domain/cost-of-goods.ts`** (cents per 1M, input/output):
+
+| Row (line here)              | Adopted as   | When / by what                                      |
+| ---------------------------- | ------------ | --------------------------------------------------- |
+| `gpt-4o-mini` (line 29)      | 15 / 60      | #98 fix                                             |
+| `gpt-4o` (line 28)           | 250 / 1000   | #98 fix                                             |
+| `gemini-3.6-flash` (51)      | 75 / 375     | #98 fix (replaces the shut-down `gemini-2.0-flash`) |
+| `gemini-3.1-flash-lite` (54) | 25 / 150     | #98 fix (SSM `/ai-model`)                           |
+| **`gpt-5.6-luna` (line 27)** | **20 / 120** | **#98 review round 1 — explicit HUMAN decision**    |
+
+`gpt-5.6-luna` is also the OpenAI **code default** in `api/relay/relay-handler.ts` and
+`api/stream/stream-handler.ts` as of that decision. Pointing SSM
+`/lexflow/relay/prod/openai-model` at it is a separate HUMAN ops step, after deploy — until then
+SSM still selects `gpt-5.4-mini`, which has no verified price and therefore settles as a visible
+0 (`:unmetered`).
+
+Every OTHER row in this file stays verification-only: confirmed against the page, but NOT a rate
+the code may use until it is adopted the same explicit way. The multi-tier caveats (long context,
+
+> 200K, audio/video, the 2027-01-01 increase) remain unmodelled by that table on purpose.

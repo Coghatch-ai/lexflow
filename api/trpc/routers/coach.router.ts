@@ -21,7 +21,7 @@ import {
 import { enqueueRelayJob, getRelayJob, mintJobId } from "../../lib/relay";
 import { resolveAiPrompt } from "../../lib/ai-prompts";
 import { admit } from "../../lib/admission";
-import { resolveMeteringModel, consumeAndCharge } from "../../lib/ai-metering";
+import { parseAiResult, meteringOf, consumeAndCharge } from "../../lib/ai-metering";
 import { accuracyPct } from "../../../shared/domain/scoring";
 import { LOV_SEED } from "../../../shared/data/lov";
 import {
@@ -198,8 +198,9 @@ export const coachRouter = router({
       if (job.status === "error") {
         throw new TRPCError({ code: "BAD_GATEWAY", message: job.error });
       }
-      const raw = job.data as { text: string };
-      const parsed = parseCoachResponse(raw.text);
+      // Parse OUTSIDE the transaction: text + the REAL metering facts (#98).
+      const ai = parseAiResult(job.data);
+      const parsed = parseCoachResponse(ai.text);
       if (parsed === null) {
         throw new TRPCError({
           code: "BAD_GATEWAY",
@@ -222,9 +223,8 @@ export const coachRouter = router({
           targetId: input.jobId,
           source: "coach",
           refId: `coach:${input.jobId}`,
-          // Metering model MUST be server-derived (client model → costFor=0 dodge).
-          model: resolveMeteringModel(),
-          usage: { kind: "tokens", amount: 1200 },
+          // Metering facts are SERVER-READ from the relay result, never the input.
+          metering: meteringOf(ai),
         });
         if (outcome === "replay") return; // digest already inserted + charged once.
         await tx.insert(aiCoachDigests).values({
