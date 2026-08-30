@@ -26,7 +26,7 @@ vi.mock("./credit-charge", () => ({
   CHARGE_LEDGER_REF_PREFIX: "charge:",
 }));
 
-import { consumeAndCharge } from "./ai-metering";
+import { consumeAndCharge, type AiMetering } from "./ai-metering";
 
 const USER = "33333333-3333-4333-8333-333333333333";
 const JOB = "22222222-2222-4222-8222-222222222222";
@@ -42,15 +42,24 @@ function fakeTx(scripted: Array<{ rows: unknown[] }>): { execute: ReturnType<typ
   };
 }
 
-const params = (targetId: string, tx: { execute: ReturnType<typeof vi.fn> }) => ({
+const PRICED = {
+  kind: "priced" as const,
+  model: "gpt-4o-mini",
+  usage: { inputTokens: 1_000_000, outputTokens: 0 },
+};
+
+const params = (
+  targetId: string,
+  tx: { execute: ReturnType<typeof vi.fn> },
+  metering: AiMetering = PRICED,
+) => ({
   tx: tx as never,
   userId: USER,
   jobId: JOB,
   targetId,
   source: "grade",
   refId: REF,
-  model: "gpt-4o-mini",
-  usage: { kind: "tokens" as const, amount: 2048 },
+  metering,
 });
 
 beforeEach(() => {
@@ -95,5 +104,67 @@ describe("consumeAndCharge — single-use job binding + atomic charge", () => {
     // The throw unwinds the caller's transaction → the marker + persist are rolled
     // back with it. Nothing is persisted-but-unsettled (the split-settle hole).
     expect(chargeMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("#98 PRICED — the charge is REAL tokens × the model that really ran", () => {
+  it("rawCents = costFor(model, usage), not a constant", async () => {
+    // 1M input tokens of gpt-4o-mini = its input rate (15¢), exactly.
+    const tx = fakeTx([{ rows: [{ ref_id: REF }] }]);
+    await consumeAndCharge(params("q1", tx));
+    const arg = chargeMock.mock.calls[0]?.[0] as Record<string, unknown> | undefined;
+    expect(arg?.["rawCents"]).toBeCloseTo(15, 6);
+    expect(arg?.["source"]).toBe("grade"); // priced → source is NOT suffixed
+  });
+
+  it("a different model prices differently (the model is no longer a fixed default)", async () => {
+    const tx = fakeTx([{ rows: [{ ref_id: REF }] }]);
+    await consumeAndCharge(
+      params("q1", tx, {
+        kind: "priced",
+        model: "gemini-3.6-flash",
+        usage: { inputTokens: 0, outputTokens: 1_000_000 },
+      }),
+    );
+    const arg = chargeMock.mock.calls[0]?.[0] as Record<string, unknown> | undefined;
+    expect(arg?.["rawCents"]).toBeCloseTo(375, 6);
+  });
+});
+
+describe("#98 UNPRICED — charged 0 and VISIBLE, never a refusal", () => {
+  const unpriced: AiMetering = { kind: "unpriced", model: null, reason: "usage-missing" };
+
+  it("charges 0 under a ':unmetered' source and does NOT throw", async () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const tx = fakeTx([{ rows: [{ ref_id: REF }] }]);
+    const outcome = await consumeAndCharge(params("q1", tx, unpriced));
+    expect(outcome).toBe("first"); // the user's action completes
+    const arg = chargeMock.mock.calls[0]?.[0] as Record<string, unknown> | undefined;
+    expect(arg?.["rawCents"]).toBe(0);
+    expect(arg?.["source"]).toBe("grade:unmetered");
+    // refId keeps its identity — the suffix NEVER leaks into idempotency.
+    expect(arg?.["refId"]).toBe(REF);
+    errSpy.mockRestore();
+  });
+
+  it("logs the stable [credits] tag with the reason — exactly once", async () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const tx = fakeTx([{ rows: [{ ref_id: REF }] }]);
+    await consumeAndCharge(params("q1", tx, unpriced));
+    expect(errSpy).toHaveBeenCalledTimes(1);
+    expect(errSpy.mock.calls[0]?.[0]).toBe("[credits] ai usage indisponível — cobrado 0");
+    expect(errSpy.mock.calls[0]?.[1]).toMatchObject({ reason: "usage-missing", refId: REF });
+    errSpy.mockRestore();
+  });
+
+  it("a REPLAY of the same refId produces NO second charge and NO second log", async () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    // Empty claim = marker already exists → replay onto the same target.
+    const tx = fakeTx([{ rows: [] }, { rows: [{ target_id: "q1" }] }]);
+    const outcome = await consumeAndCharge(params("q1", tx, unpriced));
+    expect(outcome).toBe("replay");
+    expect(chargeMock).not.toHaveBeenCalled();
+    expect(errSpy).not.toHaveBeenCalled();
+    errSpy.mockRestore();
   });
 });

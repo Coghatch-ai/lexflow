@@ -22,17 +22,84 @@ import { sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { charge, type CreditTx } from "./credit-charge";
 import { assertExternalRefId } from "../../shared/domain/credit-reserved";
-import { costFor, type Usage } from "../../shared/domain/cost-of-goods";
+import { costFor, hasCostRate, type Usage } from "../../shared/domain/cost-of-goods";
 
-// Prod default model (CLAUDE.md: production runs OpenAI gpt-4o-mini). A door with
-// no per-task model override meters against this — kept in sync with the relay's
-// live selection. costFor tolerates a stale id (unknown → 0), the guard test keeps
-// it live.
-export const PROD_DEFAULT_MODEL = "gpt-4o-mini";
+// ── parseAiResult — the ONE place a relay/stream result becomes billable facts ─
+//
+// #98: the doors used to meter a HARDCODED token count against a GLOBAL default
+// model. Both are gone. The model and the token counts now come from the result
+// the sender wrote server-side (never from the tRPC input — a client-chosen
+// model would be a free-call lever now that an unpriceable call costs 0).
+//
+// PRICING NEVER FAILS THE USER'S ACTION. Credit is admitted at the door
+// (`admit`, balance > 0) BEFORE the call; charging happens on the way back. So a
+// result we cannot price is NOT a delivery failure: it is delivered, persisted,
+// and charged 0 — visibly (`:unmetered` source + console.error). The ONE
+// condition that still fails is missing/empty TEXT: nothing was delivered.
+// NEVER estimate a token count to fill the gap.
 
-/** Resolve the model a door metered against: its per-task override, else prod default. */
-export function resolveMeteringModel(override?: string): string {
-  return override !== undefined && override.length > 0 ? override : PROD_DEFAULT_MODEL;
+/** Why a delivered result could not be priced. Terminal for that refId. */
+export type UnpricedReason = "usage-missing" | "usage-invalid" | "model-missing" | "no-rate-row";
+
+/** The billable facts of one delivered AI call — a TOTAL discriminated union. */
+export type AiMetering =
+  | { readonly kind: "priced"; readonly model: string; readonly usage: Usage }
+  | { readonly kind: "unpriced"; readonly model: string | null; readonly reason: UnpricedReason };
+
+/** A parsed relay/stream result: the delivered text plus its metering facts. */
+export type ParsedAiResult = { readonly text: string } & AiMetering;
+
+function tokenCount(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+/**
+ * Parse (never cast — the backend is max-strict) a relay/stream result payload
+ * into the delivered text + the facts a charge is computed from.
+ *
+ * THROWS only for a missing/empty `text` (BAD_GATEWAY — nothing was delivered,
+ * exactly what the doors already do when their response parser returns null).
+ * Every metering problem is a `kind: "unpriced"` REFUSAL TO PRICE, never a
+ * refusal to serve: `usage` absent → "usage-missing"; a non-finite/negative
+ * counter or a zero total → "usage-invalid"; `model` absent/empty →
+ * "model-missing"; a model with no rate row → "no-rate-row".
+ */
+export function parseAiResult(data: unknown): ParsedAiResult {
+  const record = typeof data === "object" && data !== null ? (data as Record<string, unknown>) : {};
+  const rawText = record["text"];
+  const text = typeof rawText === "string" ? rawText : "";
+  if (text.length === 0) {
+    throw new TRPCError({ code: "BAD_GATEWAY", message: "A IA não retornou uma resposta" });
+  }
+
+  const rawModel = record["model"];
+  const model = typeof rawModel === "string" && rawModel.length > 0 ? rawModel : null;
+  const rawUsage = record["usage"];
+
+  if (typeof rawUsage !== "object" || rawUsage === null) {
+    return { kind: "unpriced", text, model, reason: "usage-missing" };
+  }
+  const usageRecord = rawUsage as Record<string, unknown>;
+  const inputTokens = tokenCount(usageRecord["inputTokens"]);
+  const outputTokens = tokenCount(usageRecord["outputTokens"]);
+  if (inputTokens === null || outputTokens === null || inputTokens + outputTokens === 0) {
+    return { kind: "unpriced", text, model, reason: "usage-invalid" };
+  }
+  if (model === null) {
+    return { kind: "unpriced", text, model: null, reason: "model-missing" };
+  }
+  if (!hasCostRate(model)) {
+    return { kind: "unpriced", text, model, reason: "no-rate-row" };
+  }
+  return { kind: "priced", text, model, usage: { inputTokens, outputTokens } };
+}
+
+/** Project a parsed result down to just its billable facts (drops the text), so
+ *  what reaches consumeAndCharge is exactly what a charge is computed from. */
+export function meteringOf(parsed: ParsedAiResult): AiMetering {
+  return parsed.kind === "priced"
+    ? { kind: "priced", model: parsed.model, usage: parsed.usage }
+    : { kind: "unpriced", model: parsed.model, reason: parsed.reason };
 }
 
 // ── Atomic consume+charge (Codex #61 round 3) ─────────────────────────────────
@@ -67,10 +134,13 @@ export interface ConsumeAndChargeParams {
    *  is BOUND to this — a replay of the same job onto a different target is rejected. */
   readonly targetId: string;
   readonly source: string;
-  /** Idempotency identity shared by the marker (PK) AND charge() (`grade:<jobId>` …). */
+  /** Idempotency identity shared by the marker (PK) AND charge() (`grade:<jobId>` …).
+   *  The `:unmetered` suffix goes on `source` ONLY — never here, so the
+   *  idempotency identity is the same whether the call priced or not. */
   readonly refId: string;
-  readonly model: string;
-  readonly usage: Usage;
+  /** The billable facts from parseAiResult — REAL model + REAL tokens, or the
+   *  reason they are unavailable. Never a default, never an estimate. */
+  readonly metering: AiMetering;
 }
 
 /**
@@ -86,7 +156,7 @@ export interface ConsumeAndChargeParams {
 export async function consumeAndCharge(
   params: ConsumeAndChargeParams,
 ): Promise<"first" | "replay"> {
-  const { tx, userId, jobId, targetId, source, refId, model, usage } = params;
+  const { tx, userId, jobId, targetId, source, refId, metering } = params;
   assertExternalRefId(refId, `consumeAndCharge(${source})`);
 
   // Single-use claim: INSERT the marker keyed by refId. An empty RETURNING means the
@@ -127,7 +197,35 @@ export async function consumeAndCharge(
   // First consume: charge INSIDE the caller's tx so persist + marker + charge commit
   // together. A charge() failure THROWS here → the whole tx rolls back (marker +
   // persist undone), so nothing is delivered-but-unsettled. Idempotent by refId.
-  const rawCents = costFor(model, usage);
-  await charge({ scope: { userId }, source, rawCents, refId, delivered: true, tx });
+  //
+  // UNPRICED (#98): a delivered result we could not price is charged 0 under a
+  // `<source>:unmetered` source — NOT refused. Two visibility signals, both
+  // AFTER the marker claim so a replay produces neither a second row nor a
+  // second log line: (1) the console.error below, greppable by its stable tag;
+  // (2) the credit_charges row charge() writes even at rawCents 0, queryable as
+  // `source LIKE '%:unmetered'`. Zero cost is deliberate and LOUD — it is not
+  // the price, it is the absence of one. `mult.<source>` never matches the
+  // suffixed source, so the multiplier is 1× and 0 × 1 = 0 either way.
+  const rawCents = metering.kind === "priced" ? costFor(metering.model, metering.usage) : 0;
+  const chargeSource = metering.kind === "priced" ? source : `${source}:unmetered`;
+  if (metering.kind === "unpriced") {
+    console.error("[credits] ai usage indisponível — cobrado 0", {
+      userId,
+      source: chargeSource,
+      refId,
+      jobId,
+      targetId,
+      model: metering.model,
+      reason: metering.reason,
+    });
+  }
+  await charge({
+    scope: { userId },
+    source: chargeSource,
+    rawCents,
+    refId,
+    delivered: true,
+    tx,
+  });
   return "first";
 }

@@ -28,15 +28,23 @@ import {
   DeleteObjectCommand,
 } from "@aws-sdk/client-s3";
 import type { S3Event } from "aws-lambda";
-import { geminiComplete, openaiComplete } from "./providers";
+import { geminiComplete, openaiComplete, type ProviderResult } from "./providers";
 
 const REGION = process.env.AWS_REGION ?? "sa-east-1";
 // Set by the SAM template to /lexflow/relay/${Environment}.
 const SSM_PREFIX = process.env.SSM_PREFIX ?? "/lexflow/relay/prod";
 
 const DEFAULT_AI_PROVIDER = "gemini";
-const DEFAULT_GEMINI_MODEL = "gemini-2.0-flash";
-const DEFAULT_OPENAI_MODEL = "gpt-4o-mini";
+// gemini-2.0-flash was SHUT DOWN 2026-06-01; gemini-3.6-flash is Google's own
+// replacement and the id that carries a rate row (#98). This default is
+// DUPLICATED in api/stream/stream-handler.ts — the two must move together.
+const DEFAULT_GEMINI_MODEL = "gemini-3.6-flash";
+// Bumped off gpt-4o-mini (#98, human decision 2026-08-30): gpt-5.6-luna is the
+// current small OpenAI model and carries a first-party verified rate row
+// (20¢/1M in · 120¢/1M out). SSM /lexflow/relay/prod/openai-model STILL WINS at
+// runtime and holds gpt-5.4-mini — repointing it is a HUMAN ops step after
+// deploy. Also DUPLICATED in api/stream/stream-handler.ts; move both together.
+const DEFAULT_OPENAI_MODEL = "gpt-5.6-luna";
 
 const ssm = new SSMClient({ region: REGION });
 const s3 = new S3Client({ region: REGION });
@@ -112,7 +120,10 @@ function secretLeaf(provider: string): string {
   return provider === "openai" ? "openai-api-key" : "ai-api-key";
 }
 
-async function aiChannel(e: AiEvent): Promise<string> {
+// Returns the WHOLE provider record ({ text, model, usage }) — the metering
+// facts travel with the text to the result key, so the door prices the model
+// that really ran with the tokens it really reported (#98).
+async function aiChannel(e: AiEvent): Promise<ProviderResult> {
   const provider = e.provider ?? (await getProvider());
   const model = e.model ?? (await getModel(provider));
   const apiKey = await getSecret(secretLeaf(provider));
@@ -204,8 +215,10 @@ async function emailChannel(e: EmailEvent): Promise<RelayResult> {
 // ── dispatch ────────────────────────────────────────────────────────────────────
 async function dispatch(event: RelayEvent): Promise<RelayResult> {
   switch (event.channel) {
-    case "ai":
-      return { success: true, data: { text: await aiChannel(event) } };
+    case "ai": {
+      const { text, model, usage } = await aiChannel(event);
+      return { success: true, data: { text, model, usage } };
+    }
     case "email":
       return emailChannel(event);
   }

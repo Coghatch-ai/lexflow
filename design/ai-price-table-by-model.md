@@ -168,3 +168,98 @@ Bindable checks. `pnpm validate` (tsc + strict lint + vitest) green is assumed t
 - **Does SSM `/lexflow/relay/prod/openai-model` currently hold an override?** If it does, the
   code default alone will not bump the model. To be checked during the deploy step, not a design
   fork.
+
+---
+
+## Addendum — what implementation (#98) corrected in this PRD
+
+Two things this document got wrong, both found before/while building. Recorded here so the PRD
+is not read later as the account of what shipped.
+
+1. **A sixth AI surface was missing from the scope.** This PRD listed five doors, all of which go
+   through the relay. The tutor with `stream:true` does NOT: it runs in `api/stream/`
+   (`stream-handler.ts` + `stream-providers.ts`) and writes to the SAME
+   `results/{userId}/{jobId}.json` key the doors read. `consumeSse()` discarded every non-delta
+   SSE event, so a usage frame was dropped even when the provider sent one. Relay and stream now
+   capture usage and emit the identical `{ text, model, usage }` payload, in the same commit.
+
+2. **"No usage ⇒ delivery failure" was revoked.** The PRD (and `.claude/library/ai-pricing.md`)
+   said a result with no usage, or naming a model with no rate row, should be refused —
+   `BAD_GATEWAY`, nothing persisted, nothing charged. That INVENTS a failure mode the product does
+   not have: credit is admitted at the door (`admit()`, balance > 0) before the call, so metering
+   runs on the way back and may never veto an answer the user already received. A corrected
+   2ª-fase essay must never fail to save because pricing could not price it.
+
+   What shipped instead: `parseAiResult` returns a total discriminated union — `priced` or
+   `unpriced` with a reason (`usage-missing` / `usage-invalid` / `model-missing` / `no-rate-row`).
+   An `unpriced` call is charged **0** under `source` = `<source>:unmetered` and logged with the
+   stable tag `[credits] ai usage indisponível — cobrado 0` (after the single-use marker claim, so
+   a replay produces neither a second row nor a second log). The only remaining `BAD_GATEWAY` is
+   **missing text** — nothing delivered. Consequently the "Later" bullet above ("today it is a
+   refusal in the logs") reads: it is a **0-cent charge**, visible in the logs and in
+   `credit_charges` — query `WHERE source LIKE '%:unmetered'`.
+
+3. **Deferred, still open:** the OpenAI model bump and `reasoning: { effort: "low" }` were NOT
+   applied — both need your approval and neither is a prerequisite (the charge is correct for
+   whatever model runs, provided it has a rate row). The dead `gemini-2.0-flash` default WAS
+   swapped to `gemini-3.6-flash` in both handlers, because leaving it would mean every default
+   Gemini call bills 0.
+
+4. **The PRD's open question is now answered, and it is worse than a bump question.** SSM read
+   2026-08-30: `/lexflow/relay/prod/ai-provider` = `openai`, `/openai-model` = **`gpt-5.4-mini`**,
+   `/ai-model` = `gemini-3.1-flash-lite`. So prod does NOT run the `gpt-4o-mini` code default at
+   all. `gemini-3.1-flash-lite` was verified first-party (25 / 150 cents per 1M) and got a rate
+   row. **`gpt-5.4-mini` has no verified price anywhere in the verdicts** (which cover
+   `gpt-5.6-sol/terra/luna`, `gpt-4o`, `gpt-4o-mini`), so no row was invented for it — the
+   provenance rule forbids it. Consequence to decide BEFORE this ships to a paying user: every
+   prod OpenAI call will settle `no-rate-row` ⇒ charged **0** (visibly). Resolve by verifying and
+   adding the `gpt-5.4-mini` rate, or by pointing `/openai-model` at a model that has a row.
+
+---
+
+## Addendum — #98 review round 1 (2026-08-30)
+
+1. **The OpenAI model bump is no longer deferred.** Human decision: the code default moves off
+   `gpt-4o-mini` to **`gpt-5.6-luna`** in BOTH handlers (`api/relay/relay-handler.ts`,
+   `api/stream/stream-handler.ts`), and its rate row was adopted from
+   `.claude/library/verdicts/ai-price-verification-2026-08-29.md:27` — 20 cents/1M input,
+   120 cents/1M output, first-party CONFIRMED. `reasoning: { effort: "low" }` was NOT adopted;
+   the existing `effort: "none"` for `gpt-5*` ids stands (luna is a `gpt-5*` id, so it takes that
+   fast non-thinking path unchanged).
+2. **Repointing SSM is a HUMAN ops step, after the deploy.** `/lexflow/relay/prod/openai-model`
+   still holds `gpt-5.4-mini`, which has no verified price. SSM overrides the code default, so
+   until a human repoints it every prod OpenAI call keeps settling `no-rate-row` ⇒ visible 0.
+   Nothing in this repo touches AWS.
+3. **Pricing now resolves the id the provider ECHOES.** The round-1 blocker: lookup was exact-key
+   while the providers echo a dated snapshot (OpenAI) or a `modelVersion` revision (Gemini), so
+   effectively ALL live traffic priced at 0. `resolveRateModel()` strips ONE documented version
+   suffix (`-YYYY-MM-DD` / `-NNN`) and re-looks-up EXACTLY. Longest-prefix matching was considered
+   and REJECTED: it would let `gpt-4o-realtime` silently inherit the `gpt-4o` rate. An id that
+   still resolves to nothing keeps the visible `:unmetered` + 0¢ + log path.
+4. **A client may only request a PRICED model.** `ai.grade`'s `model` input was an open string that
+   reached the real provider; asking for an expensive un-priced id bought real inference for 0.
+   It is now `requestedModelSchema` (`isRequestableModel`), refused at tRPC input validation —
+   before `admit()`, before the outbox, before any provider call. **Round 2, blocker 1:** that
+   allowlist is EXACT membership of `COST_OF_GOODS` (`Object.hasOwn`), NOT `hasCostRate`. Reusing
+   the metering suffix strip on client input let `gpt-4o-2024-05-13` validate and settle at
+   `gpt-4o`'s rate — a distinct snapshot billed at another id's price, with no verdict provenance
+   of its own. Suffix stripping stays on the ECHOED id only (item 3).
+5. **The poll endpoint went back to `{ text }`.** `relay.job` briefly returned the raw
+   `{ text, model, usage }` record; the doors read `getRelayJob()` directly, so the browser never
+   needed the metering facts.
+
+---
+
+## Addendum — #98 pre-PR round (2026-08-30), final
+
+1. **`reasoning: { effort: "low" }` IS adopted — this supersedes the round-1 item 1 above and the
+   "deferred" half of the earlier addendum's item 3.** Human confirmed LOW, so `effort: "none"` no
+   longer stands anywhere: both senders now set `body["reasoning"] = { effort: "low" }` under
+   `model.startsWith("gpt-5")` — `api/relay/providers.ts:190` and
+   `api/stream/stream-providers.ts:165`. The code came to the requirement; Scope (in) 4 (`:22-23`),
+   the user's own words (`:70`) and Acceptance 5 (`:96-97`) were RIGHT and were not touched — they
+   are what caught the drift.
+2. **Acceptance 5 is now bindable, in both halves.** `api/relay/openai-reasoning.test.ts` (new, 4
+   cases) parses the JSON each sender puts on the wire: `openaiComplete` → `"low"`, `streamOpenai`
+   → `"low"`, both together → `["low", "low"]`, and a non-`gpt-5` id → no `reasoning` key at all.
+   A silent revert in either sender goes red.

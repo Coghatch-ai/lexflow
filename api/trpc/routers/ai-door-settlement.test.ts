@@ -95,7 +95,7 @@ vi.mock("../../db/client", () => {
 // mirrors that: a job is only `done` for its OWNER; any other (userId,jobId) → pending
 // (exactly what a missing/foreign/random result object looks like). Tests register the
 // owned done jobs they expect via `ownJob(userId, jobId, data)`.
-import type { RelayJobStatus } from "../../lib/relay";
+import { enqueueRelayJob, type RelayJobStatus } from "../../lib/relay";
 const doneJobs = new Map<string, unknown>();
 function ownJob(userId: string, jobId: string, data: unknown): void {
   doneJobs.set(`${userId}:${jobId}`, data);
@@ -117,17 +117,23 @@ vi.mock("../../lib/relay", () => ({
 import * as metering from "../../lib/ai-metering";
 const consumeSpy = vi.spyOn(metering, "consumeAndCharge").mockResolvedValue("first" as const);
 
+import { requestedModelSchema } from "./ai.router";
 import { appRouter } from "../router";
-import { PROD_DEFAULT_MODEL } from "../../lib/ai-metering";
 
 const JOB = "22222222-2222-4222-8222-222222222222";
 const RANDOM_JOB = "99999999-9999-4999-8999-999999999999";
 const USER = "33333333-3333-4333-8333-333333333333";
 const OTHER_USER = "44444444-4444-4444-8444-444444444444";
 
+// #98: every relay/stream result now carries the metering facts alongside the
+// text — the model that really ran and the tokens the provider reported.
+const MODEL = "gpt-4o-mini";
+const USAGE = { inputTokens: 1200, outputTokens: 340 };
+const meta = { model: MODEL, usage: USAGE };
+
 // The relay result the consume proc parses. Grade → {score,feedback} JSON; admin
 // explanation → the 4-pillar JSON (parseExplainResponse).
-const GRADE_RESULT = { text: JSON.stringify({ score: 8, feedback: "bom argumento" }) };
+const GRADE_RESULT = { text: JSON.stringify({ score: 8, feedback: "bom argumento" }), ...meta };
 const EXPLAIN_RESULT = {
   text: JSON.stringify({
     whyCorrect: "porque sim",
@@ -135,9 +141,10 @@ const EXPLAIN_RESULT = {
     memoryTip: "lembre disso",
     commonTraps: "cuidado com X",
   }),
+  ...meta,
 };
 // Tutor → parseTutorResponse accepts either JSON {answer} or plain text.
-const TUTOR_RESULT = { text: JSON.stringify({ answer: "explico assim" }) };
+const TUTOR_RESULT = { text: JSON.stringify({ answer: "explico assim" }), ...meta };
 // Coach → parseCoachResponse wants a CoachDigest JSON (diagnosis/priorities/actions).
 const COACH_RESULT = {
   text: JSON.stringify({
@@ -145,6 +152,7 @@ const COACH_RESULT = {
     priorities: [{ discipline: "Direito Civil", reason: "acurácia baixa", severity: "alta" }],
     actions: [{ title: "Revisar contratos", detail: "faça 10 questões" }],
   }),
+  ...meta,
 };
 
 function caller(role: "user" | "admin", userId: string = USER) {
@@ -176,7 +184,9 @@ describe("GRADE DOOR — server-verified job required; grade derived, never clie
     expect(arg?.refId).toBe(`grade:${JOB}`);
     expect(arg?.jobId).toBe(JOB);
     expect(arg?.targetId).toBe("q1"); // marker BOUND to the graded question
-    expect(arg?.model).toBe(PROD_DEFAULT_MODEL); // server-derived, never client input
+    // #98: the metered model + tokens come from the relay RESULT (server-read),
+    // never a global default and never the tRPC input.
+    expect(arg?.metering).toEqual({ kind: "priced", model: MODEL, usage: USAGE });
   });
 
   it("MISSING gradeJobId → manual save, NO AI fields persisted, NO settlement", async () => {
@@ -288,7 +298,7 @@ describe("ADMIN EXPLAIN DOOR — server-verified job required; explanation deriv
     expect(arg?.refId).toBe(`explain:admin:${JOB}`);
     expect(arg?.jobId).toBe(JOB);
     expect(arg?.targetId).toBe("q1"); // marker BOUND to the explained question
-    expect(arg?.model).toBe(PROD_DEFAULT_MODEL);
+    expect(arg?.metering).toEqual({ kind: "priced", model: MODEL, usage: USAGE });
   });
 
   it("MISSING jobId on the AI path → REJECTED, NO settlement (jobId is mandatory for generated output)", async () => {
@@ -351,7 +361,7 @@ describe("EXPLANATION DOOR (user) — finalizeExplanation binds the job to input
     expect(arg?.refId).toBe(`explain:${JOB}`);
     expect(arg?.jobId).toBe(JOB);
     expect(arg?.targetId).toBe("q1"); // marker BOUND to the explained question
-    expect(arg?.model).toBe(PROD_DEFAULT_MODEL);
+    expect(arg?.metering).toEqual({ kind: "priced", model: MODEL, usage: USAGE });
   });
 
   it("RANDOM/pending jobId → REJECTED, no consume", async () => {
@@ -399,7 +409,7 @@ describe("TUTOR DOOR — tutorFinalize binds the job to input.questionId, atomic
     expect(arg?.refId).toBe(`tutor:${JOB}`);
     expect(arg?.jobId).toBe(JOB);
     expect(arg?.targetId).toBe("q1"); // marker BOUND to the tutor thread's question
-    expect(arg?.model).toBe(PROD_DEFAULT_MODEL);
+    expect(arg?.metering).toEqual({ kind: "priced", model: MODEL, usage: USAGE });
   });
 
   it("RANDOM/pending jobId → REJECTED, no consume", async () => {
@@ -447,7 +457,7 @@ describe("COACH DOOR — finalize binds the job to a single-digest-per-job targe
     expect(arg?.refId).toBe(`coach:${JOB}`);
     expect(arg?.jobId).toBe(JOB);
     expect(arg?.targetId).toBe(JOB); // single-digest-per-job stable target
-    expect(arg?.model).toBe(PROD_DEFAULT_MODEL);
+    expect(arg?.metering).toEqual({ kind: "priced", model: MODEL, usage: USAGE });
   });
 
   it("RANDOM/pending jobId → REJECTED, no consume", async () => {
@@ -507,5 +517,136 @@ describe("ALL 5 DOORS — settle lives inside the real consume/persist proc (sou
   it("the deleted inert procs are absent from source too", () => {
     expect(read("api/trpc/routers/ai.router.ts")).not.toContain("gradeSettle:");
     expect(read("api/trpc/routers/admin.router.ts")).not.toContain("settleGeneration:");
+  });
+});
+
+describe("#98 — a result the doors CANNOT PRICE still completes the user's action", () => {
+  // The amendment's key case: credit was already admitted at the door (balance >
+  // 0) and the AI already answered. Metering runs on the way back, so it may
+  // never veto what was delivered — an unpriceable result is charged 0 and made
+  // visible, NOT turned into BAD_GATEWAY.
+  it("grade with NO usage: the graded answer persists and settles as unpriced", async () => {
+    ownJob(USER, JOB, { text: JSON.stringify({ score: 8, feedback: "bom argumento" }) });
+    const res = await caller("user").discursive.saveAnswer({
+      questionId: "q1",
+      answerText: "resposta",
+      gradeJobId: JOB,
+    });
+    expect(res.aiScore).toBe(8); // the action CONCLUDED — nothing was refused
+    expect(consumeSpy).toHaveBeenCalledTimes(1);
+    expect(consumeSpy.mock.calls[0]?.[0]?.metering).toEqual({
+      kind: "unpriced",
+      model: null,
+      reason: "usage-missing",
+    });
+  });
+
+  it("tutor on a model with NO rate row: the reply persists, priced 0 as no-rate-row", async () => {
+    ownJob(USER, JOB, {
+      text: JSON.stringify({ answer: "explico assim" }),
+      model: "gemini-2.0-flash", // shut down; deliberately rate-less
+      usage: USAGE,
+    });
+    await caller("user").ai.tutorFinalize({ questionId: "q1", jobId: JOB });
+    expect(consumeSpy.mock.calls[0]?.[0]?.metering).toEqual({
+      kind: "unpriced",
+      model: "gemini-2.0-flash",
+      reason: "no-rate-row",
+    });
+  });
+
+  it("a result with NO TEXT is still a delivery failure (BAD_GATEWAY, nothing settled)", async () => {
+    ownJob(USER, JOB, { model: MODEL, usage: USAGE });
+    await expect(
+      caller("user").discursive.saveAnswer({
+        questionId: "q1",
+        answerText: "resposta",
+        gradeJobId: JOB,
+      }),
+    ).rejects.toMatchObject({ code: "BAD_GATEWAY" });
+    expect(consumeSpy).not.toHaveBeenCalled();
+  });
+});
+
+// ── #98 review round 1, finding 2 — CLIENT-CHOSEN MODEL IS AN ALLOWLIST ────────
+//
+// `ai.grade` lets the caller override provider/model for the CALL. Because an
+// unpriceable delivered call is charged 0 BY DESIGN, an unconstrained string
+// there bought real inference for free: ask for an expensive UN-PRICED id, get
+// the full discursive correction, be billed nothing. The request is now refused
+// at INPUT VALIDATION — before admit(), before the outbox, before any provider.
+describe("GRADE DOOR — a client may only REQUEST a model that prices", () => {
+  const gradeArgs = {
+    statement: "enunciado",
+    studentAnswer: "resposta do aluno",
+    modelAnswer: null,
+    legalBasis: null,
+    maxPoints: 10,
+    provider: "openai" as const,
+  };
+
+  beforeEach(() => {
+    vi.mocked(enqueueRelayJob).mockClear();
+  });
+
+  it("an UN-PRICED model id is REJECTED and never reaches the relay", async () => {
+    // Exactly the review's example: real id, no rate row, would deliver free work.
+    await expect(caller("user").ai.grade({ ...gradeArgs, model: "gpt-5.6-sol" })).rejects.toThrow();
+    expect(vi.mocked(enqueueRelayJob)).not.toHaveBeenCalled();
+    expect(consumeSpy).not.toHaveBeenCalled();
+  });
+
+  it("every un-priced id the review named is refused (none slips through)", async () => {
+    for (const forbidden of [
+      "gpt-5.6-terra",
+      "gpt-5.4-mini",
+      "gemini-2.0-flash",
+      "totally-made-up",
+    ]) {
+      await expect(caller("user").ai.grade({ ...gradeArgs, model: forbidden })).rejects.toThrow();
+    }
+    expect(vi.mocked(enqueueRelayJob)).not.toHaveBeenCalled();
+  });
+
+  it("the rejection is INPUT validation (BAD_REQUEST), not a delivery failure", async () => {
+    await expect(
+      caller("user").ai.grade({ ...gradeArgs, model: "gpt-5.6-sol" }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  it("a PRICED alias passes the request gate", () => {
+    for (const allowed of [
+      "gpt-5.6-luna",
+      "gpt-4o-mini",
+      "gpt-4o",
+      "gemini-3.6-flash",
+      "gemini-3.1-flash-lite",
+    ]) {
+      expect(requestedModelSchema.safeParse(allowed).success).toBe(true);
+    }
+    // …and the door's own schema is the one being enforced.
+    expect(requestedModelSchema.safeParse("gpt-5.6-sol").success).toBe(false);
+  });
+
+  // #98 review round 2, blocker 1. The round-1 gate accepted any id that METERS,
+  // so a client could send a dated snapshot and have it settle at the ALIAS's
+  // rate — `gpt-4o-2024-05-13` billed as `gpt-4o` (1250¢ for 1M/1M), a rate with
+  // no provenance for that id. Suffix stripping is metering-only now.
+  it("a client-supplied SNAPSHOT id is refused at the door (billed-as-another-model closed)", () => {
+    for (const snapshot of [
+      "gpt-4o-2024-05-13",
+      "gpt-4o-mini-2024-07-18",
+      "gemini-3.6-flash-002",
+      "gemini-3.1-flash-lite-001",
+    ]) {
+      expect(requestedModelSchema.safeParse(snapshot).success).toBe(false);
+    }
+  });
+
+  it("the snapshot refusal is INPUT validation — nothing is enqueued", async () => {
+    await expect(
+      caller("user").ai.grade({ ...gradeArgs, model: "gpt-4o-2024-05-13" }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect(vi.mocked(enqueueRelayJob)).not.toHaveBeenCalled();
   });
 });

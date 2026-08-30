@@ -23,7 +23,7 @@ import {
 import { enqueueRelayJob, getRelayJob, mintJobId } from "../../lib/relay";
 import { resolveAiPrompt } from "../../lib/ai-prompts";
 import { admit } from "../../lib/admission";
-import { resolveMeteringModel, consumeAndCharge } from "../../lib/ai-metering";
+import { parseAiResult, meteringOf, consumeAndCharge } from "../../lib/ai-metering";
 
 // Output contract for focusedDrill — kept a single explicit shape (see note on
 // the procedure).
@@ -306,7 +306,8 @@ export const questionsRouter = router({
           message: job.error,
         });
       }
-      const raw = job.data as { text: string };
+      // Parse OUTSIDE the transaction: text + the REAL metering facts (#98).
+      const ai = parseAiResult(job.data);
 
       // Fetch options + correctAnswer to derive the correct letter for stripping.
       const [qRow] = await db
@@ -317,7 +318,7 @@ export const questionsRouter = router({
       const letter =
         qRow !== undefined ? optionLetter(qRow.options, qRow.correctAnswer) : undefined;
 
-      const parsed = parseExplainResponse(raw.text, letter);
+      const parsed = parseExplainResponse(ai.text, letter);
       if (parsed === null) {
         throw new TRPCError({
           code: "BAD_GATEWAY",
@@ -340,10 +341,8 @@ export const questionsRouter = router({
           targetId: input.id,
           source: "explanation",
           refId: `explain:${input.jobId}`,
-          // Metering model MUST be server-derived: a client-supplied model would let an
-          // unknown string force rawCents=0 (costFor→0) and dodge the charge.
-          model: resolveMeteringModel(),
-          usage: { kind: "tokens", amount: 2048 },
+          // Metering facts are SERVER-READ from the relay result, never the input.
+          metering: meteringOf(ai),
         });
         if (outcome === "replay") return; // already consumed onto this question.
         await tx

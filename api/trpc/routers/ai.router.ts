@@ -30,7 +30,8 @@ import { enqueueStreamTicket } from "../../lib/stream-ticket";
 import { resolveAiPrompt } from "../../lib/ai-prompts";
 import { admit } from "../../lib/admission";
 import { buildGradeVariables } from "../../../shared/domain/ai-eval";
-import { resolveMeteringModel, consumeAndCharge } from "../../lib/ai-metering";
+import { parseAiResult, meteringOf, consumeAndCharge } from "../../lib/ai-metering";
+import { isRequestableModel } from "../../../shared/domain/cost-of-goods";
 import {
   TUTOR_FOLLOW_UP_MAX_CHARS,
   TUTOR_MODES,
@@ -41,6 +42,26 @@ import {
 
 const providerSchema = z.enum(["gemini", "openai"]).optional();
 
+// #98 review round 1, finding 2 — FREE-INFERENCE HOLE, closed here.
+// `model` used to be `z.string().min(1)`: any string a signed-in client sent was
+// forwarded to the real provider, and because an unpriceable delivered call is
+// charged 0 by design, asking for an expensive UN-PRICED id bought a real
+// completion for nothing. The request side is now an ALLOWLIST of ids that
+// price. Enforced at INPUT VALIDATION, so a rejected model never reaches
+// admit(), never reaches the outbox, and never reaches a provider — no
+// delivered work is lost.
+// Round 2, blocker 1: the allowlist is EXACT membership of COST_OF_GOODS —
+// snapshot ids are NOT accepted here. Suffix stripping belongs to METERING (the
+// id the provider echoes back), never to client input, where it would bill
+// `gpt-4o-2024-05-13` at `gpt-4o`'s rate — a rate with no provenance for that
+// id. See isRequestableModel in shared/domain/cost-of-goods.ts.
+// This constrains only what a CLIENT may REQUEST; the SSM-selected model is
+// never gated (metering must never veto a delivered call).
+export const requestedModelSchema = z
+  .string()
+  .min(1)
+  .refine(isRequestableModel, { message: "Modelo de IA não suportado" });
+
 const gradeInput = z.object({
   statement: z.string().min(1),
   studentAnswer: z.string().min(1),
@@ -49,7 +70,8 @@ const gradeInput = z.object({
   maxPoints: z.number().positive(),
   // Optional per-task provider override; absent → relay SSM default (gemini).
   provider: providerSchema,
-  model: z.string().min(1).optional(),
+  // Only a PRICED model may be requested — see requestedModelSchema above.
+  model: requestedModelSchema.optional(),
 });
 
 const tutorAskInput = z.object({
@@ -174,8 +196,10 @@ export const aiRouter = router({
       if (job.status === "error") {
         throw new TRPCError({ code: "BAD_GATEWAY", message: job.error });
       }
-      const raw = job.data as { text: string };
-      const parsed = parseTutorResponse(raw.text);
+      // Parse OUTSIDE the transaction: text + the REAL metering facts. The
+      // stream Lambda writes the SAME shape, so `stream:true` meters too (#98).
+      const ai = parseAiResult(job.data);
+      const parsed = parseTutorResponse(ai.text);
       if (parsed === null) {
         throw new TRPCError({
           code: "BAD_GATEWAY",
@@ -198,9 +222,9 @@ export const aiRouter = router({
           targetId: input.questionId,
           source: "tutor",
           refId: `tutor:${input.jobId}`,
-          // Metering model MUST be server-derived (client model → costFor=0 dodge).
-          model: resolveMeteringModel(),
-          usage: { kind: "tokens", amount: 900 },
+          // Server-read facts only — `grade` lets the CLIENT pick provider/model
+          // for the call, but never for the charge.
+          metering: meteringOf(ai),
         });
         if (outcome === "replay") return; // reply already inserted + charged once.
         await tx.insert(aiTutorMessages).values({
