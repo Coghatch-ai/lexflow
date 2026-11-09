@@ -4,12 +4,17 @@
 
 import { type ReactElement } from 'react';
 import { BookOpen } from 'lucide-react';
+import { topicOptionLabel, type TopicCount } from '@shared/domain/question-topic';
 import type { Lov } from './testing-standard-types';
 
 interface StandardSetupProps {
   discipline: string;
   examBoard: string;
   difficulty: string;
+  /** BR-06: the chosen topic label; `''` is "Todos os temas". */
+  topic: string;
+  /** The topics of the chosen discipline (empty while Disciplina = Todas). */
+  topics: TopicCount[];
   loading: boolean;
   disciplineLov: Lov;
   examBoardLov: Lov;
@@ -19,14 +24,15 @@ interface StandardSetupProps {
   onDisciplineChange: (val: string) => void;
   onExamBoardChange: (val: string) => void;
   onDifficultyChange: (val: string) => void;
+  onTopicChange: (val: string) => void;
   onBack: () => void;
   onStart: () => void;
 }
 
 export default function StandardSetup({
-  discipline, examBoard, difficulty, loading,
+  discipline, examBoard, difficulty, topic, topics, loading,
   disciplineLov, examBoardLov, difficultyLov, notice,
-  onDisciplineChange, onExamBoardChange, onDifficultyChange, onBack, onStart,
+  onDisciplineChange, onExamBoardChange, onDifficultyChange, onTopicChange, onBack, onStart,
 }: StandardSetupProps): ReactElement {
   return (
     <div className="space-y-6">
@@ -77,6 +83,23 @@ export default function StandardSetup({
             {difficultyLov.options.map((o) => <option key={o.code} value={o.code}>{o.value}</option>)}
           </select>
         </div>
+      </div>
+
+      {/* BR-06: optional, below Disciplina, and only meaningful inside one
+          discipline — with Disciplina = Todas there is no list to offer. The
+          count in each label is the honest warning about a thin topic: the run
+          takes what exists and never tops it up from another topic. */}
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-2">Tema</label>
+        <select value={topic} disabled={discipline === ''}
+          onChange={(e) => { onTopicChange(e.target.value); }}
+          className="w-full px-4 py-2 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-[#16161a] disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed"
+        >
+          <option value="">Todos os temas</option>
+          {topics.map((o) => (
+            <option key={o.topic} value={o.topic}>{topicOptionLabel(o)}</option>
+          ))}
+        </select>
       </div>
 
       <button

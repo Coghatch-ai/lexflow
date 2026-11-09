@@ -42,6 +42,12 @@ export interface RunExitIO {
   /** The session's discipline label — what the standard `setup` stores. */
   discipline: string;
   /**
+   * BR-06's topic of the run being saved: the RESUMED run's own topic when a
+   * topic-filtered desktop run is continued here (BR-05.2 shares the `standard`
+   * slot), `null` for a run started on mobile. Hardcoding null would erase it.
+   */
+  topic: string | null;
+  /**
    * The run's OWN queue ids, read at SEND time: "responder depois" reorders the
    * queue, and that reordering IS progress (BR-03). Reading the `questions`
    * prop instead would resurrect the postponed question in front of the student.
@@ -195,6 +201,7 @@ export function useRunExit(io: RunExitIO): RunExit {
             {
               surface: io.surface,
               discipline: io.discipline,
+              topic: io.topic,
               questionIds: io.queueIds(),
               answers: io.answers.current,
               carriedTime: io.carried.current,

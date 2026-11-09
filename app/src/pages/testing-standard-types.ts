@@ -58,6 +58,8 @@ export interface StandardFilters {
   discipline: string;
   examBoard: string;
   difficulty: string;
+  /** BR-06: the chosen topic label; `''` is "Todos os temas". */
+  topic: string;
 }
 
 /**

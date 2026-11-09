@@ -30,7 +30,7 @@ function answer(id: string, userAnswer = "A", timeSpent = 10): AnswerDraft {
 
 function run(overrides: Partial<StandardRunState> = {}): StandardRunState {
   return {
-    setup: { discipline: "CIVIL_LAW", examBoard: "FGV", difficulty: null },
+    setup: { discipline: "CIVIL_LAW", examBoard: "FGV", difficulty: null, topic: null },
     questionIds: ["q1", "q2", "q3"],
     cursor: 1,
     answers: [answer("q1")],
@@ -88,6 +88,32 @@ describe("standardDraftPayload", () => {
       }),
     );
     expect(payload.modeState).toEqual({ mode: "standard", carriedTime: { q2: 42, q3: 7 } });
+  });
+
+  // BR-06 (issue #102, acceptance 6): what the save carries, so the row can be
+  // resumed under the same topic.
+  it("persists the chosen topic in the setup", () => {
+    const payload = standardDraftPayload(
+      run({
+        setup: {
+          discipline: "CONSTITUTIONAL_LAW",
+          examBoard: null,
+          difficulty: null,
+          topic: "Controle de Constitucionalidade",
+        },
+      }),
+    );
+    expect(payload.setup).toEqual({
+      mode: "standard",
+      discipline: "CONSTITUTIONAL_LAW",
+      examBoard: null,
+      difficulty: null,
+      topic: "Controle de Constitucionalidade",
+    });
+  });
+
+  it("persists 'Todos os temas' as a null topic, not as a missing field", () => {
+    expect(standardDraftPayload(run()).setup.topic).toBeNull();
   });
 
   it("never sends deadlineAt — only the prova real has an absolute deadline", () => {
@@ -179,7 +205,43 @@ describe("resumeStateFrom", () => {
   it("keeps the setup filters so the recorded session is filed the same way", () => {
     const state = resumeStateFrom(draft(), [{ id: "q1" }, { id: "q2" }, { id: "q3" }]);
     if (state.discard) throw new Error("unexpected discard");
-    expect(state.setup).toEqual({ discipline: "CIVIL_LAW", examBoard: "FGV", difficulty: null });
+    expect(state.setup).toEqual({
+      discipline: "CIVIL_LAW",
+      examBoard: "FGV",
+      difficulty: null,
+      topic: null,
+    });
+  });
+
+  // BR-06 (issue #102, acceptance 6): the run's topic survives the round trip,
+  // and the frozen queue is untouched by it — a resume replays `questionIds`,
+  // never a fresh draw under the filter.
+  it("replays the chosen topic from the saved setup", () => {
+    const persisted = draft({
+      setup: {
+        mode: "standard",
+        discipline: "CONSTITUTIONAL_LAW",
+        examBoard: null,
+        difficulty: null,
+        topic: "Controle de Constitucionalidade",
+      },
+    });
+    const state = resumeStateFrom(persisted, [{ id: "q1" }, { id: "q2" }, { id: "q3" }]);
+    if (state.discard) throw new Error("unexpected discard");
+    expect(state.setup.topic).toBe("Controle de Constitucionalidade");
+    // BR-05 unchanged: the SAME ids, in the SAME order.
+    expect(state.questions.map((q) => q.id)).toEqual(["q1", "q2", "q3"]);
+  });
+
+  it("reads a row saved BEFORE BR-06 as 'Todos os temas', never undefined", () => {
+    // The jsonb of an older run has no `topic` key at all — absent must land on
+    // the screen as null, or the resumed select renders an undefined option.
+    const legacy = draft({
+      setup: { mode: "standard", discipline: "CIVIL_LAW", examBoard: null, difficulty: null },
+    });
+    const state = resumeStateFrom(legacy, [{ id: "q1" }, { id: "q2" }, { id: "q3" }]);
+    if (state.discard) throw new Error("unexpected discard");
+    expect(state.setup.topic).toBeNull();
   });
 
   it("carries the whole fetched row through, not just the id", () => {

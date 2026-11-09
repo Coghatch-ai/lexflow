@@ -15,6 +15,7 @@ import {
 } from "../../../drizzle/schema";
 import { protectedProcedure, router } from "../procedures";
 import { DEFAULT_SM2_CONFIG } from "../../../shared/domain/spaced-repetition";
+import { listableTopics, topicInput, type TopicCount } from "../../../shared/domain/question-topic";
 import {
   buildExplainVariables,
   optionLetter,
@@ -35,21 +36,38 @@ type FocusedDrill = {
   questions: (typeof oabQuestions.$inferSelect)[];
 };
 
-const listInput = z.object({
+export const listInput = z.object({
   discipline: z.string().min(1).optional(),
   examBoard: z.enum(["FGV", "CESPE"]).optional(),
   difficulty: z.enum(["easy", "medium", "hard"]).optional(),
   phase: z.enum(["1st", "2nd"]).optional(),
+  // BR-06: one topic of the chosen discipline, as a HARD equality filter —
+  // absent means "Todos os temas" and the WHERE is byte-for-byte what it was
+  // before the filter existed (no row count change for every other caller).
+  topic: topicInput.optional(),
   limit: z.number().int().min(1).max(100).default(10),
 });
 
+export type ListInput = z.infer<typeof listInput>;
+
+/**
+ * The catalog filters of `questions.list` as SQL conditions — extracted so the
+ * regression test can assert the WHERE it builds (with AND without `topic`)
+ * without a database. A filter the input did not carry adds NO condition.
+ */
+export function listConditions(input: ListInput): SQL[] {
+  const conds: SQL[] = [];
+  if (input.discipline !== undefined) conds.push(eq(oabQuestions.discipline, input.discipline));
+  if (input.examBoard !== undefined) conds.push(eq(oabQuestions.examBoard, input.examBoard));
+  if (input.difficulty !== undefined) conds.push(eq(oabQuestions.difficulty, input.difficulty));
+  if (input.phase !== undefined) conds.push(eq(oabQuestions.phase, input.phase));
+  if (input.topic !== undefined) conds.push(eq(oabQuestions.topic, input.topic));
+  return conds;
+}
+
 export const questionsRouter = router({
   list: protectedProcedure.input(listInput).query(async ({ input }) => {
-    const conds: SQL[] = [];
-    if (input.discipline !== undefined) conds.push(eq(oabQuestions.discipline, input.discipline));
-    if (input.examBoard !== undefined) conds.push(eq(oabQuestions.examBoard, input.examBoard));
-    if (input.difficulty !== undefined) conds.push(eq(oabQuestions.difficulty, input.difficulty));
-    if (input.phase !== undefined) conds.push(eq(oabQuestions.phase, input.phase));
+    const conds = listConditions(input);
 
     return db
       .select()
@@ -66,6 +84,25 @@ export const questionsRouter = router({
       .orderBy(oabQuestions.discipline);
     return rows.map((r) => r.discipline);
   }),
+
+  // BR-06: the topics of ONE discipline, each with its question count, derived
+  // from the catalog at query time. No TOPIC LOV and no seed on purpose — 681
+  // labels the importer keeps growing would rot in a seeded taxonomy, and
+  // `topic` sits outside BR-01 (a label, never a code).
+  //
+  // The grouping is SQL; WHICH groups are offered is `listableTopics` (shared),
+  // so the placeholder/blank rule has one home for this query, the setup
+  // screens and the adaptive slice.
+  topics: protectedProcedure
+    .input(z.object({ discipline: z.string().min(1) }))
+    .query(async ({ input }): Promise<TopicCount[]> => {
+      const rows = await db
+        .select({ topic: oabQuestions.topic, count: sql<number>`count(*)::int` })
+        .from(oabQuestions)
+        .where(eq(oabQuestions.discipline, input.discipline))
+        .groupBy(oabQuestions.topic);
+      return listableTopics(rows);
+    }),
 
   // Questions due for SM-2 review (next_review_at <= now). Ordered most-overdue first.
   reviewQueue: protectedProcedure.query(async ({ ctx }) => {
