@@ -67,6 +67,17 @@ export interface MobileRunState {
   /** The session's discipline label — the standard `setup` stores it. */
   discipline: string;
   /**
+   * BR-06's topic, `null` for "Todos os temas".
+   *
+   * REQUIRED, although no mobile surface can CHOOSE one: a topic-filtered run
+   * started on a desktop setup is resumed through the SAME `standard` slot here
+   * (BR-05.2), and a save that hardcoded `null` would erase the persisted topic
+   * — the frozen queue would survive while the `setup` silently widened back to
+   * the whole discipline, breaking BR-06.4. `mobileResume` hands it back and
+   * `QuestionRunner` passes it through; a fresh mobile run sends `null`.
+   */
+  topic: string | null;
+  /**
    * The run's OWN queue order, i.e. `queue` after every "responder depois"
    * (BR-03), never the `questions` prop the screen was mounted with. Replaying
    * the original order would resurrect a postponed question in front of the
@@ -140,7 +151,10 @@ export function mobileDraftPayload(run: MobileRunState, token: string | null): M
   }
 
   return standardDraftPayload({
-    setup: { discipline: run.discipline, examBoard: null, difficulty: null },
+    // `run.topic` travels through — it is `null` ("Todos os temas") for a run
+    // started on mobile (no topic picker there yet), and the RESUMED run's own
+    // topic when a desktop run filtered by one is continued on this client.
+    setup: { discipline: run.discipline, examBoard: null, difficulty: null, topic: run.topic },
     questionIds,
     cursor,
     answers,
@@ -164,6 +178,13 @@ export type MobileResume<Q> =
       elapsedSeconds: number;
       /** The saved session discipline; null on `spaced` (it has no setup). */
       discipline: string | null;
+      /**
+       * BR-06: the saved run's topic, so the mobile saves that follow keep it
+       * (`null` = "Todos os temas", and always null on `spaced`, which has no
+       * setup). Without it the next autosave on this client would write the
+       * run back as unfiltered.
+       */
+      topic: string | null;
       /** Questions that left the catalog since the run was saved. */
       dropped: number;
     };
@@ -191,6 +212,7 @@ export function mobileResume<Q extends { id: string }>(
       carriedTime: new Map(),
       elapsedSeconds: 0,
       discipline: null,
+      topic: null,
       dropped: spaced.dropped,
     };
   }
@@ -205,6 +227,8 @@ export function mobileResume<Q extends { id: string }>(
     carriedTime: standard.carriedTime,
     elapsedSeconds: standard.elapsedSeconds,
     discipline: standard.setup.discipline,
+    // `setupOf` already normalised a pre-BR-06 row's missing key to null.
+    topic: standard.setup.topic,
     dropped: standard.dropped,
   };
 }

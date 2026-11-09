@@ -2,11 +2,17 @@
 // environment, no React and no tRPC — which is why this logic lives in
 // `shared/run/` and not in `apps/mobile/` (`vitest.config.ts` does not include
 // `apps/mobile/**`, so a test written there never runs at all).
+//
+// How re-introducing the BR-06 bug fails this suite: hardcode `topic: null` in
+// `mobileDraftPayload` (or drop `topic` from `mobileResume`'s result) and a
+// topic-filtered desktop run, continued and saved here, comes back with an
+// unfiltered `setup` → FAIL ("writes the topic back into the setup it
+// persists" / "keeps the topic across a SECOND mobile save").
 
 import { describe, expect, it } from "vitest";
 import { moveToEnd } from "../domain/exam-queue";
 import type { AnswerDraft } from "../domain/exam-draft";
-import type { PersistedDraft } from "./run-persistence";
+import { standardDraftPayload, type PersistedDraft } from "./run-persistence";
 import {
   mobileCursor,
   mobileDraftPayload,
@@ -29,6 +35,7 @@ function state(overrides: Partial<MobileRunState> = {}): MobileRunState {
   return {
     surface: "practice",
     discipline: "CIVIL_LAW",
+    topic: null,
     questionIds: ["q1", "q2", "q3"],
     answers: [answer("q1")],
     carriedTime: new Map([["q2", 42]]),
@@ -168,6 +175,105 @@ describe("mobileResume — the round trip", () => {
     const resumed = mobileResume(rowOf(payload), []);
     expect(resumed.discard).toBe(true);
     expect(resumed.dropped).toBe(3);
+  });
+});
+
+describe("BR-06 — a topic-filtered run saved from mobile keeps its topic", () => {
+  // The cross-device case of acceptance 6: the run is STARTED on the desktop
+  // Simulado Padrão with a Tema chosen, continued on mobile (same `standard`
+  // slot, BR-05.2) and saved again there. A `topic: null` hardcoded into the
+  // mobile payload erases the filter from the persisted `setup` while the
+  // frozen queue survives — BR-06.4 then fails on a run whose questions are
+  // still the topic's.
+  const TOPIC = "Controle de Constitucionalidade";
+
+  /** The row a topic-filtered DESKTOP run left in `exam_drafts`. */
+  function desktopRow(): PersistedDraft {
+    return rowOf(
+      standardDraftPayload({
+        setup: {
+          discipline: "CONSTITUTIONAL_LAW",
+          examBoard: null,
+          difficulty: null,
+          topic: TOPIC,
+        },
+        questionIds: ["q1", "q2", "q3"],
+        cursor: 1,
+        answers: [answer("q1")],
+        carriedTime: new Map(),
+        elapsedSeconds: 10,
+        token: PG_TOKEN,
+      }),
+    );
+  }
+
+  /** What the mobile runner saves after resuming that row (`RunStartGate` → `useRunExit`). */
+  function savedAfterResume(row: PersistedDraft): ReturnType<typeof mobileDraftPayload> {
+    const resumed = mobileResume(row, CATALOG);
+    if (resumed.discard) throw new Error("expected a resumable run");
+    return mobileDraftPayload(
+      state({
+        discipline: resumed.discipline ?? "",
+        topic: resumed.topic,
+        questionIds: resumed.questions.map((q) => q.id),
+        answers: resumed.answers,
+        carriedTime: resumed.carriedTime,
+      }),
+      PG_TOKEN,
+    );
+  }
+
+  it("hands the saved topic back on resume", () => {
+    const resumed = mobileResume(desktopRow(), CATALOG);
+    expect(resumed.discard).toBe(false);
+    if (resumed.discard) return;
+    expect(resumed.topic).toBe(TOPIC);
+  });
+
+  it("writes the topic back into the setup it persists (acceptance 6)", () => {
+    const saved = savedAfterResume(desktopRow());
+    expect(saved.mode).toBe("standard");
+    if (saved.mode !== "standard") return;
+    expect(saved.setup.topic).toBe(TOPIC);
+    expect(saved.setup.discipline).toBe("CONSTITUTIONAL_LAW");
+    // BR-05: carrying the topic changes nothing about the frozen queue.
+    expect(saved.questionIds).toEqual(["q1", "q2", "q3"]);
+  });
+
+  it("keeps the topic across a SECOND mobile save (the autosave cadence)", () => {
+    const first = savedAfterResume(desktopRow());
+    const second = savedAfterResume(rowOf(first));
+    if (second.mode !== "standard") throw new Error("expected a standard payload");
+    expect(second.setup.topic).toBe(TOPIC);
+  });
+
+  it("a run STARTED on mobile stays unfiltered — null, never a stale topic", () => {
+    const fresh = mobileDraftPayload(state(), PG_TOKEN);
+    if (fresh.mode !== "standard") throw new Error("expected a standard payload");
+    expect(fresh.setup.topic).toBeNull();
+  });
+
+  it("a row saved before BR-06 resumes as null, not undefined", () => {
+    const row = desktopRow();
+    const legacy: PersistedDraft = {
+      ...row,
+      setup: {
+        mode: "standard",
+        discipline: "CONSTITUTIONAL_LAW",
+        examBoard: null,
+        difficulty: null,
+      },
+    };
+    const resumed = mobileResume(legacy, CATALOG);
+    if (resumed.discard) throw new Error("expected a resumable run");
+    expect(resumed.topic).toBeNull();
+  });
+
+  it("a review (spaced) run has no setup and therefore no topic", () => {
+    const payload = mobileDraftPayload(state({ surface: "review" }), PG_TOKEN);
+    const resumed = mobileResume(rowOf(payload), CATALOG);
+    if (resumed.discard) throw new Error("expected a resumable run");
+    expect(resumed.topic).toBeNull();
   });
 });
 

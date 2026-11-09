@@ -50,6 +50,12 @@ export interface RunResumeSeed {
   cursor: number;
   answers: TrackedAnswer[];
   carriedTime: CarriedTime;
+  /**
+   * BR-06: the topic the saved run was filtered by (`null` = "Todos os temas").
+   * It rides along so the saves this client makes keep it — the mobile runner
+   * cannot choose a topic, but it must not erase one.
+   */
+  topic: string | null;
   draft: AdoptedDraft;
 }
 
@@ -175,6 +181,8 @@ export function QuestionRunner({
   const run = useRunExit({
     surface,
     discipline: sessionDiscipline,
+    // A fresh mobile run has no topic; a resumed one keeps the saved one.
+    topic: resume?.topic ?? null,
     queueIds: () => queue.map((q) => q.id),
     answers: answersRef,
     carried: carriedRef,

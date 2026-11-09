@@ -24,6 +24,7 @@ authoritative product intent, above any hypothesis of its own.
 | Descartar alternativas (cross-out)  | [BR-02](kb-business/br-02-cross-out.md)      | `shared/domain/eliminations.ts` · [answering-surfaces.md](answering-surfaces.md) · epic #65 |
 | Responder depois (postpone in test) | [BR-03](kb-business/br-03-postpone.md)       | `shared/domain/exam-queue.ts`, `app/src/pages/testing-flow-guards.ts`                       |
 | Bookmarks / Salvos                  | [BR-04](kb-business/br-04-bookmarks.md)      | `bookmarks.toggle`/`list`, `user_bookmarks`                                                 |
+| Estudar por tema (topic filter)     | [BR-06](kb-business/br-06-topic-filter.md)   | `questions.list`/`questions.topics`, study setup screens · issue #102                       |
 | Salvar progresso / Sair e processar | [BR-05](kb-business/br-05-save-quit-test.md) | [answering-surfaces.md](answering-surfaces.md) (life of a test run) · `sessions.record`     |
 
 Adding a record: product-owner writes it, human approves, then append the row above AND a row in

@@ -62,7 +62,64 @@ interface StandardBoardProps {
   onReloadFromServer: () => void;
 }
 
-export default function StandardBoard({
+/**
+ * What an EMPTY run shows instead of a crash (BR-06).
+ *
+ * `StandardQuestion` is built around one current question, so a queue of zero
+ * dereferences a question that is not there. A zero-row draw is reachable by
+ * design — a topic thinner than the run combined with Banca/Dificuldade, or a
+ * saved topic whose rows left the catalog — and BR-06.3's "runs with what
+ * exists" includes nothing existing. `StandardRun` already keeps the setup
+ * screen for a fresh empty draw; this is the board's own floor.
+ */
+function EmptyRunNotice({
+  onExitToModes,
+  onRestart,
+}: {
+  onExitToModes: () => void;
+  onRestart: () => void;
+}): ReactElement {
+  return (
+    <div className="space-y-6">
+      <div className="bg-amber-50 border-2 border-amber-200 rounded-lg p-4 text-sm text-amber-800">
+        Nenhuma questão disponível para este teste. Ajuste os filtros e comece de novo.
+      </div>
+      <div className="flex flex-wrap gap-3">
+        <button
+          onClick={onRestart}
+          className="bg-gradient-to-r from-[#26262c] to-[#26262c] text-white px-5 py-2 rounded-lg font-semibold hover:shadow-lg transition"
+        >
+          Ajustar filtros
+        </button>
+        <button
+          onClick={onExitToModes}
+          className="px-5 py-2 rounded-lg font-medium text-[#16161a] border-2 border-gray-200 hover:border-[#16161a] transition"
+        >
+          Voltar aos modos
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The board's zero-question floor, OUTSIDE the run itself.
+ *
+ * `StandardBoardRun` is built around a current question (`currentQuestion.id`),
+ * so an empty queue would dereference a question that is not there. The guard
+ * sits in this wrapper rather than inside the run for two reasons: the run's
+ * hooks must all have run before any early return, and the queue's LENGTH never
+ * changes after mount (`moveToEnd` reorders, it never removes) — so what the
+ * board is mounted with is what it has.
+ */
+export default function StandardBoard(props: StandardBoardProps): ReactElement {
+  if (props.start.questions.length === 0) {
+    return <EmptyRunNotice onExitToModes={props.onExitToModes} onRestart={props.onRestart} />;
+  }
+  return <StandardBoardRun {...props} />;
+}
+
+function StandardBoardRun({
   start,
   notice,
   onExitToModes,
@@ -107,6 +164,9 @@ export default function StandardBoard({
             discipline: start.filters.discipline,
             examBoard: start.filters.examBoard !== '' ? start.filters.examBoard : null,
             difficulty: start.filters.difficulty !== '' ? start.filters.difficulty : null,
+            // BR-06: the chosen topic rides in the same jsonb, so a resumed run
+            // shows the filter it was started with.
+            topic: start.filters.topic !== '' ? start.filters.topic : null,
           },
           questionIds: questions.map((q) => q.id),
           cursor: currentIndex,

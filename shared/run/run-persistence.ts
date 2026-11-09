@@ -30,6 +30,13 @@ export interface StandardSetup {
   discipline: string;
   examBoard: string | null;
   difficulty: string | null;
+  /**
+   * BR-06: the chosen topic, `null` for "Todos os temas". REQUIRED on this
+   * (write) side although the persisted shape reads it as optional — a caller
+   * that forgets it would silently save a run as unfiltered, and the resume
+   * would then widen it back to the whole discipline.
+   */
+  topic: string | null;
 }
 
 /** The live Simulado Padrão run, as the screen holds it. */
@@ -340,12 +347,20 @@ export type ResumeState<Q> =
       dropped: number;
     };
 
-const EMPTY_SETUP: StandardSetup = { discipline: "", examBoard: null, difficulty: null };
+const EMPTY_SETUP: StandardSetup = {
+  discipline: "",
+  examBoard: null,
+  difficulty: null,
+  topic: null,
+};
 
 function setupOf(draft: PersistedDraft): StandardSetup {
   if (draft.setup.mode !== "standard") return EMPTY_SETUP;
-  const { discipline, examBoard, difficulty } = draft.setup;
-  return { discipline, examBoard, difficulty };
+  const { discipline, examBoard, difficulty, topic } = draft.setup;
+  // `?? null`: a row saved before BR-06 carries no `topic` key, and absent is
+  // the same thing as "Todos os temas" — never an undefined leaking onto the
+  // resumed screen's select.
+  return { discipline, examBoard, difficulty, topic: topic ?? null };
 }
 
 function carriedTimeOf(

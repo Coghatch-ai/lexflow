@@ -48,6 +48,11 @@ const setup = z.discriminatedUnion("mode", [
     discipline: z.string(),
     examBoard: z.string().nullable(),
     difficulty: z.string().nullable(),
+    // BR-06. `.optional()` because zod STRIPS unknown keys: a row written
+    // before #102 is re-saved from a resumed run that legitimately knows no
+    // topic, and a required field would refuse that save. Nullable is "Todos os
+    // temas"; a topic that IS chosen rides in the same jsonb, no migration.
+    topic: z.string().nullable().optional(),
   }),
   z.object({
     mode: z.literal("adaptive"),

@@ -30,7 +30,7 @@ function answer(id: string, userAnswer = "A", timeSpent = 10): AnswerDraft {
 
 function run(overrides: Partial<StandardRunState> = {}): StandardRunState {
   return {
-    setup: { discipline: "CIVIL_LAW", examBoard: "FGV", difficulty: null },
+    setup: { discipline: "CIVIL_LAW", examBoard: "FGV", difficulty: null, topic: null },
     questionIds: ["q1", "q2", "q3"],
     cursor: 1,
     answers: [answer("q1")],
@@ -45,7 +45,13 @@ function draft(overrides: Partial<PersistedDraft> = {}): PersistedDraft {
   return {
     id: "3f1c2d5e-0000-4000-8000-000000000001",
     mode: "standard",
-    setup: { mode: "standard", discipline: "CIVIL_LAW", examBoard: "FGV", difficulty: null },
+    setup: {
+      mode: "standard",
+      discipline: "CIVIL_LAW",
+      examBoard: "FGV",
+      difficulty: null,
+      topic: null,
+    },
     questionIds: ["q1", "q2", "q3"],
     cursor: 1,
     answers: [answer("q1")],

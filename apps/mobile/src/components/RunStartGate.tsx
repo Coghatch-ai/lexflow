@@ -121,6 +121,9 @@ export function RunStartGate({
         cursor: resumed.cursor,
         answers: trackedFrom(resumed.questions, resumed.answers),
         carriedTime: resumed.carriedTime,
+        // BR-06: the saved run's topic rides into the runner, so every save it
+        // makes keeps the filter a desktop run was started with.
+        topic: resumed.topic,
         // The token travels VERBATIM — it is the raw PG text the optimistic
         // guard matches with `=`.
         draft: { id: row.id, token: row.lastSavedAt },

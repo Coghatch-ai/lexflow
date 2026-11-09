@@ -13,6 +13,7 @@ refactor never invalidates a rule.
 | [BR-03](br-03-postpone.md)       | Responder depois = postpone within the test, not bookmark  |
 | [BR-04](br-04-bookmarks.md)      | Bookmarks / Salvos — the durable saved-questions library   |
 | [BR-05](br-05-save-quit-test.md) | Salvar progresso / Sair e processar a test in progress     |
+| [BR-06](br-06-topic-filter.md)   | Estudar por tema — topic filter in the study setups        |
 
 Adding a rule: the product-owner writes it, the human approves the exact text, then the row above
 is added. Never paraphrase captured intent; never fold two functionalities into one file.

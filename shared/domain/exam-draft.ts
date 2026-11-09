@@ -104,7 +104,24 @@ export interface AnswerDraft {
  * setup at all (their queue is fully described by the frozen `questionIds`).
  */
 export type ExamDraftSetup =
-  | { mode: "standard"; discipline: string; examBoard: string | null; difficulty: string | null }
+  | {
+      mode: "standard";
+      discipline: string;
+      examBoard: string | null;
+      difficulty: string | null;
+      /**
+       * BR-06, the chosen topic — `null` for "Todos os temas".
+       *
+       * OPTIONAL on the READ side on purpose: every row written before #102 has
+       * no `topic` key at all in its jsonb, and "absent" must read as "no topic
+       * filter" (`setupOf`), never as a missing field the resume trips on. The
+       * write side always sends it (`StandardSetup`), so a new save carries it
+       * explicitly. `?: string | null | undefined` and not `?: string | null`
+       * because the API program runs with `exactOptionalPropertyTypes` and the
+       * router's zod `.nullable().optional()` hands the insert exactly that.
+       */
+      topic?: string | null | undefined;
+    }
   | { mode: "adaptive"; discipline: string; totalQuestions: number }
   | { mode: "spaced" }
   | { mode: "real" };

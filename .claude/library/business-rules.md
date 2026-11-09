@@ -10,3 +10,4 @@ This file is a redirect; do not add rules here.
 | [BR-03](kb-business/br-03-postpone.md)       | Responder depois = postpone within the test            |
 | [BR-04](kb-business/br-04-bookmarks.md)      | Bookmarks / Salvos                                     |
 | [BR-05](kb-business/br-05-save-quit-test.md) | Salvar progresso / Sair e processar a test in progress |
+| [BR-06](kb-business/br-06-topic-filter.md)   | Estudar por tema — topic filter in the study setups    |
