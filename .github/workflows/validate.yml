@@ -10,6 +10,17 @@ on:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    # Public placeholders for the two VITE_* vars that `app/` and `apps/mobile/`
+    # read at module scope (#109). `import.meta.env` under vitest comes only from
+    # shell env and `.env*` files — never from `test.env` or `vi.stubEnv` — so a
+    # dev checkout's gitignored `.env` is what made this green locally and red here.
+    # Inline literals, NEVER `secrets.*`: the real values are PROD-Environment
+    # scoped (`deploy-app.yml`), this workflow declares no environment, and secrets
+    # never reach fork PRs — a `secrets.*` ref would resolve empty and fail as before.
+    # A Clerk publishable key is public by design; no test makes a network call.
+    env:
+      VITE_CLERK_PUBLISHABLE_KEY: pk_test_ci_validate_only
+      VITE_API_URL: http://localhost:3000
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
