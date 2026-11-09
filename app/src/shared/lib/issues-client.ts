@@ -7,7 +7,10 @@
 
 import { getAuthToken } from "./trpc";
 
-const FUNCTION_URL = import.meta.env.VITE_ISSUES_FUNCTION_URL;
+// `?? ""` only — this check is deliberately LAZY and user-facing in pt-BR at the
+// call site below (#109). The coalesce exists so the now-optional typing in
+// vite-env.d.ts compiles; it must not become an import-time throw.
+const FUNCTION_URL = import.meta.env.VITE_ISSUES_FUNCTION_URL ?? "";
 const PROJECT = "lexflow";
 
 export interface IssueListItem {

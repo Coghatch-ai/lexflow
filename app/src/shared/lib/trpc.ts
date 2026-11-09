@@ -10,6 +10,7 @@ import { QueryClient } from "@tanstack/react-query";
 import superjson from "superjson";
 import type { AppRouter } from "@api/handler";
 import type { RunPersistenceIO } from "@shared/react/use-run-persistence";
+import { requireEnv } from "@shared/lib/require-env";
 
 export type TrpcOutput = inferRouterOutputs<AppRouter>;
 export type TrpcInput = inferRouterInputs<AppRouter>;
@@ -52,10 +53,7 @@ export async function getAuthToken(): Promise<string | null> {
   return getToken !== null ? getToken() : null;
 }
 
-const apiUrl = import.meta.env.VITE_API_URL;
-if (apiUrl.length === 0) {
-  throw new Error("VITE_API_URL is required");
-}
+const apiUrl = requireEnv("VITE_API_URL", import.meta.env.VITE_API_URL);
 
 /** The Clerk bearer, or nothing — shared by both clients below. */
 async function authHeaders(): Promise<Record<string, string>> {
